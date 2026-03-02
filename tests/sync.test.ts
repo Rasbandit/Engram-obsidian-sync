@@ -1,0 +1,247 @@
+import { TFile } from "obsidian";
+import { SyncEngine } from "../src/sync";
+import { BrainApi } from "../src/api";
+import { DEFAULT_SETTINGS } from "../src/types";
+
+// Mock the API
+const mockApi = {
+	pushNote: jest.fn().mockResolvedValue({ note: {}, chunks_indexed: 1 }),
+	getChanges: jest.fn().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
+	deleteNote: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
+	health: jest.fn().mockResolvedValue(true),
+} as unknown as BrainApi;
+
+// Mock the Obsidian App
+const mockApp = {
+	vault: {
+		read: jest.fn().mockResolvedValue("# Test\n\nContent"),
+		getMarkdownFiles: jest.fn().mockReturnValue([]),
+		getAbstractFileByPath: jest.fn().mockReturnValue(null),
+		modify: jest.fn().mockResolvedValue(undefined),
+		create: jest.fn().mockResolvedValue(undefined),
+		createFolder: jest.fn().mockResolvedValue(undefined),
+		trash: jest.fn().mockResolvedValue(undefined),
+	},
+} as any;
+
+const mockSaveData = jest.fn().mockResolvedValue(undefined);
+
+function createEngine(overrides = {}): SyncEngine {
+	return new SyncEngine(
+		mockApp,
+		mockApi,
+		{ ...DEFAULT_SETTINGS, debounceMs: 10, ...overrides },
+		mockSaveData,
+	);
+}
+
+beforeEach(() => {
+	jest.clearAllMocks();
+});
+
+describe("SyncEngine.shouldIgnore", () => {
+	const engine = createEngine();
+
+	test("ignores .obsidian/ paths", () => {
+		expect(engine.shouldIgnore(".obsidian/config.json")).toBe(true);
+		expect(engine.shouldIgnore(".obsidian/plugins/foo/main.js")).toBe(true);
+	});
+
+	test("ignores .trash/ paths", () => {
+		expect(engine.shouldIgnore(".trash/old-note.md")).toBe(true);
+	});
+
+	test("ignores .git/ paths", () => {
+		expect(engine.shouldIgnore(".git/HEAD")).toBe(true);
+	});
+
+	test("does not ignore normal paths", () => {
+		expect(engine.shouldIgnore("Notes/Hello.md")).toBe(false);
+		expect(engine.shouldIgnore("2. Knowledge Vault/Health/Omega.md")).toBe(false);
+	});
+});
+
+describe("SyncEngine.isMarkdown", () => {
+	const engine = createEngine();
+
+	test("accepts .md files", () => {
+		const file = new TFile("Notes/Test.md");
+		expect(engine.isMarkdown(file)).toBe(true);
+	});
+
+	test("rejects non-md files", () => {
+		const file = new TFile("image.png");
+		expect(engine.isMarkdown(file)).toBe(false);
+	});
+});
+
+describe("SyncEngine.handleModify", () => {
+	test("debounces and pushes after delay", async () => {
+		const engine = createEngine({ debounceMs: 50 });
+		const file = new TFile("Notes/Test.md", Date.now());
+
+		engine.handleModify(file);
+
+		// Not pushed yet (debouncing)
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+
+		// Wait for debounce
+		await new Promise((r) => setTimeout(r, 100));
+
+		expect(mockApi.pushNote).toHaveBeenCalledWith(
+			"Notes/Test.md",
+			"# Test\n\nContent",
+			expect.any(Number),
+		);
+	});
+
+	test("ignores non-markdown files", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+		const file = new TFile("image.png");
+
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+	});
+
+	test("ignores .obsidian paths", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+		const file = new TFile(".obsidian/workspace.md");
+
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+	});
+
+	test("coalesces rapid edits", async () => {
+		const engine = createEngine({ debounceMs: 50 });
+		const file = new TFile("Notes/Test.md", Date.now());
+
+		// Fire 5 modify events in rapid succession
+		engine.handleModify(file);
+		engine.handleModify(file);
+		engine.handleModify(file);
+		engine.handleModify(file);
+		engine.handleModify(file);
+
+		await new Promise((r) => setTimeout(r, 150));
+
+		// Should only push once
+		expect(mockApi.pushNote).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("SyncEngine.handleDelete", () => {
+	test("calls API to delete note", async () => {
+		const engine = createEngine();
+		const file = new TFile("Notes/Old.md");
+
+		await engine.handleDelete(file);
+
+		expect(mockApi.deleteNote).toHaveBeenCalledWith("Notes/Old.md");
+	});
+
+	test("cancels pending push on delete", async () => {
+		const engine = createEngine({ debounceMs: 200 });
+		const file = new TFile("Notes/Test.md");
+
+		engine.handleModify(file); // Start debounce
+		await engine.handleDelete(file); // Delete should cancel
+
+		await new Promise((r) => setTimeout(r, 300));
+
+		// Push should NOT have been called
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+		expect(mockApi.deleteNote).toHaveBeenCalledWith("Notes/Test.md");
+	});
+});
+
+describe("SyncEngine.handleRename", () => {
+	test("deletes old path and pushes new path", async () => {
+		const engine = createEngine();
+		const file = new TFile("Notes/Renamed.md", Date.now());
+
+		await engine.handleRename(file, "Notes/Original.md");
+
+		expect(mockApi.deleteNote).toHaveBeenCalledWith("Notes/Original.md");
+		expect(mockApi.pushNote).toHaveBeenCalledWith(
+			"Notes/Renamed.md",
+			expect.any(String),
+			expect.any(Number),
+		);
+	});
+});
+
+describe("SyncEngine.pull", () => {
+	test("applies remote changes and updates lastSync", async () => {
+		const engine = createEngine();
+		engine.setLastSync("2026-01-01T00:00:00Z");
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [
+				{
+					path: "Notes/Remote.md",
+					title: "Remote Note",
+					content: "# Remote\n\nFrom MCP",
+					folder: "Notes",
+					tags: [],
+					mtime: 1709345678,
+					updated_at: "2026-03-01T12:00:00Z",
+					deleted: false,
+				},
+			],
+			server_time: "2026-03-01T12:00:01Z",
+		});
+
+		const pulled = await engine.pull();
+
+		expect(pulled).toBe(1);
+		expect(mockApp.vault.create).toHaveBeenCalledWith(
+			"Notes/Remote.md",
+			"# Remote\n\nFrom MCP",
+		);
+		expect(engine.getLastSync()).toBe("2026-03-01T12:00:01Z");
+	});
+
+	test("trashes locally deleted notes from remote", async () => {
+		const engine = createEngine();
+		engine.setLastSync("2026-01-01T00:00:00Z");
+
+		const existingFile = new TFile("Notes/ToDelete.md");
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [
+				{
+					path: "Notes/ToDelete.md",
+					title: "",
+					content: "",
+					folder: "",
+					tags: [],
+					mtime: 0,
+					updated_at: "2026-03-01T12:00:00Z",
+					deleted: true,
+				},
+			],
+			server_time: "2026-03-01T12:00:01Z",
+		});
+
+		await engine.pull();
+
+		expect(mockApp.vault.trash).toHaveBeenCalledWith(existingFile, true);
+	});
+});
+
+describe("SyncEngine.destroy", () => {
+	test("clears pending timers", () => {
+		const engine = createEngine({ debounceMs: 10000 });
+		const file = new TFile("Notes/Test.md");
+
+		engine.handleModify(file);
+		engine.destroy();
+
+		// No errors, timers cleaned up
+	});
+});
