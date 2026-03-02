@@ -144,6 +144,17 @@ export default class BrainSyncPlugin extends Plugin {
 		this.startSyncInterval();
 		this.setupNoteStream();
 		await this.savePluginData(this.syncEngine.getLastSync());
+
+		// Trigger immediate sync when settings are configured (handles fresh install)
+		if (this.settings.apiUrl && this.settings.apiKey) {
+			this.syncEngine.fullSync().then(({ pulled, pushed }) => {
+				if (pulled > 0 || pushed > 0) {
+					new Notice(`Brain Sync: pulled ${pulled}, pushed ${pushed}`);
+				}
+			}).catch((e) => {
+				console.error("Brain Sync: sync after settings change failed", e);
+			});
+		}
 	}
 
 	private async savePluginData(lastSync: string): Promise<void> {
