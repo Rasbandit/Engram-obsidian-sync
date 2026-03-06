@@ -113,3 +113,5 @@ Ongoing (vault open)
 
 - **Engram**: FastRaid (10.0.20.214:8000) — the sync hub, note store, indexer, search engine
 - **Dev/test**: `docker compose up` in edi-brain repo starts Engram + postgres locally on :8000
+
+@/home/open-claw/documents/code-projects/ops-agent/docs/self-updating-docs.md
