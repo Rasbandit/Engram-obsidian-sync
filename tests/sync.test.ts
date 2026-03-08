@@ -630,7 +630,7 @@ describe("SyncEngine.getStatus + onStatusChange", () => {
 
 		const status = engine.getStatus();
 		expect(status.state).toBe("error");
-		expect(status.error).toBe("Pull failed");
+		expect(status.error).toBe("Pull failed: network error");
 	});
 
 	test("status shows offline after failed push (change queued for retry)", async () => {
@@ -1196,6 +1196,111 @@ describe("SyncEngine pull with attachments", () => {
 		expect(mockApi.getAttachmentChanges).toHaveBeenCalled();
 		expect(mockApp.vault.create).toHaveBeenCalled(); // note
 		expect(mockApp.vault.createBinary).toHaveBeenCalled(); // attachment
+	});
+});
+
+describe("SyncEngine pull accuracy", () => {
+	test("updates existing file even when remote mtime < local mtime", async () => {
+		const engine = createEngine();
+		engine.setLastSync("2024-04-01T00:00:00Z"); // lastSync after localMtime → no conflict
+
+		// Local file has a LATER mtime than remote (simulates Obsidian setting mtime to "now")
+		const localFile = new TFile("Notes/Existing.md", Date.now());
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+
+		const result = await engine.applyChange({
+			path: "Notes/Existing.md",
+			title: "Existing",
+			content: "# Updated remotely",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345678, // older than local
+			updated_at: "2026-03-01T12:00:00Z",
+			deleted: false,
+		});
+
+		expect(result).toBe(true);
+		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remotely");
+	});
+
+	test("pull returns accurate count when changes are skipped", async () => {
+		const engine = createEngine();
+		engine.setLastSync("2026-01-01T00:00:00Z");
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [
+				{
+					path: ".obsidian/workspace.json", // ignored path
+					title: "",
+					content: "{}",
+					folder: ".obsidian",
+					tags: [],
+					mtime: 100,
+					updated_at: "2026-03-01T12:00:00Z",
+					deleted: false,
+				},
+			],
+			server_time: "2026-03-01T12:00:01Z",
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [],
+			server_time: "2026-03-01T12:00:00Z",
+		});
+
+		const pulled = await engine.pull();
+
+		expect(pulled).toBe(0); // ignored path should not count
+	});
+
+	test("fullSync pushes files modified between old and new lastSync", async () => {
+		const engine = createEngine();
+		const oldSync = "2026-01-01T00:00:00Z";
+		engine.setLastSync(oldSync);
+
+		// Pull will update lastSync to a newer server_time
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [],
+			server_time: "2026-03-01T12:00:00Z",
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [],
+			server_time: "2026-03-01T12:00:00Z",
+		});
+
+		// A file modified between old lastSync and new server_time
+		const modifiedFile = new TFile("Notes/Modified.md", new Date("2026-02-15T00:00:00Z").getTime());
+		(mockApp.vault.getFiles as jest.Mock).mockReturnValueOnce([modifiedFile]);
+
+		await engine.fullSync();
+
+		// pushModifiedFiles should use the OLD lastSync (prePullSync), not the new one
+		// The file was modified at Feb 15, which is after Jan 1 (old lastSync)
+		expect(mockApi.pushNote).toHaveBeenCalledWith(
+			"Notes/Modified.md",
+			expect.any(String),
+			expect.any(Number),
+		);
+	});
+
+	test("applyAttachmentChange updates binary regardless of mtime", async () => {
+		const engine = createEngine();
+		engine.setLastSync("2024-04-01T00:00:00Z");
+
+		// Local file has LATER mtime than remote
+		const localFile = new TFile("Assets/image.png", Date.now());
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+
+		const result = await engine.applyAttachmentChange({
+			path: "Assets/image.png",
+			mime_type: "image/png",
+			size_bytes: 3,
+			mtime: 1709345678, // older than local
+			updated_at: "2026-03-01T12:00:00Z",
+			deleted: false,
+		}, "AQID");
+
+		expect(result).toBe(true);
+		expect(mockApp.vault.modifyBinary).toHaveBeenCalledWith(localFile, expect.any(ArrayBuffer));
 	});
 });
 

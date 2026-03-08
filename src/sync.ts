@@ -356,13 +356,11 @@ export class SyncEngine {
 			let applied = 0;
 
 			for (const change of noteResp.changes) {
-				await this.applyChange(change);
-				applied++;
+				if (await this.applyChange(change)) applied++;
 			}
 
 			for (const change of attachResp.changes) {
-				await this.applyAttachmentChange(change);
-				applied++;
+				if (await this.applyAttachmentChange(change)) applied++;
 			}
 
 			// Use the later server_time
@@ -374,7 +372,7 @@ export class SyncEngine {
 			return applied;
 		} catch (e) {
 			console.error("Engram Sync: pull failed", e);
-			this.lastError = "Pull failed";
+			this.lastError = e instanceof Error ? `Pull failed: ${e.message}` : "Pull failed";
 			return 0;
 		} finally {
 			this.pulling = false;
@@ -434,9 +432,10 @@ export class SyncEngine {
 		}
 	}
 
-	/** Apply a single remote change to the vault, with conflict detection. */
-	async applyChange(change: NoteChange): Promise<void> {
-		if (this.shouldIgnore(change.path)) return;
+	/** Apply a single remote change to the vault, with conflict detection.
+	 *  Returns true when a file was actually created, modified, or trashed. */
+	async applyChange(change: NoteChange): Promise<boolean> {
+		if (this.shouldIgnore(change.path)) return false;
 
 		const normalized = normalizePath(change.path);
 
@@ -446,19 +445,19 @@ export class SyncEngine {
 			if (existing && existing instanceof TFile) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
+				return true;
 			}
-			return;
+			return false;
 		}
 
 		// Create or update the file
 		const existing = this.app.vault.getAbstractFileByPath(normalized);
 		if (existing && existing instanceof TFile) {
-			const localMtime = existing.stat.mtime / 1000;
-
 			// Conflict detection: both local and remote changed since last sync
 			const lastSyncSec = this.lastSync
 				? new Date(this.lastSync).getTime() / 1000
 				: 0;
+			const localMtime = existing.stat.mtime / 1000;
 
 			if (localMtime > lastSyncSec && change.mtime > lastSyncSec && localMtime !== change.mtime) {
 				// Both sides modified — resolve conflict
@@ -466,7 +465,7 @@ export class SyncEngine {
 
 				// If content is identical, no real conflict
 				if (localContent === change.content) {
-					return;
+					return false;
 				}
 
 				const choice = await this.resolveConflict({
@@ -478,36 +477,39 @@ export class SyncEngine {
 				});
 
 				if (choice === "skip") {
-					return;
+					return false;
 				} else if (choice === "keep-local") {
 					// Push local version to server
 					await this.pushFile(existing);
-					return;
+					return false;
 				} else if (choice === "keep-both") {
 					// Save remote as a conflict copy, keep local as-is
 					const date = new Date().toISOString().slice(0, 10);
 					const baseName = normalized.replace(/\.md$/, "");
 					const conflictPath = `${baseName} (conflict ${date}).md`;
 					await this.createFileWithFolders(conflictPath, change.content);
-					return;
+					return true;
 				}
 				// "keep-remote" falls through to overwrite below
 			}
 
-			// Overwrite local with remote (last-write-wins or explicit keep-remote)
-			if (change.mtime > localMtime || change.mtime === 0) {
-				await this.app.vault.modify(existing, change.content);
-			}
+			// Overwrite local with remote — conflict detection already passed,
+			// so apply unconditionally (Obsidian sets mtime to "now" on write,
+			// making mtime comparison unreliable here).
+			await this.app.vault.modify(existing, change.content);
+			return true;
 		} else {
 			// New file — create it
 			await this.createFileWithFolders(normalized, change.content);
+			return true;
 		}
 	}
 
 	/** Apply a remote attachment change to the vault.
-	 *  If contentBase64 is provided (from SSE), use it directly. Otherwise fetch it. */
-	async applyAttachmentChange(change: AttachmentChange, contentBase64?: string): Promise<void> {
-		if (this.shouldIgnore(change.path)) return;
+	 *  If contentBase64 is provided (from SSE), use it directly. Otherwise fetch it.
+	 *  Returns true when a file was actually created, modified, or trashed. */
+	async applyAttachmentChange(change: AttachmentChange, contentBase64?: string): Promise<boolean> {
+		if (this.shouldIgnore(change.path)) return false;
 
 		const normalized = normalizePath(change.path);
 
@@ -516,8 +518,9 @@ export class SyncEngine {
 			if (existing && existing instanceof TFile) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
+				return true;
 			}
-			return;
+			return false;
 		}
 
 		// Fetch content if not provided
@@ -530,13 +533,14 @@ export class SyncEngine {
 		const existing = this.app.vault.getAbstractFileByPath(normalized);
 
 		if (existing && existing instanceof TFile) {
-			const localMtime = existing.stat.mtime / 1000;
-			// Binary conflicts: timestamp-based only (no content comparison)
-			if (change.mtime > localMtime || change.mtime === 0) {
-				await this.app.vault.modifyBinary(existing, buffer);
-			}
+			// Apply unconditionally — conflict detection upstream already
+			// determined this change should be applied. Obsidian sets mtime
+			// to "now" on write, making mtime comparison unreliable here.
+			await this.app.vault.modifyBinary(existing, buffer);
+			return true;
 		} else {
 			await this.createBinaryFileWithFolders(normalized, buffer);
+			return true;
 		}
 	}
 
@@ -609,20 +613,23 @@ export class SyncEngine {
 
 	/** Full bidirectional sync: pull remote changes, then push local changes. */
 	async fullSync(): Promise<{ pulled: number; pushed: number }> {
-		// Pull first
-		const pulled = await this.pull();
+		// Snapshot lastSync before pull — pull updates it to server_time,
+		// which would cause pushModifiedFiles to miss files modified between
+		// the old and new lastSync values.
+		const prePullSync = this.lastSync;
 
-		// Then push any locally modified files
-		const pushed = await this.pushModifiedFiles();
+		const pulled = await this.pull();
+		const pushed = await this.pushModifiedFiles(prePullSync);
 
 		return { pulled, pushed };
 	}
 
 	/** Push all files that have been modified since last sync. */
-	private async pushModifiedFiles(): Promise<number> {
-		if (!this.lastSync) return 0;
+	private async pushModifiedFiles(sinceTimestamp?: string): Promise<number> {
+		const since = sinceTimestamp || this.lastSync;
+		if (!since) return 0;
 
-		const sinceMs = new Date(this.lastSync).getTime();
+		const sinceMs = new Date(since).getTime();
 		const files = this.app.vault.getFiles();
 		let pushed = 0;
 

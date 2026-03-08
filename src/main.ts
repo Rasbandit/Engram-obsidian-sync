@@ -249,6 +249,7 @@ export default class EngramSyncPlugin extends Plugin {
 				}
 			} catch (e) {
 				console.error("Engram Sync: sync failed", e);
+				new Notice("Engram Sync: sync failed — check connection");
 			}
 		}
 	}
@@ -302,9 +303,13 @@ export default class EngramSyncPlugin extends Plugin {
 			this.syncInterval = setInterval(
 				async () => {
 					try {
-						await this.syncEngine.pull();
+						const pulled = await this.syncEngine.pull();
+						if (pulled > 0) {
+							new Notice(`Engram Sync: pulled ${pulled} changes`);
+						}
 					} catch (e) {
 						console.error("Engram Sync: periodic pull failed", e);
+						new Notice("Engram Sync: pull failed — check connection");
 					}
 				},
 				minutes * 60 * 1000,
