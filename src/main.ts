@@ -183,8 +183,12 @@ export default class EngramSyncPlugin extends Plugin {
 
 		// Initial sync on startup (after workspace is ready)
 		this.app.workspace.onLayoutReady(async () => {
-			if (this.settings.apiUrl && this.settings.apiKey) {
-				await this.doSyncWithFirstSyncCheck();
+			try {
+				if (this.settings.apiUrl && this.settings.apiKey) {
+					await this.doSyncWithFirstSyncCheck();
+				}
+			} finally {
+				this.syncEngine.setReady();
 			}
 		});
 	}

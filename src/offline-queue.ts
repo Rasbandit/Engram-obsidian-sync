@@ -3,12 +3,19 @@
  *
  * Deduplicates by path: newer entries for the same path replace older ones.
  * Entries are flushed oldest-first.
+ * Persistence is debounced to avoid O(n²) serialization during rapid enqueues.
  */
 import { QueueEntry } from "./types";
 
 export class OfflineQueue {
 	private entries: Map<string, QueueEntry> = new Map();
 	private persistFn: ((entries: QueueEntry[]) => Promise<void>) | null = null;
+	private persistTimer: ReturnType<typeof setTimeout> | null = null;
+	private persistDelayMs: number;
+
+	constructor(persistDelayMs: number = 1000) {
+		this.persistDelayMs = persistDelayMs;
+	}
 
 	/** Register a callback to persist queue state. */
 	onPersist(fn: (entries: QueueEntry[]) => Promise<void>): void {
@@ -23,16 +30,16 @@ export class OfflineQueue {
 		}
 	}
 
-	/** Add or replace a queued change for a path. */
+	/** Add or replace a queued change for a path. Persistence is debounced. */
 	async enqueue(entry: QueueEntry): Promise<void> {
 		this.entries.set(entry.path, entry);
-		await this.persist();
+		this.schedulePersist();
 	}
 
-	/** Remove a path from the queue (after successful sync). */
+	/** Remove a path from the queue (after successful sync). Persists immediately. */
 	async dequeue(path: string): Promise<void> {
 		this.entries.delete(path);
-		await this.persist();
+		await this.persistNow();
 	}
 
 	/** Get all entries sorted by timestamp (oldest first). */
@@ -47,13 +54,35 @@ export class OfflineQueue {
 		return this.entries.size;
 	}
 
-	/** Clear all entries. */
+	/** Clear all entries. Persists immediately. */
 	async clear(): Promise<void> {
 		this.entries.clear();
-		await this.persist();
+		await this.persistNow();
 	}
 
-	private async persist(): Promise<void> {
+	/** Cancel any pending persist timer. Call on plugin unload. */
+	destroy(): void {
+		if (this.persistTimer) {
+			clearTimeout(this.persistTimer);
+			this.persistTimer = null;
+		}
+	}
+
+	/** Schedule a debounced persist — coalesces rapid enqueues into one write. */
+	private schedulePersist(): void {
+		if (this.persistTimer) return;
+		this.persistTimer = setTimeout(async () => {
+			this.persistTimer = null;
+			await this.persistFn?.(this.all());
+		}, this.persistDelayMs);
+	}
+
+	/** Persist immediately (cancels any pending debounced persist). */
+	private async persistNow(): Promise<void> {
+		if (this.persistTimer) {
+			clearTimeout(this.persistTimer);
+			this.persistTimer = null;
+		}
 		await this.persistFn?.(this.all());
 	}
 }

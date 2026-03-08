@@ -51,6 +51,10 @@ export class SyncEngine {
 	private lastError: string = "";
 	private offline: boolean = false;
 	private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+	private ready: boolean = false;
+	private activePushCount: number = 0;
+	private maxConcurrentPushes: number = 5;
+	private pushWaiters: (() => void)[] = [];
 	readonly queue: OfflineQueue = new OfflineQueue();
 
 	/** Called whenever sync status changes (for status bar updates). */
@@ -72,6 +76,12 @@ export class SyncEngine {
 	updateSettings(settings: EngramSyncSettings): void {
 		this.settings = settings;
 		this.parseIgnorePatterns();
+	}
+
+	/** Mark the engine as ready to handle vault events.
+	 *  Called after layout is ready and initial sync completes. */
+	setReady(): void {
+		this.ready = true;
 	}
 
 	setLastSync(timestamp: string): void {
@@ -163,6 +173,7 @@ export class SyncEngine {
 
 	/** Handle a vault modify/create event with debounce. */
 	handleModify(file: TAbstractFile): void {
+		if (!this.ready) return;
 		if (!this.isSyncable(file)) return;
 		if (this.shouldIgnore(file.path)) return;
 
@@ -181,6 +192,7 @@ export class SyncEngine {
 
 	/** Handle a vault delete event. */
 	async handleDelete(file: TAbstractFile): Promise<void> {
+		if (!this.ready) return;
 		if (!this.isSyncable(file)) return;
 		if (this.shouldIgnore(file.path)) return;
 
@@ -216,6 +228,7 @@ export class SyncEngine {
 		file: TAbstractFile,
 		oldPath: string,
 	): Promise<void> {
+		if (!this.ready) return;
 		if (!this.isSyncable(file)) return;
 
 		const isBinary = this.isBinaryFile(file);
@@ -249,9 +262,29 @@ export class SyncEngine {
 		}
 	}
 
+	/** Acquire a push slot, blocking if at max concurrency. */
+	private async acquirePushSlot(): Promise<void> {
+		if (this.activePushCount < this.maxConcurrentPushes) {
+			this.activePushCount++;
+			return;
+		}
+		await new Promise<void>((resolve) => {
+			this.pushWaiters.push(resolve);
+		});
+		this.activePushCount++;
+	}
+
+	/** Release a push slot and wake the next waiter if any. */
+	private releasePushSlot(): void {
+		this.activePushCount--;
+		const next = this.pushWaiters.shift();
+		if (next) next();
+	}
+
 	/** Push a single file to Engram. Returns true on success. */
 	private async pushFile(file: TFile): Promise<boolean> {
 		if (this.pushing.has(file.path)) return false;
+		await this.acquirePushSlot();
 		this.pushing.add(file.path);
 		this.lastError = "";
 		this.emitStatus();
@@ -281,38 +314,18 @@ export class SyncEngine {
 			this.goOnline();
 		} catch (e) {
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
-			// Queue for retry instead of showing per-file errors
-			try {
-				if (isBinary) {
-					const buffer = await this.app.vault.readBinary(file);
-					const base64 = arrayBufferToBase64(buffer);
-					const mtime = file.stat.mtime / 1000;
-					await this.enqueueChange({
-						path: file.path,
-						action: "upsert",
-						contentBase64: base64,
-						mimeType: this.getMimeType(file),
-						mtime,
-						kind: "attachment",
-						timestamp: Date.now(),
-					});
-				} else {
-					const content = await this.app.vault.read(file);
-					const mtime = file.stat.mtime / 1000;
-					await this.enqueueChange({
-						path: file.path,
-						action: "upsert",
-						content,
-						mtime,
-						timestamp: Date.now(),
-					});
-				}
-			} catch {
-				// If we can't even read the file, just log
-				this.lastError = `Push failed: ${file.path}`;
-			}
+			// Queue for retry — content-free to avoid O(n²) serialization.
+			// Content will be re-read from vault when flushing.
+			await this.enqueueChange({
+				path: file.path,
+				action: "upsert",
+				kind: isBinary ? "attachment" : "note",
+				mtime: file.stat.mtime / 1000,
+				timestamp: Date.now(),
+			});
 		} finally {
 			this.pushing.delete(file.path);
+			this.releasePushSlot();
 			// Keep path suppressed for a cooldown period after push completes.
 			// SSE events often arrive after the push finishes, and without this
 			// the echo suppression in handleStreamEvent would miss them.
@@ -768,10 +781,39 @@ export class SyncEngine {
 					} else {
 						await this.api.deleteNote(entry.path);
 					}
-				} else if (entry.kind === "attachment" && entry.contentBase64 && entry.mimeType && entry.mtime !== undefined) {
-					await this.api.pushAttachment(entry.path, entry.contentBase64, entry.mimeType, entry.mtime);
-				} else if (entry.content !== undefined && entry.mtime !== undefined) {
-					await this.api.pushNote(entry.path, entry.content, entry.mtime);
+				} else if (entry.kind === "attachment") {
+					// Legacy entries may have content inline; new entries are content-free
+					let base64 = entry.contentBase64;
+					let mimeType = entry.mimeType;
+					let mtime = entry.mtime;
+					if (!base64) {
+						const file = this.app.vault.getAbstractFileByPath(entry.path);
+						if (!(file instanceof TFile)) {
+							await this.queue.dequeue(entry.path);
+							flushed++;
+							continue;
+						}
+						const buffer = await this.app.vault.readBinary(file);
+						base64 = arrayBufferToBase64(buffer);
+						mimeType = this.getMimeType(file);
+						mtime = file.stat.mtime / 1000;
+					}
+					await this.api.pushAttachment(entry.path, base64, mimeType!, mtime!);
+				} else {
+					// Note upsert — legacy entries have content; new entries are content-free
+					let content = entry.content;
+					let mtime = entry.mtime;
+					if (content === undefined) {
+						const file = this.app.vault.getAbstractFileByPath(entry.path);
+						if (!(file instanceof TFile)) {
+							await this.queue.dequeue(entry.path);
+							flushed++;
+							continue;
+						}
+						content = await this.app.vault.read(file);
+						mtime = file.stat.mtime / 1000;
+					}
+					await this.api.pushNote(entry.path, content, mtime!);
 				}
 				await this.queue.dequeue(entry.path);
 				flushed++;
@@ -797,5 +839,6 @@ export class SyncEngine {
 		}
 		this.recentlyPushed.clear();
 		this.stopHealthCheck();
+		this.queue.destroy();
 	}
 }

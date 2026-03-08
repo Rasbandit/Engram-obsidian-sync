@@ -55,13 +55,14 @@ const mockSaveData = jest.fn().mockResolvedValue(undefined);
 
 const activeEngines: SyncEngine[] = [];
 
-function createEngine(overrides = {}): SyncEngine {
+function createEngine(overrides = {}, { ready = true } = {}): SyncEngine {
 	const engine = new SyncEngine(
 		mockApp,
 		mockApi,
 		{ ...DEFAULT_SETTINGS, debounceMs: 10, ...overrides },
 		mockSaveData,
 	);
+	if (ready) engine.setReady();
 	activeEngines.push(engine);
 	return engine;
 }
@@ -925,22 +926,28 @@ describe("OfflineQueue", () => {
 		expect(queue.size).toBe(0);
 	});
 
-	test("onPersist callback fires on enqueue/dequeue/clear", async () => {
-		const queue = new OfflineQueue();
+	test("onPersist callback fires on enqueue (debounced), dequeue, and clear", async () => {
+		const queue = new OfflineQueue(50);
 		const persisted: any[] = [];
 		queue.onPersist(async (entries: any) => { persisted.push([...entries]); });
 
 		await queue.enqueue({ path: "Notes/A.md", action: "upsert", content: "A", mtime: 100, timestamp: 1 });
+		// enqueue is debounced — not persisted yet
+		expect(persisted.length).toBe(0);
+		await new Promise((r) => setTimeout(r, 100));
 		expect(persisted.length).toBe(1);
 
+		// dequeue persists immediately
 		await queue.dequeue("Notes/A.md");
 		expect(persisted.length).toBe(2);
 		expect(persisted[1]).toEqual([]);
 
 		await queue.enqueue({ path: "Notes/B.md", action: "delete", timestamp: 2 });
+		// clear persists immediately (cancels pending enqueue debounce)
 		await queue.clear();
-		expect(persisted.length).toBe(4);
-		expect(persisted[3]).toEqual([]);
+		expect(persisted.length).toBe(3);
+		expect(persisted[2]).toEqual([]);
+		queue.destroy();
 	});
 });
 
@@ -959,7 +966,8 @@ describe("SyncEngine offline queue integration", () => {
 		const entry = engine.queue.all()[0];
 		expect(entry.path).toBe("Notes/Offline.md");
 		expect(entry.action).toBe("upsert");
-		expect(entry.content).toBe("# Test\n\nContent");
+		// Content-free queue entries — content is re-read on flush
+		expect(entry.content).toBeUndefined();
 	});
 
 	test("failed delete queues the delete and goes offline", async () => {
@@ -1418,5 +1426,263 @@ describe("SyncEngine auth validation", () => {
 		// Access private method via any cast
 		const result = await (engine as any).pushFile(file);
 		expect(result).toBe(false);
+	});
+});
+
+// --- V8 OOM Fix: Ready Gate ---
+
+describe("ready gate", () => {
+	test("handleModify suppressed before setReady", async () => {
+		const engine = createEngine({}, { ready: false });
+		const file = new TFile("Notes/Test.md", Date.now());
+
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+	});
+
+	test("handleDelete suppressed before setReady", async () => {
+		const engine = createEngine({}, { ready: false });
+		const file = new TFile("Notes/Test.md");
+
+		await engine.handleDelete(file);
+
+		expect(mockApi.deleteNote).not.toHaveBeenCalled();
+		expect(engine.queue.size).toBe(0);
+	});
+
+	test("handleRename suppressed before setReady", async () => {
+		const engine = createEngine({}, { ready: false });
+		const file = new TFile("Notes/Renamed.md", Date.now());
+
+		await engine.handleRename(file, "Notes/Old.md");
+
+		expect(mockApi.deleteNote).not.toHaveBeenCalled();
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+	});
+
+	test("events work after setReady", async () => {
+		const engine = createEngine({ debounceMs: 10 }, { ready: false });
+		engine.setReady();
+		const file = new TFile("Notes/Test.md", Date.now());
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("content");
+
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(mockApi.pushNote).toHaveBeenCalled();
+	});
+});
+
+// --- V8 OOM Fix: Content-Free Queue Entries ---
+
+describe("content-free queue entries", () => {
+	test("failed push enqueues without content", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("offline"));
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("file content");
+
+		const file = new TFile("Notes/Test.md", Date.now());
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 50));
+
+		const entries = engine.queue.all();
+		expect(entries).toHaveLength(1);
+		expect(entries[0].path).toBe("Notes/Test.md");
+		expect(entries[0].action).toBe("upsert");
+		expect(entries[0].content).toBeUndefined();
+		expect(entries[0].contentBase64).toBeUndefined();
+	});
+
+	test("flushQueue re-reads from vault for content-free entries", async () => {
+		const engine = createEngine();
+		engine.queue.load([{
+			path: "Notes/Queued.md",
+			action: "upsert",
+			kind: "note",
+			mtime: 1000,
+			timestamp: Date.now(),
+		}]);
+
+		const file = new TFile("Notes/Queued.md", Date.now());
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(file);
+		// Reset the default mock and set our specific return value
+		(mockApp.vault.read as jest.Mock).mockReset().mockResolvedValueOnce("vault content");
+
+		(engine as any).offline = true;
+		const flushed = await engine.flushQueue();
+
+		expect(flushed).toBe(1);
+		expect(mockApp.vault.read).toHaveBeenCalledWith(file);
+		expect(mockApi.pushNote).toHaveBeenCalledWith("Notes/Queued.md", "vault content", expect.any(Number));
+
+		// Restore default mock for other tests
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Test\n\nContent");
+	});
+
+	test("flushQueue uses legacy entry content", async () => {
+		const engine = createEngine();
+		engine.queue.load([{
+			path: "Notes/Legacy.md",
+			action: "upsert",
+			content: "stored content",
+			mtime: 1000,
+			timestamp: Date.now(),
+		}]);
+
+		(engine as any).offline = true;
+		const flushed = await engine.flushQueue();
+
+		expect(flushed).toBe(1);
+		expect(mockApi.pushNote).toHaveBeenCalledWith("Notes/Legacy.md", "stored content", 1000);
+		expect(mockApp.vault.read).not.toHaveBeenCalled();
+	});
+
+	test("flushQueue skips deleted files", async () => {
+		const engine = createEngine();
+		engine.queue.load([{
+			path: "Notes/Gone.md",
+			action: "upsert",
+			kind: "note",
+			mtime: 1000,
+			timestamp: Date.now(),
+		}]);
+
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(null);
+
+		(engine as any).offline = true;
+		const flushed = await engine.flushQueue();
+
+		expect(flushed).toBe(1);
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+		expect(engine.queue.size).toBe(0);
+	});
+});
+
+// --- V8 OOM Fix: Debounced Persistence ---
+
+describe("debounced persistence", () => {
+	test("enqueue does not persist immediately", async () => {
+		const { OfflineQueue } = require("../src/offline-queue");
+		const queue = new OfflineQueue(100);
+		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		queue.onPersist(persistSpy);
+
+		await queue.enqueue({ path: "a.md", action: "upsert" as const, timestamp: 1 });
+
+		expect(persistSpy).not.toHaveBeenCalled();
+
+		// Wait for the debounce timer to fire
+		await new Promise((r) => setTimeout(r, 150));
+
+		expect(persistSpy).toHaveBeenCalledTimes(1);
+		queue.destroy();
+	});
+
+	test("rapid enqueues coalesce into one persist", async () => {
+		const { OfflineQueue } = require("../src/offline-queue");
+		const queue = new OfflineQueue(100);
+		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		queue.onPersist(persistSpy);
+
+		for (let i = 0; i < 5; i++) {
+			await queue.enqueue({ path: `file${i}.md`, action: "upsert" as const, timestamp: i });
+		}
+
+		expect(persistSpy).not.toHaveBeenCalled();
+
+		await new Promise((r) => setTimeout(r, 150));
+
+		expect(persistSpy).toHaveBeenCalledTimes(1);
+		queue.destroy();
+	});
+
+	test("dequeue persists immediately", async () => {
+		const { OfflineQueue } = require("../src/offline-queue");
+		const queue = new OfflineQueue(100);
+		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		queue.onPersist(persistSpy);
+
+		queue.load([{ path: "a.md", action: "upsert" as const, timestamp: 1 }]);
+		await queue.dequeue("a.md");
+
+		expect(persistSpy).toHaveBeenCalledTimes(1);
+		queue.destroy();
+	});
+});
+
+// --- V8 OOM Fix: Push Concurrency Limit ---
+
+describe("push concurrency limit", () => {
+	test("at most 5 concurrent pushes", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+
+		let maxConcurrent = 0;
+		let currentConcurrent = 0;
+		const pushResolvers: (() => void)[] = [];
+
+		(mockApi.pushNote as jest.Mock).mockImplementation(() => {
+			currentConcurrent++;
+			if (currentConcurrent > maxConcurrent) maxConcurrent = currentConcurrent;
+			return new Promise<{ note: {}; chunks_indexed: number }>((resolve) => {
+				pushResolvers.push(() => {
+					currentConcurrent--;
+					resolve({ note: {}, chunks_indexed: 1 });
+				});
+			});
+		});
+
+		// Fire 10 modify events
+		for (let i = 0; i < 10; i++) {
+			const file = new TFile(`Notes/File${i}.md`, Date.now());
+			(mockApp.vault.read as jest.Mock).mockResolvedValueOnce(`content ${i}`);
+			engine.handleModify(file);
+		}
+
+		// Wait for debounce timers to fire and pushes to start
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(maxConcurrent).toBeLessThanOrEqual(5);
+		expect(currentConcurrent).toBe(5);
+
+		// Resolve all pushes
+		while (pushResolvers.length > 0) {
+			pushResolvers.shift()!();
+			await new Promise((r) => setTimeout(r, 10));
+		}
+	});
+
+	test("remaining pushes complete after slots free", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+
+		let completedCount = 0;
+		const pushResolvers: (() => void)[] = [];
+
+		(mockApi.pushNote as jest.Mock).mockImplementation(() => {
+			return new Promise<{ note: {}; chunks_indexed: number }>((resolve) => {
+				pushResolvers.push(() => {
+					completedCount++;
+					resolve({ note: {}, chunks_indexed: 1 });
+				});
+			});
+		});
+
+		// Fire 10 modify events
+		for (let i = 0; i < 10; i++) {
+			const file = new TFile(`Notes/File${i}.md`, Date.now());
+			(mockApp.vault.read as jest.Mock).mockResolvedValueOnce(`content ${i}`);
+			engine.handleModify(file);
+		}
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Resolve all pushes one by one, letting new ones start
+		while (pushResolvers.length > 0) {
+			pushResolvers.shift()!();
+			await new Promise((r) => setTimeout(r, 10));
+		}
+
+		expect(completedCount).toBe(10);
 	});
 });
