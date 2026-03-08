@@ -26,7 +26,7 @@ A TypeScript sync client. It does NOT parse markdown, generate embeddings, or ta
 - Parse markdown or chunk text (Engram does this)
 - Generate embeddings (Engram does this via Ollama)
 - Talk to Qdrant (Engram does this)
-- Handle search (Engram does this)
+- Perform search indexing (Engram does this — plugin provides the search UI via `POST /search`)
 - Manage auth/users (Engram does this)
 
 ## Testing
@@ -54,6 +54,7 @@ All endpoints require `Authorization: Bearer <api_key>`. All data scoped by user
 | `GET` | `/attachments/changes?since=<iso>` | Attachment changes since timestamp. |
 | `DELETE` | `/attachments/{path}` | Soft-delete attachment. |
 | `GET` | `/notes/stream` | SSE stream for live sync (note_change events). |
+| `POST` | `/search` | Semantic search. Body: `{query, limit?, tags?}`. Returns `{query, results[]}`. |
 | `GET` | `/health` | Health check (no auth required). |
 
 ### POST /notes Request/Response

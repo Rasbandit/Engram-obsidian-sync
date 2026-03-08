@@ -12,6 +12,8 @@ import { EngramSyncSettingTab } from "./settings";
 import { NoteStream } from "./stream";
 import { FirstSyncModal } from "./first-sync-modal";
 import { ConflictModal } from "./conflict-modal";
+import { SearchModal } from "./search-modal";
+import { SearchView, SEARCH_VIEW_TYPE } from "./search-view";
 
 import { QueueEntry } from "./types";
 
@@ -113,6 +115,48 @@ export default class EngramSyncPlugin extends Plugin {
 				const count = await this.syncEngine.pushAll();
 				new Notice(`Engram Sync: pushed ${count} files`);
 			},
+		});
+
+		// Register search view
+		this.registerView(SEARCH_VIEW_TYPE, (leaf) => new SearchView(leaf, this.api));
+
+		this.addCommand({
+			id: "engram-search",
+			name: "Semantic search",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "s" }],
+			callback: () => {
+				new SearchModal(this.app, this.api).open();
+			},
+		});
+
+		this.addCommand({
+			id: "engram-search-view",
+			name: "Open search sidebar",
+			callback: async () => {
+				const existing = this.app.workspace.getLeavesOfType(SEARCH_VIEW_TYPE);
+				if (existing.length) {
+					this.app.workspace.revealLeaf(existing[0]);
+					return;
+				}
+				const leaf = this.app.workspace.getRightLeaf(false);
+				if (leaf) {
+					await leaf.setViewState({ type: SEARCH_VIEW_TYPE, active: true });
+					this.app.workspace.revealLeaf(leaf);
+				}
+			},
+		});
+
+		this.addRibbonIcon("search", "Engram Search", async () => {
+			const existing = this.app.workspace.getLeavesOfType(SEARCH_VIEW_TYPE);
+			if (existing.length) {
+				this.app.workspace.revealLeaf(existing[0]);
+				return;
+			}
+			const leaf = this.app.workspace.getRightLeaf(false);
+			if (leaf) {
+				await leaf.setViewState({ type: SEARCH_VIEW_TYPE, active: true });
+				this.app.workspace.revealLeaf(leaf);
+			}
 		});
 
 		// Start periodic sync if configured

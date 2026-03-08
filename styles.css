@@ -1,1 +1,123 @@
-/* Engram Sync plugin styles — minimal for now */
+/* Engram Sync plugin styles */
+
+/* Search — shared between modal and sidebar */
+.engram-search-input {
+	width: 100%;
+	padding: 8px 12px;
+	margin-bottom: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 1em;
+}
+
+.engram-search-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.engram-search-empty {
+	color: var(--text-muted);
+	text-align: center;
+	padding: 24px 0;
+	font-style: italic;
+}
+
+.engram-search-results {
+	max-height: 400px;
+	overflow-y: auto;
+}
+
+.engram-search-result-item {
+	padding: 8px 12px;
+	border-radius: 4px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.engram-search-result-item:hover,
+.engram-search-result-item.is-selected {
+	background: var(--background-secondary);
+}
+
+.engram-search-result-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.engram-search-result-title {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.engram-search-result-path {
+	display: block;
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.engram-search-result-score {
+	font-size: 0.75em;
+	color: var(--text-muted);
+	background: var(--background-modifier-border);
+	padding: 1px 6px;
+	border-radius: 10px;
+	flex-shrink: 0;
+}
+
+.engram-search-result-snippet {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin: 4px 0 0;
+	line-height: 1.4;
+}
+
+/* Modal overrides */
+.engram-search-modal {
+	padding: 12px;
+}
+
+.engram-search-modal .modal-close-button {
+	display: none;
+}
+
+/* Sidebar view */
+.engram-search-view-container {
+	padding: 8px;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.engram-search-view-container .engram-search-results {
+	flex: 1;
+	min-height: 0;
+}
+
+/* Preview pane */
+.engram-search-preview {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 8px;
+	margin-top: 8px;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.engram-search-preview-heading {
+	font-size: 0.9em;
+	color: var(--text-muted);
+	margin: 0 0 4px;
+}
+
+.engram-search-preview-text {
+	font-size: 0.85em;
+	line-height: 1.5;
+	white-space: pre-wrap;
+}
+
+.engram-search-preview-open {
+	margin-top: 8px;
+	font-size: 0.85em;
+}

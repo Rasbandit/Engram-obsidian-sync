@@ -13,7 +13,10 @@
 | `src/stream.ts` | ~132 | SSE client for `/notes/stream` (fetch + ReadableStream, not EventSource) |
 | `src/first-sync-modal.ts` | ~62 | First-sync confirmation modal (Push All / Pull Only / Cancel) |
 | `src/conflict-modal.ts` | ~126 | Conflict resolution modal (Keep Local / Keep Remote / Keep Both / Skip) |
+| `src/search-modal.ts` | ~140 | Quick search modal (Mod+Shift+S) — semantic search with debounce, arrow nav |
+| `src/search-view.ts` | ~180 | Sidebar search view (ItemView) — persistent search panel with preview pane |
 | `tests/sync.test.ts` | ~900 | Unit tests for SyncEngine (Jest + ts-jest) |
+| `tests/search.test.ts` | ~120 | Unit tests for search API + debounce |
 | `tests/__mocks__/obsidian.ts` | — | Mock Obsidian API for tests |
 
 ### Class Relationships
@@ -26,6 +29,8 @@ EngramSyncPlugin (main.ts)
 │   ├── queue: OfflineQueue (offline-queue.ts)
 │   └── onConflict: (path, local, remote) → ConflictChoice (wired to ConflictModal)
 ├── noteStream: NoteStream (stream.ts)
+├── SearchModal (search-modal.ts) — opened via Mod+Shift+S command
+├── SearchView (search-view.ts) — registered as "engram-search-view" ItemView
 └── statusBarEl: HTMLElement
 ```
 
@@ -46,6 +51,7 @@ CLAUDE.md covers note endpoints. These are also used:
 | `GET` | `/attachments/{path}` | — | `{id, path, content_base64, mime_type, size_bytes, mtime, ...}` |
 | `GET` | `/attachments/changes?since={iso}` | — | `{changes[], server_time}` |
 | `DELETE` | `/attachments/{path}` | — | `{deleted, path}` |
+| `POST` | `/search` | `{query, limit?, tags?}` | `{query, results[{text, title?, heading_path?, source_path?, tags[], wikilinks[], score, vector_score, rerank_score}]}` |
 | `GET` | `/notes/stream` | SSE stream, `Authorization` header | `event: note_change\ndata: {event_type, path, timestamp, kind?}` |
 
 Path encoding: all URL path params use `encodeURIComponent()`.

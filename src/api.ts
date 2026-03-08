@@ -12,6 +12,7 @@ import {
 	DeleteResponse,
 	NoteDetail,
 	NoteResponse,
+	SearchResponse,
 } from "./types";
 
 export class EngramApi {
@@ -139,6 +140,15 @@ export class EngramApi {
 		const encoded = encodeURIComponent(path);
 		const resp = await this.request("DELETE", `/attachments/${encoded}`);
 		return resp.json as DeleteResponse;
+	}
+
+	/** Semantic search across indexed notes. */
+	async search(query: string, limit?: number, tags?: string[]): Promise<SearchResponse> {
+		const body: { query: string; limit?: number; tags?: string[] } = { query };
+		if (limit !== undefined) body.limit = limit;
+		if (tags?.length) body.tags = tags;
+		const resp = await this.request("POST", "/search", body);
+		return resp.json as SearchResponse;
 	}
 
 	/** Get attachment changes since a timestamp. */

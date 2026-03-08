@@ -93,4 +93,46 @@ export class Modal {
 	close(): void {}
 }
 
+export class ItemView {
+	app: any;
+	containerEl: any = {
+		children: [
+			null,
+			{
+				empty: () => {},
+				addClass: () => {},
+				createEl: (_tag: string, _opts?: any) => ({
+					addEventListener: () => {},
+					focus: () => {},
+					style: {},
+				}),
+				createDiv: (_opts?: any) => ({
+					empty: () => {},
+					createEl: (_tag: string, _opts2?: any) => ({
+						addEventListener: () => {},
+						style: {},
+					}),
+					createDiv: (_opts2?: any) => ({
+						createEl: () => ({ addEventListener: () => {}, style: {} }),
+						addEventListener: () => {},
+					}),
+				}),
+			},
+		],
+	};
+	leaf: any;
+	constructor(leaf: any) {
+		this.leaf = leaf;
+		this.app = leaf?.app || {};
+	}
+	getViewType(): string { return ""; }
+	getDisplayText(): string { return ""; }
+	getIcon(): string { return ""; }
+}
+
+export class WorkspaceLeaf {
+	app: any;
+	constructor(app?: any) { this.app = app || {}; }
+}
+
 export class App {}

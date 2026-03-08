@@ -92,6 +92,32 @@ export interface QueueEntry {
 	kind?: "note" | "attachment";
 }
 
+/** Request body for POST /search */
+export interface SearchRequest {
+	query: string;
+	limit?: number;
+	tags?: string[];
+}
+
+/** A single search result from Engram. */
+export interface SearchResult {
+	text: string;
+	title?: string;
+	heading_path?: string;
+	source_path?: string;
+	tags: string[];
+	wikilinks: string[];
+	score: number;
+	vector_score: number;
+	rerank_score: number;
+}
+
+/** Response from POST /search */
+export interface SearchResponse {
+	query: string;
+	results: SearchResult[];
+}
+
 /** Sync engine status for UI updates. */
 export type SyncState = "idle" | "syncing" | "error" | "offline";
 
