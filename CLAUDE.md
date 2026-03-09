@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **Workspace:** For cross-project work, open `../engram-workspace/` instead. It provides unified context for both plugin and backend.
+
 Obsidian plugin for bidirectional sync with Engram. This is Phase 2 of the Engram project.
 
 ## Life OS
@@ -9,7 +11,7 @@ value: financial-freedom
 
 For plugin internals (class map, sync algorithm, API endpoints, type definitions), read `docs/internals.md`.
 For debugging and operations (logs, SSH, curl, CDP, infrastructure), read `docs/engram-ops.md`.
-For backend reference (all endpoints, pipelines, auth, config, source files), read `docs/engram-backend.md`.
+For backend reference (all endpoints, pipelines, auth, config), read `../engram-workspace/docs/api-contract.md`.
 
 ## What This Plugin Does
 
