@@ -178,5 +178,26 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						}
 					}),
 			);
+
+		new Setting(containerEl)
+			.setName("Pull all from server")
+			.setDesc("Force-pull every note and attachment from the server, overwriting local copies. No conflict prompts.")
+			.addButton((btn) =>
+				btn
+					.setButtonText("Pull All")
+					.setWarning()
+					.onClick(async () => {
+						try {
+							new Notice("Engram Sync: pulling all from server...");
+							const count =
+								await this.plugin.syncEngine.pullAll();
+							new Notice(`Engram Sync: pulled ${count} files from server`);
+						} catch (e) {
+							new Notice(
+								`Engram Sync: ${e instanceof Error ? e.message : "pull failed"}`,
+							);
+						}
+					}),
+			);
 	}
 }

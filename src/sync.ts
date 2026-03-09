@@ -486,6 +486,51 @@ export class SyncEngine {
 		}
 	}
 
+	/** Force-pull ALL notes and attachments from the server, overwriting local files.
+	 *  Ignores lastSync — fetches everything. Skips conflict detection. */
+	async pullAll(): Promise<number> {
+		if (this.pulling) return 0;
+
+		this.pulling = true;
+		this.lastError = "";
+		this.emitStatus();
+		devLog().log("pull", "pullAll: fetching everything from server");
+		try {
+			const epoch = "1970-01-01T00:00:00Z";
+			const [noteResp, attachResp] = await Promise.all([
+				this.api.getChanges(epoch),
+				this.api.getAttachmentChanges(epoch),
+			]);
+			devLog().log("pull", `pullAll: fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+			let applied = 0;
+
+			for (const change of noteResp.changes) {
+				if (await this.applyChange(change, true)) applied++;
+			}
+
+			for (const change of attachResp.changes) {
+				if (await this.applyAttachmentChange(change)) applied++;
+			}
+
+			// Update lastSync to server time
+			const serverTime = noteResp.server_time > attachResp.server_time
+				? noteResp.server_time : attachResp.server_time;
+			this.lastSync = serverTime;
+			await this.saveData({ lastSync: this.lastSync });
+
+			devLog().log("pull", `pullAll: done — applied ${applied}, lastSync=${this.lastSync}`);
+			return applied;
+		} catch (e) {
+			console.error("Engram Sync: pullAll failed", e);
+			devLog().log("error", `pullAll failed: ${e instanceof Error ? e.message : e}`);
+			this.lastError = e instanceof Error ? `Pull all failed: ${e.message}` : "Pull all failed";
+			return 0;
+		} finally {
+			this.pulling = false;
+			this.emitStatus();
+		}
+	}
+
 	/** Handle an SSE stream event (upsert or delete). */
 	async handleStreamEvent(event: NoteStreamEvent): Promise<void> {
 		if (this.shouldIgnore(event.path)) return;
@@ -540,8 +585,9 @@ export class SyncEngine {
 	}
 
 	/** Apply a single remote change to the vault, with conflict detection.
-	 *  Returns true when a file was actually created, modified, or trashed. */
-	async applyChange(change: NoteChange): Promise<boolean> {
+	 *  Returns true when a file was actually created, modified, or trashed.
+	 *  When forceOverwrite is true, skip conflict detection and always apply. */
+	async applyChange(change: NoteChange, forceOverwrite = false): Promise<boolean> {
 		if (this.shouldIgnore(change.path)) return false;
 
 		const normalized = normalizePath(change.path);
@@ -574,7 +620,7 @@ export class SyncEngine {
 				? localContent !== change.content  // first sync: compare directly
 				: localHash !== lastSyncedHash;
 
-			if (localModified && localContent !== change.content) {
+			if (!forceOverwrite && localModified && localContent !== change.content) {
 				// Both sides differ — real conflict
 				const localMtime = existing.stat.mtime / 1000;
 

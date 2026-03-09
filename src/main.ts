@@ -123,6 +123,16 @@ export default class EngramSyncPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "engram-pull-all",
+			name: "Pull all from server (force overwrite)",
+			callback: async () => {
+				new Notice("Engram Sync: pulling all from server...");
+				const count = await this.syncEngine.pullAll();
+				new Notice(`Engram Sync: pulled ${count} files from server`);
+			},
+		});
+
 		// Register search view
 		this.registerView(SEARCH_VIEW_TYPE, (leaf) => new SearchView(leaf, this.api));
 
