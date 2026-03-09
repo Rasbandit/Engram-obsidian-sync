@@ -3,7 +3,7 @@
  */
 import { App, TFile, TFolder, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
-import { AttachmentChange, EngramSyncSettings, ConflictChoice, ConflictInfo, NoteChange, NoteStreamEvent, QueueEntry, SyncStatus } from "./types";
+import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, NoteChange, NoteStreamEvent, QueueEntry, SyncStatus } from "./types";
 import { OfflineQueue } from "./offline-queue";
 import { devLog } from "./dev-log";
 
@@ -69,9 +69,9 @@ export class SyncEngine {
 	/** Called whenever sync status changes (for status bar updates). */
 	onStatusChange: ((status: SyncStatus) => void) | null = null;
 
-	/** Called when a conflict is detected. Return the user's resolution choice.
+	/** Called when a conflict is detected. Return the user's resolution.
 	 *  If null, conflicts are auto-resolved as keep-remote (legacy behavior). */
-	onConflict: ((info: ConflictInfo) => Promise<ConflictChoice>) | null = null;
+	onConflict: ((info: ConflictInfo) => Promise<ConflictResolution>) | null = null;
 
 	constructor(
 		private app: App,
@@ -559,7 +559,7 @@ export class SyncEngine {
 				}
 
 				devLog().log("pull", `conflict: ${change.path} (local=${localMtime.toFixed(0)} remote=${change.mtime.toFixed(0)})`);
-				const choice = await this.resolveConflict({
+				const resolution = await this.resolveConflict({
 					path: change.path,
 					localContent,
 					localMtime,
@@ -567,18 +567,23 @@ export class SyncEngine {
 					remoteMtime: change.mtime,
 				});
 
-				if (choice === "skip") {
+				if (resolution.choice === "skip") {
 					return false;
-				} else if (choice === "keep-local") {
+				} else if (resolution.choice === "keep-local") {
 					// Push local version to server
 					await this.pushFile(existing);
 					return false;
-				} else if (choice === "keep-both") {
+				} else if (resolution.choice === "keep-both") {
 					// Save remote as a conflict copy, keep local as-is
 					const date = new Date().toISOString().slice(0, 10);
 					const baseName = normalized.replace(/\.md$/, "");
 					const conflictPath = `${baseName} (conflict ${date}).md`;
 					await this.createFileWithFolders(conflictPath, change.content);
+					return true;
+				} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
+					// Apply user-merged content locally and push to server
+					await this.app.vault.modify(existing, resolution.mergedContent);
+					await this.pushFile(existing);
 					return true;
 				}
 				// "keep-remote" falls through to overwrite below
@@ -636,12 +641,12 @@ export class SyncEngine {
 	}
 
 	/** Resolve a conflict via callback or auto-resolve as keep-remote. */
-	private async resolveConflict(info: ConflictInfo): Promise<ConflictChoice> {
+	private async resolveConflict(info: ConflictInfo): Promise<ConflictResolution> {
 		if (this.onConflict) {
 			return this.onConflict(info);
 		}
 		// No handler — default to keep-remote (legacy behavior)
-		return "keep-remote";
+		return { choice: "keep-remote" };
 	}
 
 	/** Create a text file, ensuring parent folders exist. */

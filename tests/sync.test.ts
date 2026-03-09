@@ -703,7 +703,7 @@ describe("SyncEngine conflict resolution", () => {
 		let conflictReceived: any = null;
 		engine.onConflict = async (info) => {
 			conflictReceived = info;
-			return "keep-remote";
+			return { choice: "keep-remote" };
 		};
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
@@ -725,7 +725,7 @@ describe("SyncEngine conflict resolution", () => {
 		let conflictCalled = false;
 		engine.onConflict = async () => {
 			conflictCalled = true;
-			return "keep-remote";
+			return { choice: "keep-remote" };
 		};
 
 		await engine.applyChange(makeChange({ mtime: 1711930000 })); // after this lastSync
@@ -745,7 +745,7 @@ describe("SyncEngine conflict resolution", () => {
 		let conflictCalled = false;
 		engine.onConflict = async () => {
 			conflictCalled = true;
-			return "keep-remote";
+			return { choice: "keep-remote" };
 		};
 
 		await engine.applyChange(makeChange({ content: "# Same content", mtime: REMOTE_MTIME }));
@@ -767,7 +767,7 @@ describe("SyncEngine conflict resolution", () => {
 			.mockResolvedValueOnce("# Local version")
 			.mockResolvedValueOnce("# Local version");
 
-		engine.onConflict = async () => "keep-local";
+		engine.onConflict = async () => ({ choice: "keep-local" });
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
@@ -803,7 +803,7 @@ describe("SyncEngine conflict resolution", () => {
 		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
 
-		engine.onConflict = async () => "keep-both";
+		engine.onConflict = async () => ({ choice: "keep-both" });
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
@@ -824,7 +824,7 @@ describe("SyncEngine conflict resolution", () => {
 		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
 
-		engine.onConflict = async () => "skip";
+		engine.onConflict = async () => ({ choice: "skip" });
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
@@ -857,7 +857,7 @@ describe("SyncEngine conflict resolution", () => {
 		let conflictCalled = false;
 		engine.onConflict = async () => {
 			conflictCalled = true;
-			return "keep-remote";
+			return { choice: "keep-remote" };
 		};
 
 		await engine.applyChange(makeChange({ deleted: true, mtime: REMOTE_MTIME }));

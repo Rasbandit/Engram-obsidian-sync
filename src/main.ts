@@ -54,7 +54,10 @@ export default class EngramSyncPlugin extends Plugin {
 		};
 
 		this.syncEngine.onConflict = async (info) => {
-			const modal = new ConflictModal(this.app, info);
+			const modal = new ConflictModal(this.app, info, this.settings, async (mode) => {
+				this.settings.conflictViewMode = mode;
+				await this.saveSettings();
+			});
 			return modal.waitForChoice();
 		};
 

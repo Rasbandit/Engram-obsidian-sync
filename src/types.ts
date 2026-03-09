@@ -14,6 +14,8 @@ export interface EngramSyncSettings {
 	liveSyncEnabled: boolean;
 	/** Maximum file size in MB for binary attachments (images, PDFs, etc.) */
 	maxFileSizeMB: number;
+	/** Preferred conflict diff view: unified or side-by-side */
+	conflictViewMode: "unified" | "side-by-side";
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: EngramSyncSettings = {
 	debounceMs: 2000,
 	liveSyncEnabled: false,
 	maxFileSizeMB: 5,
+	conflictViewMode: "unified",
 };
 
 /** A note as returned by POST /notes */
@@ -143,7 +146,14 @@ export interface ConflictInfo {
 }
 
 /** User's choice for resolving a sync conflict. */
-export type ConflictChoice = "keep-local" | "keep-remote" | "keep-both" | "skip";
+export type ConflictChoice = "keep-local" | "keep-remote" | "keep-both" | "merge" | "skip";
+
+/** Result returned by the conflict resolution modal. */
+export interface ConflictResolution {
+	choice: ConflictChoice;
+	/** Merged content when choice is "merge". */
+	mergedContent?: string;
+}
 
 /** Full note as returned by GET /notes/{path} */
 export interface NoteDetail {

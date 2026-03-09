@@ -121,3 +121,273 @@
 	margin-top: 8px;
 	font-size: 0.85em;
 }
+
+/* ── Conflict resolution modal ─────────────────────────────────── */
+
+.engram-conflict-modal {
+	width: 90vw;
+	max-width: 1200px;
+	height: 85vh;
+	max-height: 85vh;
+}
+
+.engram-conflict {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+}
+
+/* Header */
+.engram-conflict-header h2 {
+	margin: 0 0 4px;
+}
+
+.engram-conflict-path {
+	display: block;
+	padding: 4px 8px;
+	margin-bottom: 8px;
+	background: var(--background-secondary);
+	border-radius: 4px;
+	font-size: 0.9em;
+}
+
+.engram-conflict-meta {
+	display: flex;
+	gap: 24px;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+}
+
+/* Toolbar */
+.engram-conflict-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 8px;
+	flex-wrap: wrap;
+}
+
+.engram-conflict-view-toggle {
+	display: inline-flex;
+	gap: 2px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 2px;
+	margin: 0;
+}
+
+.engram-conflict-view-toggle legend {
+	font-size: 0.75em;
+	color: var(--text-muted);
+	padding: 0 4px;
+}
+
+.engram-conflict-view-toggle button {
+	padding: 3px 10px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	cursor: pointer;
+	font-size: 0.85em;
+}
+
+.engram-conflict-view-toggle button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.engram-conflict-bulk {
+	display: inline-flex;
+	gap: 4px;
+	margin-left: auto;
+}
+
+.engram-conflict-bulk button {
+	font-size: 0.85em;
+	padding: 3px 10px;
+}
+
+/* Diff area */
+.engram-conflict-diff {
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+}
+
+.engram-conflict-no-diff {
+	text-align: center;
+	color: var(--text-muted);
+	padding: 24px;
+	font-style: italic;
+}
+
+/* Hunks */
+.engram-conflict-hunk {
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.engram-conflict-hunk:last-child {
+	border-bottom: none;
+}
+
+.engram-conflict-hunk-controls {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.engram-conflict-hunk-label {
+	font-size: 0.8em;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-right: auto;
+}
+
+.engram-conflict-hunk-controls button {
+	font-size: 0.8em;
+	padding: 2px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: transparent;
+	cursor: pointer;
+}
+
+.engram-conflict-hunk-controls button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+/* Diff table */
+.engram-diff-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-family: var(--font-monospace);
+	font-size: 0.82em;
+	line-height: 1.5;
+	table-layout: fixed;
+}
+
+.engram-diff-linenum {
+	width: 40px;
+	min-width: 40px;
+	text-align: right;
+	padding: 0 6px;
+	color: var(--text-faint);
+	user-select: none;
+	vertical-align: top;
+}
+
+.engram-diff-marker {
+	width: 16px;
+	min-width: 16px;
+	text-align: center;
+	color: var(--text-faint);
+	user-select: none;
+	vertical-align: top;
+}
+
+.engram-diff-content {
+	padding: 0 8px;
+	white-space: pre-wrap;
+	word-break: break-all;
+	overflow-wrap: anywhere;
+}
+
+.engram-diff-content code {
+	background: none;
+	padding: 0;
+	font-size: inherit;
+}
+
+/* Line colors */
+.engram-diff-add {
+	background: var(--background-modifier-success, rgba(0, 180, 0, 0.1));
+}
+
+.engram-diff-remove {
+	background: var(--background-modifier-error, rgba(220, 0, 0, 0.1));
+}
+
+.engram-diff-empty td {
+	background: var(--background-secondary);
+}
+
+/* Side-by-side layout */
+.engram-diff-sbs-wrapper {
+	display: flex;
+	gap: 0;
+}
+
+.engram-diff-sbs {
+	width: 50%;
+}
+
+.engram-diff-sbs-wrapper > :first-child {
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+/* Merge editor */
+.engram-conflict-merge {
+	margin-top: 8px;
+	flex-shrink: 0;
+}
+
+.engram-conflict-merge-header {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+}
+
+.engram-conflict-merge-header h3 {
+	margin: 0;
+	font-size: 0.95em;
+}
+
+.engram-conflict-merge-hint {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.engram-conflict-merge-editor {
+	width: 100%;
+	height: 150px;
+	font-family: var(--font-monospace);
+	font-size: 0.82em;
+	line-height: 1.5;
+	padding: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	resize: vertical;
+	margin-top: 4px;
+}
+
+.engram-conflict-merge-editor:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+/* Action bar */
+.engram-conflict-actions {
+	display: flex;
+	gap: 8px;
+	padding-top: 10px;
+	flex-shrink: 0;
+	flex-wrap: wrap;
+}
+
+.engram-conflict-actions button {
+	padding: 6px 16px;
+}
