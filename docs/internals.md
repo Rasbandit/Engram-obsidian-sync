@@ -47,12 +47,17 @@ EngramSyncPlugin (main.ts)
   debounceMs: 2000, liveSyncEnabled: false, maxFileSizeMB: 5 }
 ```
 
-### API Endpoints (beyond CLAUDE.md)
+### Plugin API Endpoints
 
-CLAUDE.md covers note endpoints. These are also used:
+All endpoints require `Authorization: Bearer <api_key>`. Path params use `encodeURIComponent()`.
 
 | Method | Path | Body/Params | Response |
 |--------|------|-------------|----------|
+| `POST` | `/notes` | `{path, content, mtime}` | `{note, chunks_indexed}` |
+| `GET` | `/notes/{path}` | — | Full note content |
+| `GET` | `/notes/changes?since={iso}` | — | `{changes[], server_time}` |
+| `DELETE` | `/notes/{path}` | — | `{deleted, path}` |
+| `GET` | `/folders` | — | Folder tree with note counts |
 | `POST` | `/attachments` | `{path, content_base64, mime_type, mtime}` | `{attachment}` |
 | `GET` | `/attachments/{path}` | — | `{id, path, content_base64, mime_type, size_bytes, mtime, ...}` |
 | `GET` | `/attachments/changes?since={iso}` | — | `{changes[], server_time}` |
@@ -60,8 +65,30 @@ CLAUDE.md covers note endpoints. These are also used:
 | `POST` | `/search` | `{query, limit?, tags?}` | `{query, results[{text, title?, heading_path?, source_path?, tags[], wikilinks[], score, vector_score, rerank_score}]}` |
 | `GET` | `/notes/stream` | SSE stream, `Authorization` header | `event: note_change\ndata: {event_type, path, timestamp, kind?}` |
 | `GET` | `/rate-limit` | — | `{requests_per_minute}` (0 = unlimited) |
+| `GET` | `/health` | No auth required | Health check |
 
-Path encoding: all URL path params use `encodeURIComponent()`.
+**POST /notes example:**
+```json
+// Request
+{"path": "2. Knowledge Vault/Health/Omega Oils.md", "content": "---\ntags: [health]\n---\n# Omega Oils\n...", "mtime": 1709234567.0}
+// Response
+{"note": {"id": 1, "path": "...", "title": "Omega Oils", "folder": "2. Knowledge Vault/Health", "tags": ["health"], ...}, "chunks_indexed": 3}
+```
+
+**GET /notes/changes example:**
+```json
+{
+  "changes": [
+    {"path": "...", "title": "...", "content": "...", "folder": "...", "tags": [...], "mtime": 1709345678.0, "updated_at": "2026-02-28T14:30:00Z", "deleted": false},
+    {"path": "Old Note.md", "content": "...", "updated_at": "...", "deleted": true}
+  ],
+  "server_time": "2026-02-28T15:00:00Z"
+}
+```
+
+Plugin uses `server_time` as `since` for the next sync — no missed changes even with clock drift.
+
+For the full backend endpoint list, see `docs/engram-backend.md`.
 
 ### Sync Algorithm — Key Flows
 
