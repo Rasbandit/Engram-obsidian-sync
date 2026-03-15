@@ -202,9 +202,12 @@ export class SyncEngine {
 		if (!this.ready) return;
 		if (!this.isSyncable(file)) return;
 		if (this.shouldIgnore(file.path)) return;
-		// Suppress vault events while a pull is in progress — all writes are
-		// from the sync engine, not the user.
-		if (this.pulling) return;
+		// During pull, vault events are usually echoes from sync writes.
+		// But real user edits can happen too — queue them for post-pull push.
+		if (this.pulling) {
+			this.pendingPostPullPushes.add(file.path);
+			return;
+		}
 
 		// Clear existing debounce timer for this file
 		const existing = this.debounceTimers.get(file.path);
@@ -365,8 +368,12 @@ export class SyncEngine {
 		this.requestTimestamps.push(Date.now());
 	}
 
-	/** Push a single file to Engram. Returns true on success. */
-	private async pushFile(file: TFile): Promise<boolean> {
+	/** Paths modified during a pull that need pushing once pull completes. */
+	private pendingPostPullPushes: Set<string> = new Set();
+
+	/** Push a single file to Engram. Returns true on success.
+	 *  When force is true, skip echo suppression (used by pushAll). */
+	private async pushFile(file: TFile, force = false): Promise<boolean> {
 		if (this.pushing.has(file.path)) return false;
 		await this.acquirePushSlot();
 		this.pushing.add(file.path);
@@ -399,7 +406,7 @@ export class SyncEngine {
 				// where vault.modify() triggers handleModify() for every pulled file.
 				const hash = fnv1a(content);
 				const syncedHash = this.syncedHashes.get(normalizePath(file.path));
-				if (syncedHash !== undefined && hash === syncedHash) {
+				if (!force && syncedHash !== undefined && hash === syncedHash) {
 					devLog().log("push", `skip (echo): ${file.path}`);
 					return false;
 				}
@@ -495,6 +502,22 @@ export class SyncEngine {
 		} finally {
 			this.pulling = false;
 			this.emitStatus();
+			await this.flushPostPullPushes();
+		}
+	}
+
+	/** Push any files that were modified during pull. Echo suppression will
+	 *  naturally skip sync-engine writes; only real user edits get pushed. */
+	private async flushPostPullPushes(): Promise<void> {
+		if (this.pendingPostPullPushes.size === 0) return;
+		const paths = [...this.pendingPostPullPushes];
+		this.pendingPostPullPushes.clear();
+		devLog().log("push", `flushing ${paths.length} post-pull pushes`);
+		for (const path of paths) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (file instanceof TFile) {
+				await this.pushFile(file);
+			}
 		}
 	}
 
@@ -540,6 +563,7 @@ export class SyncEngine {
 		} finally {
 			this.pulling = false;
 			this.emitStatus();
+			await this.flushPostPullPushes();
 		}
 	}
 
@@ -872,7 +896,7 @@ export class SyncEngine {
 
 		for (let i = 0; i < toSync.length; i += 10) {
 			const batch = toSync.slice(i, i + 10);
-			const results = await Promise.all(batch.map((f: TFile) => this.pushFile(f)));
+			const results = await Promise.all(batch.map((f: TFile) => this.pushFile(f, true)));
 			pushed += results.filter(Boolean).length;
 
 			if (pushed % 100 === 0) {
@@ -882,7 +906,16 @@ export class SyncEngine {
 			}
 		}
 
-		new Notice(`Engram Sync: initial push complete (${pushed} files)`);
+		const skipped = toSync.length - pushed;
+		if (skipped > 0) {
+			const skippedPaths = toSync
+				.filter((f: TFile) => !this.pushing.has(f.path))
+				.map((f: TFile) => f.path);
+			devLog().log("push", `pushAll skipped ${skipped} files: ${skippedPaths.join(", ")}`);
+			new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files (${skipped} skipped)`);
+		} else {
+			new Notice(`Engram Sync: push complete (${pushed} files)`);
+		}
 		return pushed;
 	}
 
@@ -1020,6 +1053,7 @@ export class SyncEngine {
 			clearTimeout(timer);
 		}
 		this.recentlyPushed.clear();
+		this.pendingPostPullPushes.clear();
 		this.stopHealthCheck();
 		this.queue.destroy();
 	}

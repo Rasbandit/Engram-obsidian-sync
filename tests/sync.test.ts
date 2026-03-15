@@ -1803,3 +1803,120 @@ describe("request pacer", () => {
 		spy.mockRestore();
 	});
 });
+
+describe("SyncEngine.pushAll echo suppression fix", () => {
+	test("pushAll() pushes files even when syncedHashes match", async () => {
+		const engine = createEngine();
+		const file = new TFile("Notes/Existing.md", Date.now());
+		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file]);
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Existing\n\nContent");
+
+		// Simulate syncedHashes being populated (as happens after pull)
+		// by doing a pull that writes this file, then clearing the mock
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [{
+				path: "Notes/Existing.md",
+				title: "Existing",
+				content: "# Existing\n\nContent",
+				folder: "Notes",
+				tags: [],
+				mtime: 1709345678,
+				updated_at: "2026-03-01T12:00:00Z",
+				deleted: false,
+			}],
+			server_time: "2026-03-01T12:00:01Z",
+		});
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+		engine.setLastSync("2026-01-01T00:00:00Z");
+		await engine.pull();
+
+		jest.clearAllMocks();
+		(mockApi.ping as jest.Mock).mockResolvedValue({ ok: true });
+		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file]);
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Existing\n\nContent");
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+
+		const pushed = await engine.pushAll();
+
+		// Should push despite hash match because pushAll uses force=true
+		expect(pushed).toBe(1);
+		expect(mockApi.pushNote).toHaveBeenCalledWith(
+			"Notes/Existing.md",
+			"# Existing\n\nContent",
+			expect.any(Number),
+		);
+	});
+
+	test("pushAll() reports skipped count when some files fail", async () => {
+		const engine = createEngine();
+		const file1 = new TFile("Notes/Good.md", Date.now());
+		const file2 = new TFile("Notes/Bad.md", Date.now());
+		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file1, file2]);
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("content");
+		(mockApi.ping as jest.Mock).mockResolvedValue({ ok: true });
+		(mockApi.pushNote as jest.Mock)
+			.mockResolvedValueOnce({ note: {}, chunks_indexed: 1 })
+			.mockRejectedValueOnce(new Error("network error"));
+
+		const pushed = await engine.pushAll();
+
+		expect(pushed).toBe(1);
+		// The failed file gets queued, not counted as pushed
+	});
+
+	test("pushFile(force=true) bypasses echo suppression", async () => {
+		const engine = createEngine();
+		const file = new TFile("Notes/Force.md", Date.now());
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Force\n\nContent");
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+
+		// Simulate a synced hash by doing a normal push first
+		// Access private method via any cast for testing
+		await (engine as any).pushFile(file);
+		expect(mockApi.pushNote).toHaveBeenCalledTimes(1);
+
+		jest.clearAllMocks();
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+
+		// Normal push should be suppressed (echo)
+		await (engine as any).pushFile(file);
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
+
+		// Force push should bypass suppression
+		await (engine as any).pushFile(file, true);
+		expect(mockApi.pushNote).toHaveBeenCalledTimes(1);
+	});
+
+	test("handleModify during pull queues for post-pull push", async () => {
+		const engine = createEngine({ debounceMs: 10 });
+		const file = new TFile("Notes/DuringPull.md", Date.now());
+		(mockApp.vault.read as jest.Mock).mockResolvedValue("# User edit during pull");
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(file);
+
+		// Start a pull — mock it to return no changes
+		(mockApi.getChanges as jest.Mock).mockImplementation(async () => {
+			// While pull is in progress, simulate a user edit
+			engine.handleModify(file);
+			return { changes: [], server_time: "2026-03-01T12:00:01Z" };
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValue({
+			changes: [],
+			server_time: "2026-01-01T00:00:00Z",
+		});
+
+		engine.setLastSync("2026-01-01T00:00:00Z");
+		await engine.pull();
+
+		// The file should NOT have been debounce-pushed (was during pull)
+		// but should have been pushed via flushPostPullPushes
+		// Wait for async flush
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(mockApi.pushNote).toHaveBeenCalledWith(
+			"Notes/DuringPull.md",
+			"# User edit during pull",
+			expect.any(Number),
+		);
+	});
+});

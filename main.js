@@ -384,6 +384,8 @@ var SyncEngine = class {
     /** Called when a conflict is detected. Return the user's resolution.
      *  If null, conflicts are auto-resolved as keep-remote (legacy behavior). */
     this.onConflict = null;
+    /** Paths modified during a pull that need pushing once pull completes. */
+    this.pendingPostPullPushes = /* @__PURE__ */ new Set();
     this.parseIgnorePatterns();
   }
   updateSettings(settings) {
@@ -472,7 +474,10 @@ var SyncEngine = class {
     if (!this.ready) return;
     if (!this.isSyncable(file)) return;
     if (this.shouldIgnore(file.path)) return;
-    if (this.pulling) return;
+    if (this.pulling) {
+      this.pendingPostPullPushes.add(file.path);
+      return;
+    }
     const existing = this.debounceTimers.get(file.path);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(async () => {
@@ -600,8 +605,9 @@ var SyncEngine = class {
     this.requestTimestamps = this.requestTimestamps.filter((t) => t > Date.now() - windowMs);
     this.requestTimestamps.push(Date.now());
   }
-  /** Push a single file to Engram. Returns true on success. */
-  async pushFile(file) {
+  /** Push a single file to Engram. Returns true on success.
+   *  When force is true, skip echo suppression (used by pushAll). */
+  async pushFile(file, force = false) {
     if (this.pushing.has(file.path)) return false;
     await this.acquirePushSlot();
     this.pushing.add(file.path);
@@ -628,7 +634,7 @@ var SyncEngine = class {
         const content = await this.app.vault.read(file);
         const hash = fnv1a(content);
         const syncedHash = this.syncedHashes.get((0, import_obsidian2.normalizePath)(file.path));
-        if (syncedHash !== void 0 && hash === syncedHash) {
+        if (!force && syncedHash !== void 0 && hash === syncedHash) {
           devLog().log("push", `skip (echo): ${file.path}`);
           return false;
         }
@@ -706,6 +712,21 @@ var SyncEngine = class {
     } finally {
       this.pulling = false;
       this.emitStatus();
+      await this.flushPostPullPushes();
+    }
+  }
+  /** Push any files that were modified during pull. Echo suppression will
+   *  naturally skip sync-engine writes; only real user edits get pushed. */
+  async flushPostPullPushes() {
+    if (this.pendingPostPullPushes.size === 0) return;
+    const paths = [...this.pendingPostPullPushes];
+    this.pendingPostPullPushes.clear();
+    devLog().log("push", `flushing ${paths.length} post-pull pushes`);
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof import_obsidian2.TFile) {
+        await this.pushFile(file);
+      }
     }
   }
   /** Force-pull ALL notes and attachments from the server, overwriting local files.
@@ -743,6 +764,7 @@ var SyncEngine = class {
     } finally {
       this.pulling = false;
       this.emitStatus();
+      await this.flushPostPullPushes();
     }
   }
   /** Handle an SSE stream event (upsert or delete). */
@@ -988,7 +1010,7 @@ var SyncEngine = class {
     new import_obsidian2.Notice(`Engram Sync: pushing ${toSync.length} files...`);
     for (let i = 0; i < toSync.length; i += 10) {
       const batch = toSync.slice(i, i + 10);
-      const results = await Promise.all(batch.map((f) => this.pushFile(f)));
+      const results = await Promise.all(batch.map((f) => this.pushFile(f, true)));
       pushed += results.filter(Boolean).length;
       if (pushed % 100 === 0) {
         new import_obsidian2.Notice(
@@ -996,7 +1018,14 @@ var SyncEngine = class {
         );
       }
     }
-    new import_obsidian2.Notice(`Engram Sync: initial push complete (${pushed} files)`);
+    const skipped = toSync.length - pushed;
+    if (skipped > 0) {
+      const skippedPaths = toSync.filter((f) => !this.pushing.has(f.path)).map((f) => f.path);
+      devLog().log("push", `pushAll skipped ${skipped} files: ${skippedPaths.join(", ")}`);
+      new import_obsidian2.Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files (${skipped} skipped)`);
+    } else {
+      new import_obsidian2.Notice(`Engram Sync: push complete (${pushed} files)`);
+    }
     return pushed;
   }
   // --- Offline queue ---
@@ -1118,6 +1147,7 @@ var SyncEngine = class {
       clearTimeout(timer);
     }
     this.recentlyPushed.clear();
+    this.pendingPostPullPushes.clear();
     this.stopHealthCheck();
     this.queue.destroy();
   }
