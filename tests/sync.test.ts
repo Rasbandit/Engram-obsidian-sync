@@ -33,6 +33,7 @@ const mockApi = {
 	deleteAttachment: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
 	getAttachmentChanges: jest.fn().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
 	getRateLimit: jest.fn().mockResolvedValue(0),
+	getManifest: jest.fn().mockResolvedValue(null),
 } as unknown as EngramApi;
 
 // Mock the Obsidian App

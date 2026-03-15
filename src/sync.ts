@@ -3,7 +3,7 @@
  */
 import { App, TFile, TFolder, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
-import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, NoteChange, NoteStreamEvent, QueueEntry, SyncStatus } from "./types";
+import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus } from "./types";
 import { OfflineQueue } from "./offline-queue";
 import { devLog } from "./dev-log";
 
@@ -916,7 +916,75 @@ export class SyncEngine {
 		} else {
 			new Notice(`Engram Sync: push complete (${pushed} files)`);
 		}
+
+		// Post-push reconciliation
+		const reconcileResult = await this.reconcile();
+		if (reconcileResult) {
+			const { missing, diverged } = reconcileResult;
+			const toFix = [...missing, ...diverged];
+			if (toFix.length > 0) {
+				devLog().log("reconcile", `fixing ${toFix.length} files after pushAll`);
+				for (const path of toFix) {
+					const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+					if (file instanceof TFile) {
+						await this.pushFile(file, true);
+					}
+				}
+				new Notice(`Engram Sync: reconciled ${toFix.length} files`);
+			}
+		}
+
 		return pushed;
+	}
+
+	/** Compute MD5 hex hash of a UTF-8 string using Web Crypto API. */
+	private async md5(content: string): Promise<string> {
+		const encoder = new TextEncoder();
+		const data = encoder.encode(content);
+		const hashBuffer = await crypto.subtle.digest("MD5", data);
+		const hashArray = new Uint8Array(hashBuffer);
+		return Array.from(hashArray).map(b => b.toString(16).padStart(2, "0")).join("");
+	}
+
+	/** Reconcile local vault against server manifest.
+	 *  Returns null if server doesn't support the manifest endpoint. */
+	async reconcile(): Promise<ReconcileResult | null> {
+		devLog().log("reconcile", "start");
+		const manifest = await this.api.getManifest();
+		if (!manifest) {
+			devLog().log("reconcile", "server does not support manifest — skipping");
+			return null;
+		}
+
+		const serverNotes = new Map(manifest.notes.map(n => [n.path, n.content_hash]));
+		const missing: string[] = [];
+		const diverged: string[] = [];
+
+		// Check local files against server manifest
+		const files = this.app.vault.getFiles();
+		const syncable = files.filter((f: TFile) =>
+			this.isSyncable(f) && !this.isBinaryFile(f) && !this.shouldIgnore(f.path),
+		);
+
+		for (const file of syncable) {
+			const serverHash = serverNotes.get(file.path);
+			if (!serverHash) {
+				missing.push(file.path);
+			} else {
+				const content = await this.app.vault.read(file);
+				const localHash = await this.md5(content);
+				if (localHash !== serverHash) {
+					diverged.push(file.path);
+				}
+				serverNotes.delete(file.path);
+			}
+		}
+
+		// Remaining server entries are files not in the local vault
+		const extraOnServer = [...serverNotes.keys()];
+
+		devLog().log("reconcile", `done — missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
+		return { missing, diverged, extraOnServer };
 	}
 
 	// --- Offline queue ---

@@ -10,6 +10,7 @@ import {
 	AttachmentResponse,
 	ChangesResponse,
 	DeleteResponse,
+	ManifestResponse,
 	NoteDetail,
 	NoteResponse,
 	SearchResponse,
@@ -159,6 +160,20 @@ export class EngramApi {
 		} catch {
 			// Server doesn't support this endpoint — assume unlimited
 			return 0;
+		}
+	}
+
+	/** Fetch sync manifest for reconciliation.
+	 *  Returns null if the server doesn't support this endpoint (404). */
+	async getManifest(): Promise<ManifestResponse | null> {
+		try {
+			const resp = await this.request("GET", "/sync/manifest");
+			return resp.json as ManifestResponse;
+		} catch (e) {
+			if (typeof e === "object" && e !== null && (e as { status?: number }).status === 404) {
+				return null;
+			}
+			throw e;
 		}
 	}
 

@@ -124,6 +124,29 @@ export default class EngramSyncPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "engram-check-sync",
+			name: "Check sync status",
+			callback: async () => {
+				new Notice("Engram Sync: checking...");
+				const result = await this.syncEngine.reconcile();
+				if (!result) {
+					new Notice("Engram Sync: server does not support reconciliation (update backend)");
+					return;
+				}
+				const { missing, diverged, extraOnServer } = result;
+				if (missing.length === 0 && diverged.length === 0 && extraOnServer.length === 0) {
+					new Notice("Engram Sync: everything in sync");
+				} else {
+					const parts: string[] = [];
+					if (missing.length > 0) parts.push(`${missing.length} missing on server`);
+					if (diverged.length > 0) parts.push(`${diverged.length} diverged`);
+					if (extraOnServer.length > 0) parts.push(`${extraOnServer.length} only on server`);
+					new Notice(`Engram Sync: ${parts.join(", ")}`);
+				}
+			},
+		});
+
+		this.addCommand({
 			id: "engram-pull-all",
 			name: "Pull all from server (force overwrite)",
 			callback: async () => {

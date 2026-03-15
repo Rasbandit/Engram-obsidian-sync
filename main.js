@@ -149,6 +149,19 @@ var EngramApi = class {
       return 0;
     }
   }
+  /** Fetch sync manifest for reconciliation.
+   *  Returns null if the server doesn't support this endpoint (404). */
+  async getManifest() {
+    try {
+      const resp = await this.request("GET", "/sync/manifest");
+      return resp.json;
+    } catch (e) {
+      if (typeof e === "object" && e !== null && e.status === 404) {
+        return null;
+      }
+      throw e;
+    }
+  }
   /** Get attachment changes since a timestamp. */
   async getAttachmentChanges(since) {
     const encoded = encodeURIComponent(since);
@@ -1026,7 +1039,63 @@ var SyncEngine = class {
     } else {
       new import_obsidian2.Notice(`Engram Sync: push complete (${pushed} files)`);
     }
+    const reconcileResult = await this.reconcile();
+    if (reconcileResult) {
+      const { missing, diverged } = reconcileResult;
+      const toFix = [...missing, ...diverged];
+      if (toFix.length > 0) {
+        devLog().log("reconcile", `fixing ${toFix.length} files after pushAll`);
+        for (const path of toFix) {
+          const file = this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(path));
+          if (file instanceof import_obsidian2.TFile) {
+            await this.pushFile(file, true);
+          }
+        }
+        new import_obsidian2.Notice(`Engram Sync: reconciled ${toFix.length} files`);
+      }
+    }
     return pushed;
+  }
+  /** Compute MD5 hex hash of a UTF-8 string using Web Crypto API. */
+  async md5(content) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(content);
+    const hashBuffer = await crypto.subtle.digest("MD5", data);
+    const hashArray = new Uint8Array(hashBuffer);
+    return Array.from(hashArray).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  /** Reconcile local vault against server manifest.
+   *  Returns null if server doesn't support the manifest endpoint. */
+  async reconcile() {
+    devLog().log("reconcile", "start");
+    const manifest = await this.api.getManifest();
+    if (!manifest) {
+      devLog().log("reconcile", "server does not support manifest \u2014 skipping");
+      return null;
+    }
+    const serverNotes = new Map(manifest.notes.map((n) => [n.path, n.content_hash]));
+    const missing = [];
+    const diverged = [];
+    const files = this.app.vault.getFiles();
+    const syncable = files.filter(
+      (f) => this.isSyncable(f) && !this.isBinaryFile(f) && !this.shouldIgnore(f.path)
+    );
+    for (const file of syncable) {
+      const serverHash = serverNotes.get(file.path);
+      if (!serverHash) {
+        missing.push(file.path);
+      } else {
+        const content = await this.app.vault.read(file);
+        const localHash = await this.md5(content);
+        if (localHash !== serverHash) {
+          diverged.push(file.path);
+        }
+        serverNotes.delete(file.path);
+      }
+    }
+    const extraOnServer = [...serverNotes.keys()];
+    devLog().log("reconcile", `done \u2014 missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
+    return { missing, diverged, extraOnServer };
   }
   // --- Offline queue ---
   /** Queue a change for retry and go offline. */
@@ -2258,6 +2327,28 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       callback: async () => {
         const count = await this.syncEngine.pushAll();
         new import_obsidian8.Notice(`Engram Sync: pushed ${count} files`);
+      }
+    });
+    this.addCommand({
+      id: "engram-check-sync",
+      name: "Check sync status",
+      callback: async () => {
+        new import_obsidian8.Notice("Engram Sync: checking...");
+        const result = await this.syncEngine.reconcile();
+        if (!result) {
+          new import_obsidian8.Notice("Engram Sync: server does not support reconciliation (update backend)");
+          return;
+        }
+        const { missing, diverged, extraOnServer } = result;
+        if (missing.length === 0 && diverged.length === 0 && extraOnServer.length === 0) {
+          new import_obsidian8.Notice("Engram Sync: everything in sync");
+        } else {
+          const parts = [];
+          if (missing.length > 0) parts.push(`${missing.length} missing on server`);
+          if (diverged.length > 0) parts.push(`${diverged.length} diverged`);
+          if (extraOnServer.length > 0) parts.push(`${extraOnServer.length} only on server`);
+          new import_obsidian8.Notice(`Engram Sync: ${parts.join(", ")}`);
+        }
       }
     });
     this.addCommand({

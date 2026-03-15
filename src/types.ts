@@ -208,3 +208,24 @@ export interface AttachmentChangesResponse {
 	changes: AttachmentChange[];
 	server_time: string;
 }
+
+/** A single entry in the sync manifest (path + content hash). */
+export interface ManifestEntry {
+	path: string;
+	content_hash: string;
+}
+
+/** Response from GET /sync/manifest */
+export interface ManifestResponse {
+	notes: ManifestEntry[];
+	attachments: ManifestEntry[];
+	total_notes: number;
+	total_attachments: number;
+}
+
+/** Result of reconciliation — files that differ between local and server. */
+export interface ReconcileResult {
+	missing: string[];
+	diverged: string[];
+	extraOnServer: string[];
+}
