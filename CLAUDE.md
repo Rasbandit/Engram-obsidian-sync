@@ -44,9 +44,34 @@ Doc-only changes (CLAUDE.md, docs/) can be committed and pushed directly to main
 **Tests are the spec. If a test fails, fix the app — not the test.**
 
 ```bash
-npm test           # Run unit tests
-npm run build      # Build the plugin
+npm test              # Run all 201 unit tests
+npm test -- --verbose # Verbose output
+npm test -- --coverage # With coverage report
+npm run build         # Build the plugin (production)
 ```
+
+### Test files (201 tests across 7 files)
+
+| File | Tests | What it covers |
+|------|-------|----------------|
+| `tests/sync.test.ts` | ~100 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, SSE events, echo suppression, status tracking, first sync detection, destroy |
+| `tests/diff.test.ts` | ~30 | computeDiff, groupIntoHunks, buildMergedContent (line-by-line diff, hunk context, merge choices) |
+| `tests/search.test.ts` | ~4 | EngramApi.search, SearchModal debounce |
+| `tests/api.test.ts` | 25 | All EngramApi methods (pushNote, getChanges, deleteNote, getRateLimit, getManifest, search), base64 utilities, auth headers, URL encoding, error handling |
+| `tests/offline-queue.test.ts` | 17 | Enqueue/dequeue, deduplication by path, oldest-first ordering, load/clear, debounced persistence, coalesced writes, destroy cancels timers |
+| `tests/remote-log.test.ts` | 15 | Buffer management, flush threshold (20 entries), ring buffer overflow (200 cap), flush-on-disable, singleton lifecycle |
+| `tests/stream.test.ts` | 10 | NoteStream: connect/disconnect state, auth headers, SSE event parsing, idempotent connect, error handling |
+
+### Test configuration
+
+- **Jest config:** `jest.config.js` — ts-jest preset, roots in `src/` and `tests/`
+- **Test tsconfig:** `tsconfig.test.json` — extends main tsconfig with `noImplicitAny: false` (tests use `as any` for mocks)
+- **Obsidian mock:** `tests/__mocks__/obsidian.ts` — minimal mocks for TFile, Plugin, Modal, requestUrl, etc.
+- **Coverage thresholds:** 40% minimum for branches, functions, lines, statements
+
+### Untested files (UI-heavy, minimal testable logic)
+
+`settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`, `dev-log.ts`
 
 ## Build & Install
 
