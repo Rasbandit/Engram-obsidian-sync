@@ -50,6 +50,7 @@ const mockApp = {
 		createBinary: jest.fn().mockResolvedValue(undefined),
 		createFolder: jest.fn().mockResolvedValue(undefined),
 		trash: jest.fn().mockResolvedValue(undefined),
+		rename: jest.fn().mockResolvedValue(undefined),
 	},
 } as any;
 
@@ -2022,5 +2023,93 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 			"# User edit during pull",
 			expect.any(Number),
 		);
+	});
+});
+
+describe("Path sanitization on push", () => {
+	test("renames local file when server returns sanitized path", async () => {
+		// Server sanitizes "test?.md" → "test.md"
+		(mockApi.pushNote as jest.Mock).mockResolvedValueOnce({
+			note: {
+				id: 1,
+				user_id: "1",
+				path: "Notes/test.md",
+				title: "test",
+				folder: "Notes",
+				tags: [],
+				mtime: 1709234567,
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			},
+			chunks_indexed: 1,
+		});
+
+		const file = new TFile("Notes/test?.md", Date.now());
+		// vault needs to find the file for rename
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+			if (p === "Notes/test?.md") return file;
+			return null;
+		});
+
+		const engine = createEngine({ debounceMs: 10 });
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 100));
+
+		// Should have renamed the local file to match server's sanitized path
+		expect(mockApp.vault.rename).toHaveBeenCalledWith(file, "Notes/test.md");
+	});
+
+	test("does not rename when server path matches original", async () => {
+		(mockApi.pushNote as jest.Mock).mockResolvedValueOnce({
+			note: {
+				id: 1,
+				user_id: "1",
+				path: "Notes/Normal.md",
+				title: "Normal",
+				folder: "Notes",
+				tags: [],
+				mtime: 1709234567,
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			},
+			chunks_indexed: 1,
+		});
+
+		const file = new TFile("Notes/Normal.md", Date.now());
+		const engine = createEngine({ debounceMs: 10 });
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 100));
+
+		// No rename needed — path matches
+		expect(mockApp.vault.rename).not.toHaveBeenCalled();
+	});
+
+	test("handles multiple illegal chars in filename", async () => {
+		(mockApi.pushNote as jest.Mock).mockResolvedValueOnce({
+			note: {
+				id: 1,
+				user_id: "1",
+				path: "Notes/What Why How.md",
+				title: "What Why How",
+				folder: "Notes",
+				tags: [],
+				mtime: 1709234567,
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			},
+			chunks_indexed: 1,
+		});
+
+		const file = new TFile("Notes/What? Why: How*.md", Date.now());
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+			if (p === "Notes/What? Why: How*.md") return file;
+			return null;
+		});
+
+		const engine = createEngine({ debounceMs: 10 });
+		engine.handleModify(file);
+		await new Promise((r) => setTimeout(r, 100));
+
+		expect(mockApp.vault.rename).toHaveBeenCalledWith(file, "Notes/What Why How.md");
 	});
 });

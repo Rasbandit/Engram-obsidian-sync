@@ -772,8 +772,21 @@ var SyncEngine = class {
           devLog().log("push", `skip (echo): ${file.path}`);
           return false;
         }
-        await this.api.pushNote(file.path, content, mtime);
-        this.syncedHashes.set((0, import_obsidian2.normalizePath)(file.path), hash);
+        const resp = await this.api.pushNote(file.path, content, mtime);
+        const serverPath = resp.note.path;
+        if (serverPath && serverPath !== file.path) {
+          const localFile = this.app.vault.getAbstractFileByPath(file.path);
+          if (localFile) {
+            await this.app.vault.rename(localFile, serverPath);
+            devLog().log("push", `renamed: ${file.path} \u2192 ${serverPath} (server sanitized)`);
+            rlog().info("push", `Renamed: ${file.path} \u2192 ${serverPath} (server sanitized)`);
+            new import_obsidian2.Notice(`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`);
+          }
+          this.syncedHashes.delete((0, import_obsidian2.normalizePath)(file.path));
+          this.syncedHashes.set((0, import_obsidian2.normalizePath)(serverPath), hash);
+        } else {
+          this.syncedHashes.set((0, import_obsidian2.normalizePath)(file.path), hash);
+        }
       }
       success = true;
       devLog().log("push", `ok: ${file.path}`);

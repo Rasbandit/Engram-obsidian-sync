@@ -411,8 +411,24 @@ export class SyncEngine {
 					devLog().log("push", `skip (echo): ${file.path}`);
 					return false;
 				}
-				await this.api.pushNote(file.path, content, mtime);
-				this.syncedHashes.set(normalizePath(file.path), hash);
+				const resp = await this.api.pushNote(file.path, content, mtime);
+
+				// Server may sanitize the path (strip chars illegal on mobile).
+				// If so, rename the local file to match.
+				const serverPath = resp.note.path;
+				if (serverPath && serverPath !== file.path) {
+					const localFile = this.app.vault.getAbstractFileByPath(file.path);
+					if (localFile) {
+						await this.app.vault.rename(localFile, serverPath);
+						devLog().log("push", `renamed: ${file.path} → ${serverPath} (server sanitized)`);
+						rlog().info("push", `Renamed: ${file.path} → ${serverPath} (server sanitized)`);
+						new Notice(`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`);
+					}
+					this.syncedHashes.delete(normalizePath(file.path));
+					this.syncedHashes.set(normalizePath(serverPath), hash);
+				} else {
+					this.syncedHashes.set(normalizePath(file.path), hash);
+				}
 			}
 			success = true;
 			devLog().log("push", `ok: ${file.path}`);
