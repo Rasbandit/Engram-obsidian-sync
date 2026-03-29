@@ -10,6 +10,7 @@ export const SEARCH_VIEW_TYPE = "engram-search-view";
 export class SearchView extends ItemView {
 	private api: EngramApi;
 	private inputEl!: HTMLInputElement;
+	private folderEl!: HTMLInputElement;
 	private resultsEl!: HTMLElement;
 	private previewEl!: HTMLElement;
 	private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -44,15 +45,24 @@ export class SearchView extends ItemView {
 			cls: "engram-search-input",
 		});
 
+		this.folderEl = container.createEl("input", {
+			type: "text",
+			placeholder: "Filter by folder...",
+			cls: "engram-search-input engram-search-folder-input",
+		});
+
 		this.resultsEl = container.createDiv({ cls: "engram-search-results" });
 		this.previewEl = container.createDiv({ cls: "engram-search-preview" });
 
 		this.renderEmpty();
 
-		this.inputEl.addEventListener("input", () => {
+		const scheduleSearch = () => {
 			if (this.debounceTimer) clearTimeout(this.debounceTimer);
 			this.debounceTimer = setTimeout(() => this.doSearch(), 300);
-		});
+		};
+
+		this.inputEl.addEventListener("input", scheduleSearch);
+		this.folderEl.addEventListener("input", scheduleSearch);
 
 		this.inputEl.addEventListener("keydown", (e) => {
 			if (e.key === "ArrowDown") {
@@ -191,7 +201,8 @@ export class SearchView extends ItemView {
 		}
 
 		try {
-			const resp = await this.api.search(query, 10);
+			const folder = this.folderEl.value.trim() || undefined;
+			const resp = await this.api.search(query, 10, undefined, folder);
 			this.results = resp.results;
 			this.selectedIndex = this.results.length > 0 ? 0 : -1;
 			this.renderResults();

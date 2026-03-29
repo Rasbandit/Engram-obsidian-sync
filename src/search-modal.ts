@@ -8,6 +8,7 @@ import { SearchResult } from "./types";
 export class SearchModal extends Modal {
 	private api: EngramApi;
 	private inputEl!: HTMLInputElement;
+	private folderEl!: HTMLInputElement;
 	private resultsEl!: HTMLElement;
 	private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	private results: SearchResult[] = [];
@@ -29,13 +30,22 @@ export class SearchModal extends Modal {
 			cls: "engram-search-input",
 		});
 
+		this.folderEl = contentEl.createEl("input", {
+			type: "text",
+			placeholder: "Filter by folder...",
+			cls: "engram-search-input engram-search-folder-input",
+		});
+
 		this.resultsEl = contentEl.createDiv({ cls: "engram-search-results" });
 		this.renderEmpty();
 
-		this.inputEl.addEventListener("input", () => {
+		const scheduleSearch = () => {
 			if (this.debounceTimer) clearTimeout(this.debounceTimer);
 			this.debounceTimer = setTimeout(() => this.doSearch(), 300);
-		});
+		};
+
+		this.inputEl.addEventListener("input", scheduleSearch);
+		this.folderEl.addEventListener("input", scheduleSearch);
 
 		this.inputEl.addEventListener("keydown", (e) => {
 			if (e.key === "ArrowDown") {
@@ -138,7 +148,8 @@ export class SearchModal extends Modal {
 		}
 
 		try {
-			const resp = await this.api.search(query, 10);
+			const folder = this.folderEl.value.trim() || undefined;
+			const resp = await this.api.search(query, 10, undefined, folder);
 			this.results = resp.results;
 			this.selectedIndex = this.results.length > 0 ? 0 : -1;
 			this.renderResults();

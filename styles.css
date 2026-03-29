@@ -17,6 +17,11 @@
 	outline: none;
 }
 
+.engram-search-folder-input {
+	font-size: 0.9em;
+	padding: 6px 10px;
+}
+
 .engram-search-empty {
 	color: var(--text-muted);
 	text-align: center;
