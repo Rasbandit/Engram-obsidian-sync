@@ -1010,14 +1010,16 @@ describe("SyncEngine conflict resolution", () => {
 });
 
 describe("SyncEngine.destroy", () => {
-	test("clears pending timers", () => {
+	test("clears pending timers so debounced push never fires", async () => {
 		const engine = createEngine({ debounceMs: 10000 });
 		const file = new TFile("Notes/Test.md");
 
 		engine.handleModify(file);
 		engine.destroy();
 
-		// No errors, timers cleaned up
+		// Wait longer than the debounce — push should never fire
+		await new Promise((r) => setTimeout(r, 100));
+		expect(mockApi.pushNote).not.toHaveBeenCalled();
 	});
 });
 
