@@ -1,5 +1,5 @@
 /**
- * Engram Sync — Obsidian plugin for bidirectional sync with Engram.
+ * Engram Sync — Obsidian plugin for bidirectional note sync with Engram.
  *
  * Pushes vault changes to Engram for indexing/search.
  * Pulls MCP-created notes and changes from other devices.
