@@ -6,6 +6,7 @@ import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
 import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus } from "./types";
 import { OfflineQueue } from "./offline-queue";
 import { devLog } from "./dev-log";
+import { rlog } from "./remote-log";
 
 /** Check if an error is an HTTP response with the given status code.
  *  Obsidian's requestUrl() throws objects with a `status` property on non-2xx. */
@@ -419,6 +420,7 @@ export class SyncEngine {
 		} catch (e) {
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
 			devLog().log("error", `push failed: ${file.path} — ${e instanceof Error ? e.message : e}`);
+			rlog().error("push", `Push failed: ${file.path} — ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
 			// Queue for retry — content-free to avoid O(n²) serialization.
 			// Content will be re-read from vault when flushing.
 			await this.enqueueChange({
@@ -469,6 +471,7 @@ export class SyncEngine {
 		this.lastError = "";
 		this.emitStatus();
 		devLog().log("pull", `start since=${this.lastSync}`);
+		rlog().info("pull", `Pull started since=${this.lastSync}`);
 		try {
 			// Fetch note and attachment changes in parallel
 			const [noteResp, attachResp] = await Promise.all([
@@ -493,10 +496,12 @@ export class SyncEngine {
 			await this.saveData({ lastSync: this.lastSync });
 
 			devLog().log("pull", `done — applied ${applied}, lastSync=${this.lastSync}`);
+			rlog().info("pull", `Pull done — applied ${applied}`);
 			return applied;
 		} catch (e) {
 			console.error("Engram Sync: pull failed", e);
 			devLog().log("error", `pull failed: ${e instanceof Error ? e.message : e}`);
+			rlog().error("pull", `Pull failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
 			this.lastError = e instanceof Error ? `Pull failed: ${e.message}` : "Pull failed";
 			return 0;
 		} finally {
@@ -825,6 +830,7 @@ export class SyncEngine {
 			this.lastError = error ?? "Connection failed";
 			this.emitStatus();
 			devLog().log("error", `fullSync auth failed: ${this.lastError}`);
+			rlog().error("lifecycle", `Auth failed: ${this.lastError}`);
 			throw new Error(this.lastError);
 		}
 
@@ -1001,6 +1007,7 @@ export class SyncEngine {
 		this.offline = true;
 		this.lastError = "";
 		devLog().log("lifecycle", `went offline — queue=${this.queue.size}`);
+		rlog().warn("lifecycle", `Went offline — queue=${this.queue.size}`);
 		this.emitStatus();
 		this.startHealthCheck();
 	}
@@ -1012,6 +1019,7 @@ export class SyncEngine {
 		this.lastError = "";
 		this.stopHealthCheck();
 		devLog().log("lifecycle", `went online — flushing queue (${this.queue.size} entries)`);
+		rlog().info("lifecycle", `Went online — flushing queue (${this.queue.size} entries)`);
 		this.emitStatus();
 		// Flush the queue now that we're online
 		this.flushQueue().catch((e) => {

@@ -144,10 +144,11 @@ export class EngramApi {
 	}
 
 	/** Semantic search across indexed notes. */
-	async search(query: string, limit?: number, tags?: string[]): Promise<SearchResponse> {
-		const body: { query: string; limit?: number; tags?: string[] } = { query };
+	async search(query: string, limit?: number, tags?: string[], folder?: string): Promise<SearchResponse> {
+		const body: { query: string; limit?: number; tags?: string[]; folder?: string } = { query };
 		if (limit !== undefined) body.limit = limit;
 		if (tags?.length) body.tags = tags;
+		if (folder) body.folder = folder;
 		const resp = await this.request("POST", "/search", body);
 		return resp.json as SearchResponse;
 	}
@@ -175,6 +176,11 @@ export class EngramApi {
 			}
 			throw e;
 		}
+	}
+
+	/** Push batched log entries to the server for remote debugging. */
+	async pushLogs(entries: { ts: string; level: string; category: string; message: string; stack?: string; plugin_version: string; platform: string }[]): Promise<void> {
+		await this.request("POST", "/logs", { entries });
 	}
 
 	/** Get attachment changes since a timestamp. */

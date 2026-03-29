@@ -4,7 +4,7 @@
  * Pushes vault changes to Engram for indexing/search.
  * Pulls MCP-created notes and changes from other devices.
  */
-import { Notice, Plugin } from "obsidian";
+import { Notice, Platform, Plugin } from "obsidian";
 import { EngramApi } from "./api";
 import { EngramSyncSettings, DEFAULT_SETTINGS, SyncStatus } from "./types";
 import { SyncEngine } from "./sync";
@@ -17,6 +17,7 @@ import { SearchView, SEARCH_VIEW_TYPE } from "./search-view";
 
 import { QueueEntry } from "./types";
 import { initDevLog, destroyDevLog, devLog } from "./dev-log";
+import { initRemoteLog, destroyRemoteLog, rlog } from "./remote-log";
 
 interface PluginData {
 	settings: EngramSyncSettings;
@@ -39,6 +40,15 @@ export default class EngramSyncPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.api = new EngramApi(this.settings.apiUrl, this.settings.apiKey);
+
+		// Remote logging for mobile debugging
+		const remoteLogger = initRemoteLog();
+		remoteLogger.configure(
+			(entries) => this.api.pushLogs(entries),
+			this.manifest.version,
+			Platform.isMobile ? "mobile" : "desktop",
+		);
+		remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
 
 		this.syncEngine = new SyncEngine(
 			this.app,
@@ -212,6 +222,7 @@ export default class EngramSyncPlugin extends Plugin {
 					new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
 				}).catch((e) => {
 					console.error("Engram Sync: manual sync failed", e);
+					rlog().error("lifecycle", `Manual sync failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
 					new Notice("Engram Sync: sync failed");
 				});
 			}
@@ -241,6 +252,7 @@ export default class EngramSyncPlugin extends Plugin {
 			clearInterval(this.syncInterval);
 			this.syncInterval = null;
 		}
+		destroyRemoteLog();
 		destroyDevLog();
 	}
 
@@ -256,6 +268,7 @@ export default class EngramSyncPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		this.api.updateConfig(this.settings.apiUrl, this.settings.apiKey);
 		this.syncEngine.updateSettings(this.settings);
+		rlog().setEnabled(this.settings.remoteLoggingEnabled);
 		this.startSyncInterval();
 		this.setupNoteStream();
 		await this.savePluginData(this.syncEngine.getLastSync());
@@ -264,6 +277,7 @@ export default class EngramSyncPlugin extends Plugin {
 		if (this.settings.apiUrl && this.settings.apiKey) {
 			this.doSyncWithFirstSyncCheck().catch((e) => {
 				console.error("Engram Sync: sync after settings change failed", e);
+				rlog().error("lifecycle", `Sync after settings change failed: ${e instanceof Error ? e.message : e}`);
 			});
 		}
 	}
@@ -301,6 +315,7 @@ export default class EngramSyncPlugin extends Plugin {
 			if (connected) {
 				this.syncEngine.pull().catch((e) => {
 					console.error("Engram Sync: catch-up pull failed", e);
+					rlog().error("sse", `Catch-up pull on SSE reconnect failed: ${e instanceof Error ? e.message : e}`);
 				});
 			}
 		};

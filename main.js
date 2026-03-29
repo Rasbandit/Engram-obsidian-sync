@@ -133,10 +133,11 @@ var EngramApi = class {
     return resp.json;
   }
   /** Semantic search across indexed notes. */
-  async search(query, limit, tags) {
+  async search(query, limit, tags, folder) {
     const body = { query };
     if (limit !== void 0) body.limit = limit;
     if (tags == null ? void 0 : tags.length) body.tags = tags;
+    if (folder) body.folder = folder;
     const resp = await this.request("POST", "/search", body);
     return resp.json;
   }
@@ -161,6 +162,10 @@ var EngramApi = class {
       }
       throw e;
     }
+  }
+  /** Push batched log entries to the server for remote debugging. */
+  async pushLogs(entries) {
+    await this.request("POST", "/logs", { entries });
   }
   /** Get attachment changes since a timestamp. */
   async getAttachmentChanges(since) {
@@ -198,7 +203,8 @@ var DEFAULT_SETTINGS = {
   debounceMs: 2e3,
   liveSyncEnabled: false,
   maxFileSizeMB: 5,
-  conflictViewMode: "unified"
+  conflictViewMode: "unified",
+  remoteLoggingEnabled: false
 };
 
 // src/sync.ts
@@ -307,6 +313,121 @@ function destroyDevLog() {
     delete globalThis.__engramLog;
   }
   instance = noopLog;
+}
+
+// src/remote-log.ts
+var MAX_BUFFER = 200;
+var FLUSH_INTERVAL_MS = 3e4;
+var FLUSH_THRESHOLD = 20;
+var RemoteLogger = class {
+  constructor() {
+    this.buffer = [];
+    this.flushTimer = null;
+    this.pushFn = null;
+    this.enabled = false;
+    this.pluginVersion = "";
+    this.platform = "";
+    this.flushing = false;
+  }
+  configure(pushFn, pluginVersion, platform) {
+    this.pushFn = pushFn;
+    this.pluginVersion = pluginVersion;
+    this.platform = platform;
+  }
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (enabled) {
+      this.startTimer();
+    } else {
+      this.stopTimer();
+      this.flush();
+    }
+  }
+  error(category, message, stack) {
+    this.addEntry("error", category, message, stack);
+  }
+  warn(category, message) {
+    this.addEntry("warn", category, message);
+  }
+  info(category, message) {
+    this.addEntry("info", category, message);
+  }
+  flush() {
+    if (this.flushing || this.buffer.length === 0 || !this.pushFn) return;
+    const batch = this.buffer.splice(0, this.buffer.length);
+    this.flushing = true;
+    this.pushFn(batch).catch(() => {
+      const space = MAX_BUFFER - this.buffer.length;
+      if (space > 0) {
+        this.buffer.unshift(...batch.slice(0, space));
+      }
+    }).finally(() => {
+      this.flushing = false;
+    });
+  }
+  destroy() {
+    this.stopTimer();
+    this.flush();
+    this.buffer = [];
+    this.pushFn = null;
+  }
+  addEntry(level, category, message, stack) {
+    if (!this.enabled || !this.pushFn) return;
+    const entry = {
+      ts: (/* @__PURE__ */ new Date()).toISOString(),
+      level,
+      category,
+      message,
+      plugin_version: this.pluginVersion,
+      platform: this.platform
+    };
+    if (stack) entry.stack = stack;
+    this.buffer.push(entry);
+    if (this.buffer.length > MAX_BUFFER) {
+      this.buffer.splice(0, this.buffer.length - MAX_BUFFER);
+    }
+    if (this.buffer.length >= FLUSH_THRESHOLD) {
+      this.flush();
+    }
+  }
+  startTimer() {
+    this.stopTimer();
+    this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
+  }
+  stopTimer() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+  }
+};
+var _noop = {
+  error() {
+  },
+  warn() {
+  },
+  info() {
+  },
+  flush() {
+  },
+  destroy() {
+  },
+  setEnabled() {
+  },
+  configure() {
+  }
+};
+var _instance = null;
+function initRemoteLog() {
+  _instance = new RemoteLogger();
+  return _instance;
+}
+function rlog() {
+  return _instance != null ? _instance : _noop;
+}
+function destroyRemoteLog() {
+  _instance == null ? void 0 : _instance.destroy();
+  _instance = null;
 }
 
 // src/sync.ts
@@ -660,6 +781,7 @@ var SyncEngine = class {
     } catch (e) {
       console.error(`Engram Sync: failed to push ${file.path}`, e);
       devLog().log("error", `push failed: ${file.path} \u2014 ${e instanceof Error ? e.message : e}`);
+      rlog().error("push", `Push failed: ${file.path} \u2014 ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
       await this.enqueueChange({
         path: file.path,
         action: "upsert",
@@ -699,6 +821,7 @@ var SyncEngine = class {
     this.lastError = "";
     this.emitStatus();
     devLog().log("pull", `start since=${this.lastSync}`);
+    rlog().info("pull", `Pull started since=${this.lastSync}`);
     try {
       const [noteResp, attachResp] = await Promise.all([
         this.api.getChanges(this.lastSync),
@@ -716,10 +839,12 @@ var SyncEngine = class {
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
       devLog().log("pull", `done \u2014 applied ${applied}, lastSync=${this.lastSync}`);
+      rlog().info("pull", `Pull done \u2014 applied ${applied}`);
       return applied;
     } catch (e) {
       console.error("Engram Sync: pull failed", e);
       devLog().log("error", `pull failed: ${e instanceof Error ? e.message : e}`);
+      rlog().error("pull", `Pull failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
       this.lastError = e instanceof Error ? `Pull failed: ${e.message}` : "Pull failed";
       return 0;
     } finally {
@@ -973,6 +1098,7 @@ var SyncEngine = class {
       this.lastError = error != null ? error : "Connection failed";
       this.emitStatus();
       devLog().log("error", `fullSync auth failed: ${this.lastError}`);
+      rlog().error("lifecycle", `Auth failed: ${this.lastError}`);
       throw new Error(this.lastError);
     }
     await this.configureRateLimit();
@@ -1109,6 +1235,7 @@ var SyncEngine = class {
     this.offline = true;
     this.lastError = "";
     devLog().log("lifecycle", `went offline \u2014 queue=${this.queue.size}`);
+    rlog().warn("lifecycle", `Went offline \u2014 queue=${this.queue.size}`);
     this.emitStatus();
     this.startHealthCheck();
   }
@@ -1119,6 +1246,7 @@ var SyncEngine = class {
     this.lastError = "";
     this.stopHealthCheck();
     devLog().log("lifecycle", `went online \u2014 flushing queue (${this.queue.size} entries)`);
+    rlog().info("lifecycle", `Went online \u2014 flushing queue (${this.queue.size} entries)`);
     this.emitStatus();
     this.flushQueue().catch((e) => {
       console.error("Engram Sync: queue flush failed", e);
@@ -1276,6 +1404,12 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
           this.plugin.settings.maxFileSizeMB = num;
           await this.plugin.saveSettings();
         }
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Remote logging").setDesc("Send sync errors and lifecycle events to the server for remote debugging. Useful for diagnosing mobile sync issues.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
+        this.plugin.settings.remoteLoggingEnabled = value;
+        await this.plugin.saveSettings();
       })
     );
     const ignoreSetting = new import_obsidian3.Setting(containerEl).setName("Ignore patterns").setDesc("Extra paths to skip (one per line). Folder patterns end with /. Built-in ignores (.obsidian/, .trash/, .git/) are always applied.").addTextArea((text) => {
@@ -1968,12 +2102,19 @@ var SearchModal = class extends import_obsidian6.Modal {
       placeholder: "Search your vault semantically...",
       cls: "engram-search-input"
     });
+    this.folderEl = contentEl.createEl("input", {
+      type: "text",
+      placeholder: "Filter by folder...",
+      cls: "engram-search-input engram-search-folder-input"
+    });
     this.resultsEl = contentEl.createDiv({ cls: "engram-search-results" });
     this.renderEmpty();
-    this.inputEl.addEventListener("input", () => {
+    const scheduleSearch = () => {
       if (this.debounceTimer) clearTimeout(this.debounceTimer);
       this.debounceTimer = setTimeout(() => this.doSearch(), 300);
-    });
+    };
+    this.inputEl.addEventListener("input", scheduleSearch);
+    this.folderEl.addEventListener("input", scheduleSearch);
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2060,7 +2201,8 @@ var SearchModal = class extends import_obsidian6.Modal {
       return;
     }
     try {
-      const resp = await this.api.search(query, 10);
+      const folder = this.folderEl.value.trim() || void 0;
+      const resp = await this.api.search(query, 10, void 0, folder);
       this.results = resp.results;
       this.selectedIndex = this.results.length > 0 ? 0 : -1;
       this.renderResults();
@@ -2104,13 +2246,20 @@ var SearchView = class extends import_obsidian7.ItemView {
       placeholder: "Search your vault semantically...",
       cls: "engram-search-input"
     });
+    this.folderEl = container.createEl("input", {
+      type: "text",
+      placeholder: "Filter by folder...",
+      cls: "engram-search-input engram-search-folder-input"
+    });
     this.resultsEl = container.createDiv({ cls: "engram-search-results" });
     this.previewEl = container.createDiv({ cls: "engram-search-preview" });
     this.renderEmpty();
-    this.inputEl.addEventListener("input", () => {
+    const scheduleSearch = () => {
       if (this.debounceTimer) clearTimeout(this.debounceTimer);
       this.debounceTimer = setTimeout(() => this.doSearch(), 300);
-    });
+    };
+    this.inputEl.addEventListener("input", scheduleSearch);
+    this.folderEl.addEventListener("input", scheduleSearch);
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2227,7 +2376,8 @@ var SearchView = class extends import_obsidian7.ItemView {
       return;
     }
     try {
-      const resp = await this.api.search(query, 10);
+      const folder = this.folderEl.value.trim() || void 0;
+      const resp = await this.api.search(query, 10, void 0, folder);
       this.results = resp.results;
       this.selectedIndex = this.results.length > 0 ? 0 : -1;
       this.renderResults();
@@ -2261,6 +2411,13 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     devLog().log("lifecycle", "plugin loading");
     await this.loadSettings();
     this.api = new EngramApi(this.settings.apiUrl, this.settings.apiKey);
+    const remoteLogger = initRemoteLog();
+    remoteLogger.configure(
+      (entries) => this.api.pushLogs(entries),
+      this.manifest.version,
+      import_obsidian8.Platform.isMobile ? "mobile" : "desktop"
+    );
+    remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
     this.syncEngine = new SyncEngine(
       this.app,
       this.api,
@@ -2408,6 +2565,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
           new import_obsidian8.Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
         }).catch((e) => {
           console.error("Engram Sync: manual sync failed", e);
+          rlog().error("lifecycle", `Manual sync failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
           new import_obsidian8.Notice("Engram Sync: sync failed");
         });
       }
@@ -2433,6 +2591,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
+    destroyRemoteLog();
     destroyDevLog();
   }
   async loadSettings() {
@@ -2446,12 +2605,14 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
   async saveSettings() {
     this.api.updateConfig(this.settings.apiUrl, this.settings.apiKey);
     this.syncEngine.updateSettings(this.settings);
+    rlog().setEnabled(this.settings.remoteLoggingEnabled);
     this.startSyncInterval();
     this.setupNoteStream();
     await this.savePluginData(this.syncEngine.getLastSync());
     if (this.settings.apiUrl && this.settings.apiKey) {
       this.doSyncWithFirstSyncCheck().catch((e) => {
         console.error("Engram Sync: sync after settings change failed", e);
+        rlog().error("lifecycle", `Sync after settings change failed: ${e instanceof Error ? e.message : e}`);
       });
     }
   }
@@ -2482,6 +2643,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       if (connected) {
         this.syncEngine.pull().catch((e) => {
           console.error("Engram Sync: catch-up pull failed", e);
+          rlog().error("sse", `Catch-up pull on SSE reconnect failed: ${e instanceof Error ? e.message : e}`);
         });
       }
     };

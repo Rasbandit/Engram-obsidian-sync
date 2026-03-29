@@ -104,6 +104,18 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Remote logging")
+			.setDesc("Send sync errors and lifecycle events to the server for remote debugging. Useful for diagnosing mobile sync issues.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.remoteLoggingEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.remoteLoggingEnabled = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
 		const ignoreSetting = new Setting(containerEl)
 			.setName("Ignore patterns")
 			.setDesc("Extra paths to skip (one per line). Folder patterns end with /. Built-in ignores (.obsidian/, .trash/, .git/) are always applied.")

@@ -16,6 +16,8 @@ export interface EngramSyncSettings {
 	maxFileSizeMB: number;
 	/** Preferred conflict diff view: unified or side-by-side */
 	conflictViewMode: "unified" | "side-by-side";
+	/** Send errors and sync lifecycle events to the server for remote debugging */
+	remoteLoggingEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: EngramSyncSettings = {
 	liveSyncEnabled: false,
 	maxFileSizeMB: 5,
 	conflictViewMode: "unified",
+	remoteLoggingEnabled: false,
 };
 
 /** A note as returned by POST /notes */
@@ -100,6 +103,7 @@ export interface SearchRequest {
 	query: string;
 	limit?: number;
 	tags?: string[];
+	folder?: string;
 }
 
 /** A single search result from Engram. */
