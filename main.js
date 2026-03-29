@@ -1022,6 +1022,11 @@ var SyncEngine = class {
       if (!forceOverwrite && localModified && localContent !== change.content) {
         const localMtime = existing.stat.mtime / 1e3;
         devLog().log("pull", `conflict: ${change.path} (localHash=${localHash} syncedHash=${lastSyncedHash})`);
+        const firstSync = lastSyncedHash === void 0;
+        rlog().warn(
+          "conflict",
+          `Detected: ${change.path} | firstSync=${firstSync} | localHash=${localHash} | syncedHash=${lastSyncedHash != null ? lastSyncedHash : "none"} | localMtime=${new Date(localMtime * 1e3).toISOString()} | remoteMtime=${new Date(change.mtime * 1e3).toISOString()} | localLen=${localContent.length} | remoteLen=${change.content.length}`
+        );
         const resolution = await this.resolveConflict({
           path: change.path,
           localContent,
@@ -1030,24 +1035,56 @@ var SyncEngine = class {
           remoteMtime: change.mtime
         });
         if (resolution.choice === "skip") {
+          rlog().info("conflict", `Resolved: ${change.path} \u2192 skip`);
           return false;
         } else if (resolution.choice === "keep-local") {
-          await this.pushFile(existing);
-          this.syncedHashes.set(normalized, localHash);
+          try {
+            await this.pushFile(existing);
+            this.syncedHashes.set(normalized, localHash);
+            rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-local | pushOk=true`);
+          } catch (e) {
+            rlog().error(
+              "conflict",
+              `Resolved: ${change.path} \u2192 keep-local | pushOk=false | err=${e instanceof Error ? e.message : e}`,
+              e instanceof Error ? e.stack : void 0
+            );
+          }
           return false;
         } else if (resolution.choice === "keep-both") {
           const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
           const baseName = normalized.replace(/\.md$/, "");
           const conflictPath = `${baseName} (conflict ${date}).md`;
-          await this.createFileWithFolders(conflictPath, change.content);
-          this.syncedHashes.set((0, import_obsidian2.normalizePath)(conflictPath), fnv1a(change.content));
+          try {
+            await this.createFileWithFolders(conflictPath, change.content);
+            this.syncedHashes.set((0, import_obsidian2.normalizePath)(conflictPath), fnv1a(change.content));
+            rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-both | copyPath=${conflictPath}`);
+          } catch (e) {
+            rlog().error(
+              "conflict",
+              `Resolved: ${change.path} \u2192 keep-both | copyFailed=true | err=${e instanceof Error ? e.message : e}`,
+              e instanceof Error ? e.stack : void 0
+            );
+          }
           return true;
         } else if (resolution.choice === "merge" && resolution.mergedContent != null) {
-          await this.app.vault.modify(existing, resolution.mergedContent);
-          this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
-          await this.pushFile(existing);
+          try {
+            await this.app.vault.modify(existing, resolution.mergedContent);
+            this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
+            await this.pushFile(existing);
+            rlog().info(
+              "conflict",
+              `Resolved: ${change.path} \u2192 merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`
+            );
+          } catch (e) {
+            rlog().error(
+              "conflict",
+              `Resolved: ${change.path} \u2192 merge | pushOk=false | err=${e instanceof Error ? e.message : e}`,
+              e instanceof Error ? e.stack : void 0
+            );
+          }
           return true;
         }
+        rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-remote`);
       } else if (localContent === change.content) {
         this.syncedHashes.set(normalized, localHash);
         return false;
@@ -1095,6 +1132,7 @@ var SyncEngine = class {
     if (this.onConflict) {
       return this.onConflict(info);
     }
+    rlog().warn("conflict", `Auto-resolved: ${info.path} \u2192 keep-remote (no handler) | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}`);
     return { choice: "keep-remote" };
   }
   /** Create a text file, ensuring parent folders exist. */

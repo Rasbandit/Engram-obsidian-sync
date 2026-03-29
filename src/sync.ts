@@ -714,6 +714,14 @@ export class SyncEngine {
 				const localMtime = existing.stat.mtime / 1000;
 
 				devLog().log("pull", `conflict: ${change.path} (localHash=${localHash} syncedHash=${lastSyncedHash})`);
+				const firstSync = lastSyncedHash === undefined;
+				rlog().warn("conflict",
+					`Detected: ${change.path} | firstSync=${firstSync}` +
+					` | localHash=${localHash} | syncedHash=${lastSyncedHash ?? "none"}` +
+					` | localMtime=${new Date(localMtime * 1000).toISOString()}` +
+					` | remoteMtime=${new Date(change.mtime * 1000).toISOString()}` +
+					` | localLen=${localContent.length} | remoteLen=${change.content.length}`,
+				);
 				const resolution = await this.resolveConflict({
 					path: change.path,
 					localContent,
@@ -723,28 +731,56 @@ export class SyncEngine {
 				});
 
 				if (resolution.choice === "skip") {
+					rlog().info("conflict", `Resolved: ${change.path} → skip`);
 					return false;
 				} else if (resolution.choice === "keep-local") {
 					// Push local version to server
-					await this.pushFile(existing);
-					this.syncedHashes.set(normalized, localHash);
+					try {
+						await this.pushFile(existing);
+						this.syncedHashes.set(normalized, localHash);
+						rlog().info("conflict", `Resolved: ${change.path} → keep-local | pushOk=true`);
+					} catch (e) {
+						rlog().error("conflict",
+							`Resolved: ${change.path} → keep-local | pushOk=false | err=${e instanceof Error ? e.message : e}`,
+							e instanceof Error ? e.stack : undefined,
+						);
+					}
 					return false;
 				} else if (resolution.choice === "keep-both") {
 					// Save remote as a conflict copy, keep local as-is
 					const date = new Date().toISOString().slice(0, 10);
 					const baseName = normalized.replace(/\.md$/, "");
 					const conflictPath = `${baseName} (conflict ${date}).md`;
-					await this.createFileWithFolders(conflictPath, change.content);
-					this.syncedHashes.set(normalizePath(conflictPath), fnv1a(change.content));
+					try {
+						await this.createFileWithFolders(conflictPath, change.content);
+						this.syncedHashes.set(normalizePath(conflictPath), fnv1a(change.content));
+						rlog().info("conflict", `Resolved: ${change.path} → keep-both | copyPath=${conflictPath}`);
+					} catch (e) {
+						rlog().error("conflict",
+							`Resolved: ${change.path} → keep-both | copyFailed=true | err=${e instanceof Error ? e.message : e}`,
+							e instanceof Error ? e.stack : undefined,
+						);
+					}
 					return true;
 				} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
 					// Apply user-merged content locally and push to server
-					await this.app.vault.modify(existing, resolution.mergedContent);
-					this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
-					await this.pushFile(existing);
+					try {
+						await this.app.vault.modify(existing, resolution.mergedContent);
+						this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
+						await this.pushFile(existing);
+						rlog().info("conflict",
+							`Resolved: ${change.path} → merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`,
+						);
+					} catch (e) {
+						rlog().error("conflict",
+							`Resolved: ${change.path} → merge | pushOk=false | err=${e instanceof Error ? e.message : e}`,
+							e instanceof Error ? e.stack : undefined,
+						);
+					}
 					return true;
 				}
 				// "keep-remote" falls through to overwrite below
+				rlog().info("conflict", `Resolved: ${change.path} → keep-remote`);
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
 				this.syncedHashes.set(normalized, localHash);
@@ -808,6 +844,7 @@ export class SyncEngine {
 			return this.onConflict(info);
 		}
 		// No handler — default to keep-remote (legacy behavior)
+		rlog().warn("conflict", `Auto-resolved: ${info.path} → keep-remote (no handler) | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}`);
 		return { choice: "keep-remote" };
 	}
 
