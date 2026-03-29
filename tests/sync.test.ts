@@ -637,6 +637,109 @@ describe("SyncEngine.getStatus + onStatusChange", () => {
 		expect(status.error).toBe("Pull failed: network error");
 	});
 
+	test("pull skips files that fail to apply and continues", async () => {
+		// Simulate a file with illegal characters (like ? on mobile)
+		// by making vault.create throw for one specific path
+		const goodChange = {
+			path: "Notes/Good.md",
+			title: "Good",
+			content: "# Good\nThis should work",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345678,
+			updated_at: "2026-03-01T12:00:00Z",
+			deleted: false,
+		};
+		const badChange = {
+			path: "Notes/Bad?.md",
+			title: "Bad",
+			content: "# Bad\nIllegal filename chars",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345679,
+			updated_at: "2026-03-01T12:01:00Z",
+			deleted: false,
+		};
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [badChange, goodChange],
+			server_time: "2026-03-01T12:02:00Z",
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [],
+			server_time: "2026-03-01T12:02:00Z",
+		});
+
+		// vault.create throws on the bad file, succeeds on the good one
+		(mockApp.vault.create as jest.Mock).mockImplementation(async (path: string) => {
+			if (path.includes("?")) {
+				throw new Error('File name cannot contain any of the following characters: \\ / : * ? < > "');
+			}
+			return undefined;
+		});
+
+		const engine = createEngine();
+		engine.setLastSync("2026-01-01T00:00:00Z");
+
+		const applied = await engine.pull();
+
+		// Should have applied the good file (1), skipped the bad one
+		expect(applied).toBe(1);
+		// vault.create should have been called for both (bad one throws)
+		expect(mockApp.vault.create).toHaveBeenCalledTimes(2);
+		// lastSync should still be updated (pull succeeded overall)
+		expect(engine.getLastSync()).toBe("2026-03-01T12:02:00Z");
+		// Status should NOT be error — individual file failures don't fail the pull
+		expect(engine.getStatus().state).not.toBe("error");
+	});
+
+	test("pullAll skips files that fail to apply and continues", async () => {
+		const goodChange = {
+			path: "Notes/PullAllGood.md",
+			title: "Good",
+			content: "# Good\nWorks fine",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345678,
+			updated_at: "2026-03-01T12:00:00Z",
+			deleted: false,
+		};
+		const badChange = {
+			path: "Notes/Has:Colon.md",
+			title: "Bad",
+			content: "# Bad\nIllegal colon in name",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345679,
+			updated_at: "2026-03-01T12:01:00Z",
+			deleted: false,
+		};
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [badChange, goodChange],
+			server_time: "2026-03-01T12:02:00Z",
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+			changes: [],
+			server_time: "2026-03-01T12:02:00Z",
+		});
+
+		(mockApp.vault.create as jest.Mock).mockImplementation(async (path: string) => {
+			if (path.includes(":")) {
+				throw new Error('File name cannot contain any of the following characters: \\ / : * ? < > "');
+			}
+			return undefined;
+		});
+
+		const engine = createEngine();
+		engine.setLastSync("2026-01-01T00:00:00Z");
+
+		const applied = await engine.pullAll();
+
+		expect(applied).toBe(1);
+		expect(engine.getLastSync()).toBe("2026-03-01T12:02:00Z");
+	});
+
 	test("status shows offline after failed push (change queued for retry)", async () => {
 		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("500"));
 

@@ -480,13 +480,30 @@ export class SyncEngine {
 			]);
 			devLog().log("pull", `fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
 			let applied = 0;
+			let skipped = 0;
 
 			for (const change of noteResp.changes) {
-				if (await this.applyChange(change)) applied++;
+				try {
+					if (await this.applyChange(change)) applied++;
+				} catch (e) {
+					skipped++;
+					const msg = e instanceof Error ? e.message : String(e);
+					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
+					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
+					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`, e instanceof Error ? e.stack : undefined);
+				}
 			}
 
 			for (const change of attachResp.changes) {
-				if (await this.applyAttachmentChange(change)) applied++;
+				try {
+					if (await this.applyAttachmentChange(change)) applied++;
+				} catch (e) {
+					skipped++;
+					const msg = e instanceof Error ? e.message : String(e);
+					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
+					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
+					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`, e instanceof Error ? e.stack : undefined);
+				}
 			}
 
 			// Use the later server_time
@@ -495,8 +512,8 @@ export class SyncEngine {
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
-			devLog().log("pull", `done — applied ${applied}, lastSync=${this.lastSync}`);
-			rlog().info("pull", `Pull done — applied ${applied}`);
+			devLog().log("pull", `done — applied ${applied}, skipped ${skipped}, lastSync=${this.lastSync}`);
+			rlog().info("pull", `Pull done — applied ${applied}, skipped ${skipped}`);
 			return applied;
 		} catch (e) {
 			console.error("Engram Sync: pull failed", e);
@@ -543,13 +560,28 @@ export class SyncEngine {
 			]);
 			devLog().log("pull", `pullAll: fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
 			let applied = 0;
+			let skipped = 0;
 
 			for (const change of noteResp.changes) {
-				if (await this.applyChange(change, true)) applied++;
+				try {
+					if (await this.applyChange(change, true)) applied++;
+				} catch (e) {
+					skipped++;
+					const msg = e instanceof Error ? e.message : String(e);
+					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
+					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
+				}
 			}
 
 			for (const change of attachResp.changes) {
-				if (await this.applyAttachmentChange(change)) applied++;
+				try {
+					if (await this.applyAttachmentChange(change)) applied++;
+				} catch (e) {
+					skipped++;
+					const msg = e instanceof Error ? e.message : String(e);
+					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
+					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
+				}
 			}
 
 			// Update lastSync to server time
