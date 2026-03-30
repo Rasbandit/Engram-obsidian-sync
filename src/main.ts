@@ -119,6 +119,7 @@ export default class EngramSyncPlugin extends Plugin {
 		this.registerDomEvent(document, "visibilitychange", () => {
 			if (document.visibilityState === "hidden") {
 				rlog().flush();
+				this.savePluginData(this.syncEngine.getLastSync());
 			}
 		});
 
@@ -260,6 +261,8 @@ export default class EngramSyncPlugin extends Plugin {
 	onunload(): void {
 		devLog().log("lifecycle", "plugin unloading");
 		rlog().info("lifecycle", "Plugin unloading");
+		// Best-effort save before teardown — hashes must be exported before destroy
+		this.savePluginData(this.syncEngine.getLastSync());
 		this.syncEngine?.destroy();
 		this.noteStream?.disconnect();
 		if (this.syncInterval) {
