@@ -352,22 +352,24 @@ var RemoteLogger = class {
   info(category, message) {
     this.addEntry("info", category, message);
   }
-  flush() {
+  async flush() {
     if (this.flushing || this.buffer.length === 0 || !this.pushFn) return;
     const batch = this.buffer.splice(0, this.buffer.length);
     this.flushing = true;
-    this.pushFn(batch).catch(() => {
+    try {
+      await this.pushFn(batch);
+    } catch (e) {
       const space = MAX_BUFFER - this.buffer.length;
       if (space > 0) {
         this.buffer.unshift(...batch.slice(0, space));
       }
-    }).finally(() => {
+    } finally {
       this.flushing = false;
-    });
+    }
   }
-  destroy() {
+  async destroy() {
     this.stopTimer();
-    this.flush();
+    await this.flush();
     this.buffer = [];
     this.pushFn = null;
   }
@@ -408,9 +410,9 @@ var _noop = {
   },
   info() {
   },
-  flush() {
+  async flush() {
   },
-  destroy() {
+  async destroy() {
   },
   setEnabled() {
   },
@@ -425,8 +427,8 @@ function initRemoteLog() {
 function rlog() {
   return _instance != null ? _instance : _noop;
 }
-function destroyRemoteLog() {
-  _instance == null ? void 0 : _instance.destroy();
+async function destroyRemoteLog() {
+  await (_instance == null ? void 0 : _instance.destroy());
   _instance = null;
 }
 
@@ -531,12 +533,23 @@ var SyncEngine = class {
   setReady() {
     this.ready = true;
     devLog().log("lifecycle", "setReady \u2014 event handlers enabled");
+    rlog().info("lifecycle", "Engine ready \u2014 event handlers enabled");
   }
   setLastSync(timestamp) {
     this.lastSync = timestamp;
   }
   getLastSync() {
     return this.lastSync;
+  }
+  /** Export synced hashes for persistence across sessions. */
+  exportHashes() {
+    return Object.fromEntries(this.syncedHashes);
+  }
+  /** Import previously persisted synced hashes. */
+  importHashes(data) {
+    for (const [path, hash] of Object.entries(data)) {
+      this.syncedHashes.set(path, hash);
+    }
   }
   /** Get current sync status snapshot. */
   getStatus() {
@@ -712,13 +725,16 @@ var SyncEngine = class {
       if (serverRPM > 0) {
         this.rateLimitRPM = Math.floor(serverRPM * 0.9);
         devLog().log("pacer", `server limit=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`);
+        rlog().info("pacer", `Rate limit: server=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`);
       } else {
         this.rateLimitRPM = 0;
         devLog().log("pacer", "server reports unlimited \u2014 pacer disabled");
+        rlog().info("pacer", "Server reports unlimited \u2014 pacer disabled");
       }
     } catch (e) {
       this.rateLimitRPM = 0;
       devLog().log("pacer", "failed to query rate limit \u2014 assuming unlimited");
+      rlog().warn("pacer", "Failed to query rate limit \u2014 assuming unlimited");
     }
   }
   /** Wait if needed to stay within the server's rate limit. */
@@ -735,6 +751,7 @@ var SyncEngine = class {
     const oldest = this.requestTimestamps[0];
     const waitMs = oldest + windowMs - now + 50;
     devLog().log("pacer", `at capacity (${this.requestTimestamps.length}/${this.rateLimitRPM}), waiting ${waitMs}ms`);
+    rlog().info("pacer", `Throttled: ${this.requestTimestamps.length}/${this.rateLimitRPM} RPM, waiting ${waitMs}ms`);
     await new Promise((resolve) => setTimeout(resolve, waitMs));
     this.requestTimestamps = this.requestTimestamps.filter((t) => t > Date.now() - windowMs);
     this.requestTimestamps.push(Date.now());
@@ -750,6 +767,7 @@ var SyncEngine = class {
     const isBinary = this.isBinaryFile(file);
     let success = false;
     devLog().log("push", `start ${isBinary ? "attachment" : "note"}: ${file.path} (active=${this.activePushCount})`);
+    rlog().info("push", `Push start: ${file.path} | type=${isBinary ? "attachment" : "note"} | active=${this.activePushCount}`);
     try {
       await this.paceRequest();
       const mtime = file.stat.mtime / 1e3;
@@ -770,6 +788,7 @@ var SyncEngine = class {
         const syncedHash = this.syncedHashes.get((0, import_obsidian2.normalizePath)(file.path));
         if (!force && syncedHash !== void 0 && hash === syncedHash) {
           devLog().log("push", `skip (echo): ${file.path}`);
+          rlog().info("push", `Echo skip: ${file.path} | hash=${hash}`);
           return false;
         }
         const resp = await this.api.pushNote(file.path, content, mtime);
@@ -790,6 +809,7 @@ var SyncEngine = class {
       }
       success = true;
       devLog().log("push", `ok: ${file.path}`);
+      rlog().info("push", `Push ok: ${file.path} | type=${isBinary ? "attachment" : "note"}`);
       this.goOnline();
     } catch (e) {
       console.error(`Engram Sync: failed to push ${file.path}`, e);
@@ -841,6 +861,7 @@ var SyncEngine = class {
         this.api.getAttachmentChanges(this.lastSync)
       ]);
       devLog().log("pull", `fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+      rlog().info("pull", `Fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
       let applied = 0;
       let skipped = 0;
       for (const change of noteResp.changes) {
@@ -890,6 +911,7 @@ var SyncEngine = class {
     const paths = [...this.pendingPostPullPushes];
     this.pendingPostPullPushes.clear();
     devLog().log("push", `flushing ${paths.length} post-pull pushes`);
+    rlog().info("push", `Post-pull flush: ${paths.length} files`);
     for (const path of paths) {
       const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof import_obsidian2.TFile) {
@@ -905,6 +927,7 @@ var SyncEngine = class {
     this.lastError = "";
     this.emitStatus();
     devLog().log("pull", "pullAll: fetching everything from server");
+    rlog().info("pull", "PullAll started \u2014 fetching everything from epoch");
     try {
       const epoch = "1970-01-01T00:00:00Z";
       const [noteResp, attachResp] = await Promise.all([
@@ -912,6 +935,7 @@ var SyncEngine = class {
         this.api.getAttachmentChanges(epoch)
       ]);
       devLog().log("pull", `pullAll: fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+      rlog().info("pull", `PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
       let applied = 0;
       let skipped = 0;
       for (const change of noteResp.changes) {
@@ -938,10 +962,12 @@ var SyncEngine = class {
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
       devLog().log("pull", `pullAll: done \u2014 applied ${applied}, lastSync=${this.lastSync}`);
+      rlog().info("pull", `PullAll done \u2014 applied ${applied}, skipped ${skipped}`);
       return applied;
     } catch (e) {
       console.error("Engram Sync: pullAll failed", e);
       devLog().log("error", `pullAll failed: ${e instanceof Error ? e.message : e}`);
+      rlog().error("pull", `PullAll failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
       this.lastError = e instanceof Error ? `Pull all failed: ${e.message}` : "Pull all failed";
       return 0;
     } finally {
@@ -952,11 +978,18 @@ var SyncEngine = class {
   }
   /** Handle an SSE stream event (upsert or delete). */
   async handleStreamEvent(event) {
-    var _a;
+    var _a, _b;
     if (this.shouldIgnore(event.path)) return;
     devLog().log("sse", `${event.event_type} ${(_a = event.kind) != null ? _a : "note"}: ${event.path}`);
-    if (this.pushing.has(event.path)) return;
-    if (this.recentlyPushed.has(event.path)) return;
+    rlog().info("sse", `Event: ${event.event_type} ${(_b = event.kind) != null ? _b : "note"}: ${event.path}`);
+    if (this.pushing.has(event.path)) {
+      rlog().info("sse", `Echo skip (pushing): ${event.path}`);
+      return;
+    }
+    if (this.recentlyPushed.has(event.path)) {
+      rlog().info("sse", `Echo skip (recently pushed): ${event.path}`);
+      return;
+    }
     const isAttachment = event.kind === "attachment";
     if (event.event_type === "delete") {
       const normalized = (0, import_obsidian2.normalizePath)(event.path);
@@ -1009,6 +1042,7 @@ var SyncEngine = class {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
         this.syncedHashes.delete(normalized);
+        rlog().info("pull", `Deleted: ${change.path}`);
         return true;
       }
       return false;
@@ -1087,14 +1121,17 @@ var SyncEngine = class {
         rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-remote`);
       } else if (localContent === change.content) {
         this.syncedHashes.set(normalized, localHash);
+        rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
       await this.app.vault.modify(existing, change.content);
       this.syncedHashes.set(normalized, fnv1a(change.content));
+      rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
       return true;
     } else {
       await this.createFileWithFolders(normalized, change.content);
       this.syncedHashes.set(normalized, fnv1a(change.content));
+      rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
       return true;
     }
   }
@@ -1109,6 +1146,7 @@ var SyncEngine = class {
       if (existing2 && existing2 instanceof import_obsidian2.TFile) {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
+        rlog().info("pull", `Attachment deleted: ${change.path}`);
         return true;
       }
       return false;
@@ -1121,9 +1159,11 @@ var SyncEngine = class {
     const existing = this.app.vault.getAbstractFileByPath(normalized);
     if (existing && existing instanceof import_obsidian2.TFile) {
       await this.app.vault.modifyBinary(existing, buffer);
+      rlog().info("pull", `Attachment applied: ${change.path} | bytes=${buffer.byteLength}`);
       return true;
     } else {
       await this.createBinaryFileWithFolders(normalized, buffer);
+      rlog().info("pull", `Attachment created: ${change.path} | bytes=${buffer.byteLength}`);
       return true;
     }
   }
@@ -1176,6 +1216,7 @@ var SyncEngine = class {
   /** Full bidirectional sync: pull remote changes, then push local changes. */
   async fullSync() {
     devLog().log("lifecycle", "fullSync start");
+    rlog().info("lifecycle", "FullSync started");
     const { ok, error } = await this.api.ping();
     if (!ok) {
       this.lastError = error != null ? error : "Connection failed";
@@ -1189,6 +1230,7 @@ var SyncEngine = class {
     const pulled = await this.pull();
     const pushed = await this.pushModifiedFiles(prePullSync);
     devLog().log("lifecycle", `fullSync done \u2014 pulled=${pulled} pushed=${pushed}`);
+    rlog().info("lifecycle", `FullSync done \u2014 pulled=${pulled} pushed=${pushed}`);
     return { pulled, pushed };
   }
   /** Push all files that have been modified since last sync. */
@@ -1202,6 +1244,7 @@ var SyncEngine = class {
       (f) => this.isSyncable(f) && !this.shouldIgnore(f.path) && f.stat.mtime > sinceMs
     );
     devLog().log("push", `pushModifiedFiles: ${toSync.length} files modified since ${since}`);
+    rlog().info("push", `PushModified: ${toSync.length} files modified since ${since}`);
     for (let i = 0; i < toSync.length; i += 10) {
       const batch = toSync.slice(i, i + 10);
       const results = await Promise.all(batch.map((f) => this.pushFile(f)));
@@ -1244,6 +1287,7 @@ var SyncEngine = class {
     if (skipped > 0) {
       const skippedPaths = toSync.filter((f) => !this.pushing.has(f.path)).map((f) => f.path);
       devLog().log("push", `pushAll skipped ${skipped} files: ${skippedPaths.join(", ")}`);
+      rlog().warn("push", `PushAll skipped ${skipped} files`);
       new import_obsidian2.Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files (${skipped} skipped)`);
     } else {
       new import_obsidian2.Notice(`Engram Sync: push complete (${pushed} files)`);
@@ -1254,6 +1298,7 @@ var SyncEngine = class {
       const toFix = [...missing, ...diverged];
       if (toFix.length > 0) {
         devLog().log("reconcile", `fixing ${toFix.length} files after pushAll`);
+        rlog().warn("reconcile", `Fixing ${toFix.length} files after pushAll (${missing.length} missing, ${diverged.length} diverged)`);
         for (const path of toFix) {
           const file = this.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(path));
           if (file instanceof import_obsidian2.TFile) {
@@ -1277,9 +1322,11 @@ var SyncEngine = class {
    *  Returns null if server doesn't support the manifest endpoint. */
   async reconcile() {
     devLog().log("reconcile", "start");
+    rlog().info("reconcile", "Reconcile started");
     const manifest = await this.api.getManifest();
     if (!manifest) {
       devLog().log("reconcile", "server does not support manifest \u2014 skipping");
+      rlog().info("reconcile", "Server does not support manifest \u2014 skipping");
       return null;
     }
     const serverNotes = new Map(manifest.notes.map((n) => [n.path, n.content_hash]));
@@ -1304,6 +1351,7 @@ var SyncEngine = class {
     }
     const extraOnServer = [...serverNotes.keys()];
     devLog().log("reconcile", `done \u2014 missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
+    rlog().info("reconcile", `Reconcile done \u2014 missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
     return { missing, diverged, extraOnServer };
   }
   // --- Offline queue ---
@@ -1360,6 +1408,7 @@ var SyncEngine = class {
     const entries = this.queue.all();
     if (entries.length === 0) return 0;
     devLog().log("queue", `flush start \u2014 ${entries.length} entries`);
+    rlog().info("queue", `Queue flush start \u2014 ${entries.length} entries`);
     let flushed = 0;
     for (const entry of entries) {
       try {
@@ -1414,6 +1463,7 @@ var SyncEngine = class {
       }
     }
     devLog().log("queue", `flush done \u2014 ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
+    rlog().info("queue", `Queue flush done \u2014 ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
     this.emitStatus();
     return flushed;
   }
@@ -1585,6 +1635,7 @@ var NoteStream = class {
       this.controller = null;
     }
     this.setConnected(false);
+    rlog().info("sse", "SSE disconnected");
   }
   isConnected() {
     return this.connected;
@@ -1616,6 +1667,7 @@ var NoteStream = class {
       let currentData = "";
       this.setConnected(true);
       this.reconnectMs = 1e3;
+      rlog().info("sse", "SSE connected");
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1646,6 +1698,7 @@ var NoteStream = class {
         return;
       }
       console.error("Engram SSE: stream error", e);
+      rlog().error("sse", `SSE stream error: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
     } finally {
       this.setConnected(false);
     }
@@ -1653,6 +1706,7 @@ var NoteStream = class {
       const jitter = Math.random() * this.reconnectMs * 0.5;
       const delay = this.reconnectMs + jitter;
       console.log(`Engram SSE: reconnecting in ${Math.round(delay)}ms`);
+      rlog().info("sse", `SSE reconnecting in ${Math.round(delay)}ms`);
       this.controller = null;
       setTimeout(() => {
         this.reconnectMs = Math.min(this.reconnectMs * 2, this.maxReconnectMs);
@@ -2501,6 +2555,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       import_obsidian8.Platform.isMobile ? "mobile" : "desktop"
     );
     remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
+    rlog().info("lifecycle", `Plugin loading | v${this.manifest.version} | ${import_obsidian8.Platform.isMobile ? "mobile" : "desktop"}`);
     this.syncEngine = new SyncEngine(
       this.app,
       this.api,
@@ -2529,6 +2584,9 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     if ((_a = saved == null ? void 0 : saved.offlineQueue) == null ? void 0 : _a.length) {
       this.syncEngine.queue.load(saved.offlineQueue);
     }
+    if (saved == null ? void 0 : saved.syncedHashes) {
+      this.syncEngine.importHashes(saved.syncedHashes);
+    }
     this.addSettingTab(new EngramSyncSettingTab(this.app, this));
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
@@ -2550,6 +2608,11 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
         this.syncEngine.handleRename(file, oldPath);
       })
     );
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        rlog().flush();
+      }
+    });
     this.addCommand({
       id: "engram-sync-now",
       name: "Sync now",
@@ -2656,6 +2719,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     this.setupNoteStream();
     this.app.workspace.onLayoutReady(async () => {
       devLog().log("lifecycle", "layout ready \u2014 starting initial sync");
+      rlog().info("lifecycle", "Layout ready \u2014 starting initial sync");
       try {
         if (this.settings.apiUrl && this.settings.apiKey) {
           await this.doSyncWithFirstSyncCheck();
@@ -2668,6 +2732,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
   onunload() {
     var _a, _b;
     devLog().log("lifecycle", "plugin unloading");
+    rlog().info("lifecycle", "Plugin unloading");
     (_a = this.syncEngine) == null ? void 0 : _a.destroy();
     (_b = this.noteStream) == null ? void 0 : _b.disconnect();
     if (this.syncInterval) {
@@ -2703,7 +2768,8 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     await this.saveData({
       settings: this.settings,
       lastSync,
-      offlineQueue: offlineQueue != null ? offlineQueue : this.syncEngine.queue.all()
+      offlineQueue: offlineQueue != null ? offlineQueue : this.syncEngine.queue.all(),
+      syncedHashes: this.syncEngine.exportHashes()
     });
   }
   setupNoteStream() {

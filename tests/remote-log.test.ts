@@ -198,29 +198,29 @@ describe("RemoteLogger destroy", () => {
 // ---------------------------------------------------------------------------
 
 describe("remote-log singleton", () => {
-    test("rlog returns noop before init", () => {
-        destroyRemoteLog();
+    test("rlog returns noop before init", async () => {
+        await destroyRemoteLog();
         const logger = rlog();
         // Should not throw
         logger.error("test", "msg");
-        logger.flush();
+        await logger.flush();
     });
 
-    test("initRemoteLog returns a RemoteLogger", () => {
+    test("initRemoteLog returns a RemoteLogger", async () => {
         const logger = initRemoteLog();
         expect(logger).toBeInstanceOf(RemoteLogger);
-        destroyRemoteLog();
+        await destroyRemoteLog();
     });
 
-    test("rlog returns the instance after init", () => {
+    test("rlog returns the instance after init", async () => {
         const logger = initRemoteLog();
         expect(rlog()).toBe(logger);
-        destroyRemoteLog();
+        await destroyRemoteLog();
     });
 
-    test("destroyRemoteLog resets to noop", () => {
+    test("destroyRemoteLog resets to noop", async () => {
         initRemoteLog();
-        destroyRemoteLog();
+        await destroyRemoteLog();
         // Should return noop (not the destroyed instance)
         const logger = rlog();
         expect(logger).not.toBeInstanceOf(RemoteLogger);
