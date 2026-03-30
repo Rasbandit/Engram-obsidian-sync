@@ -1158,6 +1158,13 @@ var SyncEngine = class {
     const buffer = base64ToArrayBuffer(contentBase64);
     const existing = this.app.vault.getAbstractFileByPath(normalized);
     if (existing && existing instanceof import_obsidian2.TFile) {
+      if (existing.stat.size === buffer.byteLength) {
+        const localBuffer = await this.app.vault.readBinary(existing);
+        if (this.arrayBuffersEqual(localBuffer, buffer)) {
+          rlog().info("pull", `Attachment unchanged: ${change.path} | bytes=${buffer.byteLength}`);
+          return false;
+        }
+      }
       await this.app.vault.modifyBinary(existing, buffer);
       rlog().info("pull", `Attachment applied: ${change.path} | bytes=${buffer.byteLength}`);
       return true;
@@ -1229,6 +1236,9 @@ var SyncEngine = class {
     const prePullSync = this.lastSync;
     const pulled = await this.pull();
     const pushed = await this.pushModifiedFiles(prePullSync);
+    if (pushed > 0) {
+      await this.saveData({ lastSync: this.lastSync });
+    }
     devLog().log("lifecycle", `fullSync done \u2014 pulled=${pulled} pushed=${pushed}`);
     rlog().info("lifecycle", `FullSync done \u2014 pulled=${pulled} pushed=${pushed}`);
     return { pulled, pushed };
@@ -1308,6 +1318,7 @@ var SyncEngine = class {
         new import_obsidian2.Notice(`Engram Sync: reconciled ${toFix.length} files`);
       }
     }
+    await this.saveData({ lastSync: this.lastSync });
     return pushed;
   }
   /** Compute MD5 hex hash of a UTF-8 string using Web Crypto API. */
@@ -1466,6 +1477,16 @@ var SyncEngine = class {
     rlog().info("queue", `Queue flush done \u2014 ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
     this.emitStatus();
     return flushed;
+  }
+  /** Fast byte-level comparison of two ArrayBuffers. */
+  arrayBuffersEqual(a, b) {
+    if (a.byteLength !== b.byteLength) return false;
+    const va = new Uint8Array(a);
+    const vb = new Uint8Array(b);
+    for (let i = 0; i < va.length; i++) {
+      if (va[i] !== vb[i]) return false;
+    }
+    return true;
   }
   /** Cancel all pending debounce, cooldown, and health check timers. */
   destroy() {
@@ -2611,6 +2632,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     this.registerDomEvent(document, "visibilitychange", () => {
       if (document.visibilityState === "hidden") {
         rlog().flush();
+        this.savePluginData(this.syncEngine.getLastSync());
       }
     });
     this.addCommand({
@@ -2733,6 +2755,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     var _a, _b;
     devLog().log("lifecycle", "plugin unloading");
     rlog().info("lifecycle", "Plugin unloading");
+    this.savePluginData(this.syncEngine.getLastSync());
     (_a = this.syncEngine) == null ? void 0 : _a.destroy();
     (_b = this.noteStream) == null ? void 0 : _b.disconnect();
     if (this.syncInterval) {

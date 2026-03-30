@@ -865,6 +865,14 @@ export class SyncEngine {
 		const existing = this.app.vault.getAbstractFileByPath(normalized);
 
 		if (existing && existing instanceof TFile) {
+			// Skip if content is identical — prevents modify event and push-back loop
+			if (existing.stat.size === buffer.byteLength) {
+				const localBuffer = await this.app.vault.readBinary(existing);
+				if (this.arrayBuffersEqual(localBuffer, buffer)) {
+					rlog().info("pull", `Attachment unchanged: ${change.path} | bytes=${buffer.byteLength}`);
+					return false;
+				}
+			}
 			await this.app.vault.modifyBinary(existing, buffer);
 			rlog().info("pull", `Attachment applied: ${change.path} | bytes=${buffer.byteLength}`);
 			return true;
@@ -968,6 +976,11 @@ export class SyncEngine {
 		const pulled = await this.pull();
 		const pushed = await this.pushModifiedFiles(prePullSync);
 
+		// Persist syncedHashes updated during push (pull already saved its own)
+		if (pushed > 0) {
+			await this.saveData({ lastSync: this.lastSync });
+		}
+
 		devLog().log("lifecycle", `fullSync done — pulled=${pulled} pushed=${pushed}`);
 		rlog().info("lifecycle", `FullSync done — pulled=${pulled} pushed=${pushed}`);
 		return { pulled, pushed };
@@ -1066,6 +1079,9 @@ export class SyncEngine {
 				new Notice(`Engram Sync: reconciled ${toFix.length} files`);
 			}
 		}
+
+		// Persist all hashes accumulated during pushAll + reconcile
+		await this.saveData({ lastSync: this.lastSync });
 
 		return pushed;
 	}
@@ -1249,6 +1265,17 @@ export class SyncEngine {
 		rlog().info("queue", `Queue flush done — ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
 		this.emitStatus();
 		return flushed;
+	}
+
+	/** Fast byte-level comparison of two ArrayBuffers. */
+	private arrayBuffersEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
+		if (a.byteLength !== b.byteLength) return false;
+		const va = new Uint8Array(a);
+		const vb = new Uint8Array(b);
+		for (let i = 0; i < va.length; i++) {
+			if (va[i] !== vb[i]) return false;
+		}
+		return true;
 	}
 
 	/** Cancel all pending debounce, cooldown, and health check timers. */
