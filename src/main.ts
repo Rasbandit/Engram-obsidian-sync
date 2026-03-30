@@ -23,6 +23,7 @@ interface PluginData {
 	settings: EngramSyncSettings;
 	lastSync: string;
 	offlineQueue?: QueueEntry[];
+	syncedHashes?: Record<string, number>;
 }
 
 export default class EngramSyncPlugin extends Plugin {
@@ -49,6 +50,7 @@ export default class EngramSyncPlugin extends Plugin {
 			Platform.isMobile ? "mobile" : "desktop",
 		);
 		remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
+		rlog().info("lifecycle", `Plugin loading | v${this.manifest.version} | ${Platform.isMobile ? "mobile" : "desktop"}`);
 
 		this.syncEngine = new SyncEngine(
 			this.app,
@@ -76,13 +78,16 @@ export default class EngramSyncPlugin extends Plugin {
 			await this.savePluginData(this.syncEngine.getLastSync(), entries);
 		});
 
-		// Restore last sync timestamp and offline queue
+		// Restore last sync timestamp, offline queue, and synced hashes
 		const saved = await this.loadData();
 		if (saved?.lastSync) {
 			this.syncEngine.setLastSync(saved.lastSync);
 		}
 		if (saved?.offlineQueue?.length) {
 			this.syncEngine.queue.load(saved.offlineQueue);
+		}
+		if (saved?.syncedHashes) {
+			this.syncEngine.importHashes(saved.syncedHashes);
 		}
 
 		// Register settings tab
@@ -109,6 +114,13 @@ export default class EngramSyncPlugin extends Plugin {
 				this.syncEngine.handleRename(file, oldPath);
 			}),
 		);
+
+		// Flush remote logs when app goes to background (mobile)
+		this.registerDomEvent(document, "visibilitychange", () => {
+			if (document.visibilityState === "hidden") {
+				rlog().flush();
+			}
+		});
 
 		// Add commands
 		this.addCommand({
@@ -234,6 +246,7 @@ export default class EngramSyncPlugin extends Plugin {
 		// Initial sync on startup (after workspace is ready)
 		this.app.workspace.onLayoutReady(async () => {
 			devLog().log("lifecycle", "layout ready — starting initial sync");
+			rlog().info("lifecycle", "Layout ready — starting initial sync");
 			try {
 				if (this.settings.apiUrl && this.settings.apiKey) {
 					await this.doSyncWithFirstSyncCheck();
@@ -246,6 +259,7 @@ export default class EngramSyncPlugin extends Plugin {
 
 	onunload(): void {
 		devLog().log("lifecycle", "plugin unloading");
+		rlog().info("lifecycle", "Plugin unloading");
 		this.syncEngine?.destroy();
 		this.noteStream?.disconnect();
 		if (this.syncInterval) {
@@ -287,6 +301,7 @@ export default class EngramSyncPlugin extends Plugin {
 			settings: this.settings,
 			lastSync,
 			offlineQueue: offlineQueue ?? this.syncEngine.queue.all(),
+			syncedHashes: this.syncEngine.exportHashes(),
 		} as PluginData);
 	}
 

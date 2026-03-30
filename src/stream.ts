@@ -5,6 +5,7 @@
  * doesn't support custom Authorization headers. Works in Electron (Obsidian).
  */
 import { NoteStreamEvent } from "./types";
+import { rlog } from "./remote-log";
 
 export class NoteStream {
 	private controller: AbortController | null = null;
@@ -39,6 +40,7 @@ export class NoteStream {
 			this.controller = null;
 		}
 		this.setConnected(false);
+		rlog().info("sse", "SSE disconnected");
 	}
 
 	isConnected(): boolean {
@@ -75,6 +77,7 @@ export class NoteStream {
 
 			this.setConnected(true);
 			this.reconnectMs = 1000;
+			rlog().info("sse", "SSE connected");
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -111,6 +114,7 @@ export class NoteStream {
 				return;
 			}
 			console.error("Engram SSE: stream error", e);
+			rlog().error("sse", `SSE stream error: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
 		} finally {
 			this.setConnected(false);
 		}
@@ -120,6 +124,7 @@ export class NoteStream {
 			const jitter = Math.random() * this.reconnectMs * 0.5;
 			const delay = this.reconnectMs + jitter;
 			console.log(`Engram SSE: reconnecting in ${Math.round(delay)}ms`);
+			rlog().info("sse", `SSE reconnecting in ${Math.round(delay)}ms`);
 
 			this.controller = null;
 			setTimeout(() => {

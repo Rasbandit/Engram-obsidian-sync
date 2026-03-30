@@ -58,28 +58,28 @@ export class RemoteLogger {
 		this.addEntry("info", category, message);
 	}
 
-	flush(): void {
+	async flush(): Promise<void> {
 		if (this.flushing || this.buffer.length === 0 || !this.pushFn) return;
 
 		const batch = this.buffer.splice(0, this.buffer.length);
 		this.flushing = true;
 
-		this.pushFn(batch)
-			.catch(() => {
-				// Put entries back (up to MAX_BUFFER)
-				const space = MAX_BUFFER - this.buffer.length;
-				if (space > 0) {
-					this.buffer.unshift(...batch.slice(0, space));
-				}
-			})
-			.finally(() => {
-				this.flushing = false;
-			});
+		try {
+			await this.pushFn(batch);
+		} catch {
+			// Put entries back (up to MAX_BUFFER)
+			const space = MAX_BUFFER - this.buffer.length;
+			if (space > 0) {
+				this.buffer.unshift(...batch.slice(0, space));
+			}
+		} finally {
+			this.flushing = false;
+		}
 	}
 
-	destroy(): void {
+	async destroy(): Promise<void> {
 		this.stopTimer();
-		this.flush();
+		await this.flush();
 		this.buffer = [];
 		this.pushFn = null;
 	}
@@ -127,8 +127,8 @@ interface NoopLogger {
 	error(category: string, message: string, stack?: string): void;
 	warn(category: string, message: string): void;
 	info(category: string, message: string): void;
-	flush(): void;
-	destroy(): void;
+	flush(): Promise<void>;
+	destroy(): Promise<void>;
 	setEnabled(enabled: boolean): void;
 	configure(pushFn: PushFn, pluginVersion: string, platform: string): void;
 }
@@ -137,8 +137,8 @@ const _noop: NoopLogger = {
 	error() {},
 	warn() {},
 	info() {},
-	flush() {},
-	destroy() {},
+	async flush() {},
+	async destroy() {},
 	setEnabled() {},
 	configure() {},
 };
@@ -154,7 +154,7 @@ export function rlog(): RemoteLogger | NoopLogger {
 	return _instance ?? _noop;
 }
 
-export function destroyRemoteLog(): void {
-	_instance?.destroy();
+export async function destroyRemoteLog(): Promise<void> {
+	await _instance?.destroy();
 	_instance = null;
 }
