@@ -23,6 +23,13 @@ const HEALTH_CHECK_INTERVAL_MS = 30_000;
 /** Paths that are always ignored regardless of user settings. */
 const ALWAYS_IGNORED = [".obsidian/", ".trash/", ".git/"];
 
+/** If we have no sync hash and the local file's mtime is older than the remote
+ *  mtime by at least this many seconds, treat the file as stale (not locally
+ *  modified) and skip conflict detection. 1 hour is conservative — if a user
+ *  edited a file, its mtime will be within seconds/minutes of the remote push,
+ *  not hours behind. */
+const STALE_THRESHOLD_S = 3600;
+
 /** Fast string hash (FNV-1a 32-bit). Not cryptographic — just for content change detection. */
 function fnv1a(s: string): number {
 	let h = 0x811c9dc5;
@@ -739,9 +746,18 @@ export class SyncEngine {
 
 			// Local was modified by the user if its content hash differs from
 			// what we last wrote during sync (or if we never wrote it).
-			const localModified = lastSyncedHash === undefined
-				? localContent !== change.content  // first sync: compare directly
-				: localHash !== lastSyncedHash;
+			let localModified: boolean;
+			if (lastSyncedHash !== undefined) {
+				localModified = localHash !== lastSyncedHash;
+			} else {
+				// No sync hash — first sync for this file. Use a staleness
+				// heuristic: if the local mtime is well before the remote mtime,
+				// the user almost certainly didn't edit locally — the file is
+				// just stale and the remote is newer.
+				const localMtimeS = existing.stat.mtime / 1000;
+				const stale = change.mtime - localMtimeS > STALE_THRESHOLD_S;
+				localModified = stale ? false : localContent !== change.content;
+			}
 
 			if (!forceOverwrite && localModified && localContent !== change.content) {
 				// Both sides differ — real conflict
