@@ -6,6 +6,7 @@ import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
 import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, FileSyncState, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus, VersionConflictResponse } from "./types";
 import { OfflineQueue } from "./offline-queue";
 import { BaseStore } from "./base-store";
+import { threeWayMerge } from "./three-way-merge";
 import { devLog } from "./dev-log";
 import { rlog } from "./remote-log";
 
@@ -469,13 +470,38 @@ export class SyncEngine {
 					const serverNote = (resp as VersionConflictResponse).server_note;
 					devLog().log("push", `version conflict: ${file.path} (local=${existing?.version} server=${serverNote.version})`);
 					rlog().warn("conflict", `Version conflict on push: ${file.path} | localVer=${existing?.version} | serverVer=${serverNote.version}`);
-					// Delegate to conflict resolution (same as pull conflicts)
+
+					// Attempt 3-way auto-merge if we have a base
+					const pushBase = this.baseStore?.get(normalizePath(file.path));
+					if (pushBase) {
+						const merge = threeWayMerge(pushBase.content, content, serverNote.content);
+						if (merge.clean) {
+							const mergeResp = await this.api.pushNote(file.path, merge.merged, mtime);
+							const localFile = this.app.vault.getAbstractFileByPath(file.path);
+							if (localFile && localFile instanceof TFile) {
+								await this.app.vault.modify(localFile, merge.merged);
+							}
+							if (!("conflict" in mergeResp)) {
+								const np = normalizePath(file.path);
+								this.syncState.set(np, { hash: fnv1a(merge.merged), version: mergeResp.note.version });
+								if (mergeResp.note.version != null) {
+									this.baseStore?.set(np, merge.merged, mergeResp.note.version);
+								}
+							}
+							rlog().info("conflict", `Auto-merged (push): ${file.path} | mergedLen=${merge.merged.length}`);
+							return false;
+						}
+						rlog().info("conflict", `Auto-merge failed (push): ${file.path} | conflicts=${merge.conflicts.length}`);
+					}
+
+					// Fall back to interactive conflict resolution
 					const resolution = await this.resolveConflict({
 						path: file.path,
 						localContent: content,
 						localMtime: mtime,
 						remoteContent: serverNote.content,
 						remoteMtime: serverNote.mtime,
+						baseContent: pushBase?.content,
 					});
 					if (resolution.choice === "keep-local") {
 						// Re-push without version (unconditional overwrite)
@@ -856,12 +882,37 @@ export class SyncEngine {
 					` | remoteMtime=${new Date(change.mtime * 1000).toISOString()}` +
 					` | localLen=${localContent.length} | remoteLen=${change.content.length}`,
 				);
+
+				// Attempt 3-way auto-merge if we have a base
+				const pullBase = this.baseStore?.get(normalized);
+				if (pullBase) {
+					const merge = threeWayMerge(pullBase.content, localContent, change.content);
+					if (merge.clean) {
+						await this.app.vault.modify(existing, merge.merged);
+						this.syncState.set(normalized, { hash: fnv1a(merge.merged), version: change.version });
+						if (change.version != null) {
+							this.baseStore?.set(normalized, merge.merged, change.version);
+						}
+						// Push merged result to server
+						try {
+							await this.pushFile(existing);
+						} catch (e) {
+							rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
+						}
+						rlog().info("conflict", `Auto-merged (pull): ${change.path} | mergedLen=${merge.merged.length}`);
+						return true;
+					}
+					rlog().info("conflict", `Auto-merge failed (pull): ${change.path} | conflicts=${merge.conflicts.length}`);
+				}
+
+				// Fall back to interactive conflict resolution
 				const resolution = await this.resolveConflict({
 					path: change.path,
 					localContent,
 					localMtime,
 					remoteContent: change.content,
 					remoteMtime: change.mtime,
+					baseContent: pullBase?.content,
 				});
 
 				if (resolution.choice === "skip") {
