@@ -44,6 +44,7 @@ export interface NoteResponse {
 		mtime: number;
 		created_at: string;
 		updated_at: string;
+		version?: number;
 	};
 	chunks_indexed: number;
 }
@@ -58,6 +59,7 @@ export interface NoteChange {
 	mtime: number;
 	updated_at: string;
 	deleted: boolean;
+	version?: number;
 }
 
 /** Response from GET /notes/changes */
@@ -169,6 +171,7 @@ export interface NoteDetail {
 	mtime: number;
 	created_at: string;
 	updated_at: string;
+	version?: number;
 }
 
 /** Attachment metadata as returned by POST /attachments */
@@ -217,6 +220,32 @@ export interface AttachmentChangesResponse {
 export interface ManifestEntry {
 	path: string;
 	content_hash: string;
+	version?: number;
+}
+
+/** Per-file sync metadata tracked by the plugin. */
+export interface FileSyncState {
+	/** FNV-1a 32-bit content hash of last synced content. */
+	hash: number;
+	/** Server version counter (monotonic, from backend). */
+	version?: number;
+}
+
+/** 409 conflict response from the server when expected_version mismatches. */
+export interface VersionConflictResponse {
+	conflict: true;
+	server_note: {
+		id: number;
+		path: string;
+		title: string;
+		content: string;
+		folder: string;
+		tags: string[];
+		mtime: number;
+		created_at: string;
+		updated_at: string;
+		version: number;
+	};
 }
 
 /** Response from GET /sync/manifest */

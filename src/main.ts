@@ -6,7 +6,7 @@
  */
 import { Notice, Platform, Plugin } from "obsidian";
 import { EngramApi } from "./api";
-import { EngramSyncSettings, DEFAULT_SETTINGS, SyncStatus } from "./types";
+import { EngramSyncSettings, DEFAULT_SETTINGS, FileSyncState, SyncStatus } from "./types";
 import { SyncEngine } from "./sync";
 import { EngramSyncSettingTab } from "./settings";
 import { NoteStream } from "./stream";
@@ -23,6 +23,9 @@ interface PluginData {
 	settings: EngramSyncSettings;
 	lastSync: string;
 	offlineQueue?: QueueEntry[];
+	/** New unified sync state (hash + version per file). */
+	syncState?: Record<string, FileSyncState>;
+	/** @deprecated Legacy hash-only format. Kept for rollback safety (dual-write). */
 	syncedHashes?: Record<string, number>;
 }
 
@@ -78,7 +81,7 @@ export default class EngramSyncPlugin extends Plugin {
 			await this.savePluginData(this.syncEngine.getLastSync(), entries);
 		});
 
-		// Restore last sync timestamp, offline queue, and synced hashes
+		// Restore last sync timestamp, offline queue, and sync state
 		const saved = await this.loadData();
 		if (saved?.lastSync) {
 			this.syncEngine.setLastSync(saved.lastSync);
@@ -86,8 +89,13 @@ export default class EngramSyncPlugin extends Plugin {
 		if (saved?.offlineQueue?.length) {
 			this.syncEngine.queue.load(saved.offlineQueue);
 		}
-		if (saved?.syncedHashes) {
+		if (saved?.syncState) {
+			// New format — hash + version per file
+			this.syncEngine.importSyncState(saved.syncState);
+		} else if (saved?.syncedHashes) {
+			// Legacy format — migrate hash-only data
 			this.syncEngine.importHashes(saved.syncedHashes);
+			devLog().log("lifecycle", "Migrated legacy syncedHashes → syncState");
 		}
 
 		// Register settings tab
@@ -304,6 +312,8 @@ export default class EngramSyncPlugin extends Plugin {
 			settings: this.settings,
 			lastSync,
 			offlineQueue: offlineQueue ?? this.syncEngine.queue.all(),
+			syncState: this.syncEngine.exportSyncState(),
+			// Dual-write legacy format for rollback safety (remove after one release cycle)
 			syncedHashes: this.syncEngine.exportHashes(),
 		} as PluginData);
 	}

@@ -14,6 +14,7 @@ import {
 	NoteDetail,
 	NoteResponse,
 	SearchResponse,
+	VersionConflictResponse,
 } from "./types";
 
 export class EngramApi {
@@ -73,18 +74,26 @@ export class EngramApi {
 		}
 	}
 
-	/** Push a note to Engram. */
+	/** Push a note to Engram.
+	 *  When version is provided, the server uses optimistic concurrency control:
+	 *  returns 409 with the current server state if the version doesn't match. */
 	async pushNote(
 		path: string,
 		content: string,
 		mtime: number,
-	): Promise<NoteResponse> {
-		const resp = await this.request("POST", "/notes", {
-			path,
-			content,
-			mtime,
-		});
-		return resp.json as NoteResponse;
+		version?: number,
+	): Promise<NoteResponse | VersionConflictResponse> {
+		const body: Record<string, unknown> = { path, content, mtime };
+		if (version !== undefined) body.version = version;
+		try {
+			const resp = await this.request("POST", "/notes", body);
+			return resp.json as NoteResponse;
+		} catch (e) {
+			if (typeof e === "object" && e !== null && (e as { status?: number }).status === 409) {
+				return (e as { json: VersionConflictResponse }).json;
+			}
+			throw e;
+		}
 	}
 
 	/** Get changes since a timestamp. */

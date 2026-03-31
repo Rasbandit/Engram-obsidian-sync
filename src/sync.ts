@@ -3,7 +3,7 @@
  */
 import { App, TFile, TFolder, TAbstractFile, Notice, normalizePath } from "obsidian";
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
-import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus } from "./types";
+import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, FileSyncState, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus, VersionConflictResponse } from "./types";
 import { OfflineQueue } from "./offline-queue";
 import { devLog } from "./dev-log";
 import { rlog } from "./remote-log";
@@ -84,11 +84,11 @@ export class SyncEngine {
 	private requestTimestamps: number[] = [];
 	readonly queue: OfflineQueue = new OfflineQueue();
 
-	/** Content hashes of files last written by the sync engine.
+	/** Per-file sync metadata (content hash + server version).
 	 *  Used to detect whether the user actually modified a file since
 	 *  the last sync (Obsidian sets mtime to "now" on vault.modify(),
 	 *  making mtime-based detection unreliable). */
-	private syncedHashes: Map<string, number> = new Map();
+	private syncState: Map<string, FileSyncState> = new Map();
 
 	/** Called whenever sync status changes (for status bar updates). */
 	onStatusChange: ((status: SyncStatus) => void) | null = null;
@@ -127,15 +127,31 @@ export class SyncEngine {
 		return this.lastSync;
 	}
 
-	/** Export synced hashes for persistence across sessions. */
-	exportHashes(): Record<string, number> {
-		return Object.fromEntries(this.syncedHashes);
+	/** Export sync state for persistence across sessions. */
+	exportSyncState(): Record<string, FileSyncState> {
+		return Object.fromEntries(this.syncState);
 	}
 
-	/** Import previously persisted synced hashes. */
+	/** Export hash-only projection for backwards-compatible dual-write. */
+	exportHashes(): Record<string, number> {
+		const result: Record<string, number> = {};
+		for (const [path, state] of this.syncState) {
+			result[path] = state.hash;
+		}
+		return result;
+	}
+
+	/** Import sync state from persisted data. */
+	importSyncState(data: Record<string, FileSyncState>): void {
+		for (const [path, state] of Object.entries(data)) {
+			this.syncState.set(path, state);
+		}
+	}
+
+	/** Import legacy hash-only format (migration from old plugin versions). */
 	importHashes(data: Record<string, number>): void {
 		for (const [path, hash] of Object.entries(data)) {
-			this.syncedHashes.set(path, hash);
+			this.syncState.set(path, { hash });
 		}
 	}
 
@@ -431,17 +447,60 @@ export class SyncEngine {
 				// sync engine last wrote (pull/SSE). Prevents the pull→push loop
 				// where vault.modify() triggers handleModify() for every pulled file.
 				const hash = fnv1a(content);
-				const syncedHash = this.syncedHashes.get(normalizePath(file.path));
-				if (!force && syncedHash !== undefined && hash === syncedHash) {
+				const existing = this.syncState.get(normalizePath(file.path));
+				if (!force && existing !== undefined && hash === existing.hash) {
 					devLog().log("push", `skip (echo): ${file.path}`);
 					rlog().info("push", `Echo skip: ${file.path} | hash=${hash}`);
 					return false;
 				}
-				const resp = await this.api.pushNote(file.path, content, mtime);
+				const resp = await this.api.pushNote(file.path, content, mtime, existing?.version);
+
+				// 409 = version conflict — server has a newer version
+				if ("conflict" in resp) {
+					const serverNote = (resp as VersionConflictResponse).server_note;
+					devLog().log("push", `version conflict: ${file.path} (local=${existing?.version} server=${serverNote.version})`);
+					rlog().warn("conflict", `Version conflict on push: ${file.path} | localVer=${existing?.version} | serverVer=${serverNote.version}`);
+					// Delegate to conflict resolution (same as pull conflicts)
+					const resolution = await this.resolveConflict({
+						path: file.path,
+						localContent: content,
+						localMtime: mtime,
+						remoteContent: serverNote.content,
+						remoteMtime: serverNote.mtime,
+					});
+					if (resolution.choice === "keep-local") {
+						// Re-push without version (unconditional overwrite)
+						const forceResp = await this.api.pushNote(file.path, content, mtime);
+						if (!("conflict" in forceResp)) {
+							const np = normalizePath(file.path);
+							this.syncState.set(np, { hash, version: forceResp.note.version });
+						}
+					} else if (resolution.choice === "keep-remote") {
+						const localFile = this.app.vault.getAbstractFileByPath(file.path);
+						if (localFile && localFile instanceof TFile) {
+							await this.app.vault.modify(localFile, serverNote.content);
+							const np = normalizePath(file.path);
+							this.syncState.set(np, { hash: fnv1a(serverNote.content), version: serverNote.version });
+						}
+					} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
+						const mergeResp = await this.api.pushNote(file.path, resolution.mergedContent, mtime);
+						const localFile = this.app.vault.getAbstractFileByPath(file.path);
+						if (localFile && localFile instanceof TFile) {
+							await this.app.vault.modify(localFile, resolution.mergedContent);
+						}
+						if (!("conflict" in mergeResp)) {
+							const np = normalizePath(file.path);
+							this.syncState.set(np, { hash: fnv1a(resolution.mergedContent), version: mergeResp.note.version });
+						}
+					}
+					// skip and keep-both handled by returning false / not pushing
+					return false;
+				}
 
 				// Server may sanitize the path (strip chars illegal on mobile).
 				// If so, rename the local file to match.
 				const serverPath = resp.note.path;
+				const serverVersion = resp.note.version;
 				if (serverPath && serverPath !== file.path) {
 					const localFile = this.app.vault.getAbstractFileByPath(file.path);
 					if (localFile) {
@@ -450,10 +509,10 @@ export class SyncEngine {
 						rlog().info("push", `Renamed: ${file.path} → ${serverPath} (server sanitized)`);
 						new Notice(`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`);
 					}
-					this.syncedHashes.delete(normalizePath(file.path));
-					this.syncedHashes.set(normalizePath(serverPath), hash);
+					this.syncState.delete(normalizePath(file.path));
+					this.syncState.set(normalizePath(serverPath), { hash, version: serverVersion });
 				} else {
-					this.syncedHashes.set(normalizePath(file.path), hash);
+					this.syncState.set(normalizePath(file.path), { hash, version: serverVersion });
 				}
 			}
 			success = true;
@@ -727,7 +786,7 @@ export class SyncEngine {
 			if (existing && existing instanceof TFile) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
-				this.syncedHashes.delete(normalized);
+				this.syncState.delete(normalized);
 				rlog().info("pull", `Deleted: ${change.path}`);
 				return true;
 			}
@@ -742,7 +801,8 @@ export class SyncEngine {
 			// vault.modify(), so we track hashes of content we last wrote.
 			const localContent = await this.app.vault.read(existing);
 			const localHash = fnv1a(localContent);
-			const lastSyncedHash = this.syncedHashes.get(normalized);
+			const lastSynced = this.syncState.get(normalized);
+			const lastSyncedHash = lastSynced?.hash;
 
 			// Local was modified by the user if its content hash differs from
 			// what we last wrote during sync (or if we never wrote it).
@@ -787,7 +847,7 @@ export class SyncEngine {
 					// Push local version to server
 					try {
 						await this.pushFile(existing);
-						this.syncedHashes.set(normalized, localHash);
+						this.syncState.set(normalized, { hash: localHash, version: lastSynced?.version });
 						rlog().info("conflict", `Resolved: ${change.path} → keep-local | pushOk=true`);
 					} catch (e) {
 						rlog().error("conflict",
@@ -803,7 +863,7 @@ export class SyncEngine {
 					const conflictPath = `${baseName} (conflict ${date}).md`;
 					try {
 						await this.createFileWithFolders(conflictPath, change.content);
-						this.syncedHashes.set(normalizePath(conflictPath), fnv1a(change.content));
+						this.syncState.set(normalizePath(conflictPath), { hash: fnv1a(change.content), version: change.version });
 						rlog().info("conflict", `Resolved: ${change.path} → keep-both | copyPath=${conflictPath}`);
 					} catch (e) {
 						rlog().error("conflict",
@@ -816,7 +876,7 @@ export class SyncEngine {
 					// Apply user-merged content locally and push to server
 					try {
 						await this.app.vault.modify(existing, resolution.mergedContent);
-						this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
+						this.syncState.set(normalized, { hash: fnv1a(resolution.mergedContent), version: change.version });
 						await this.pushFile(existing);
 						rlog().info("conflict",
 							`Resolved: ${change.path} → merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`,
@@ -833,20 +893,20 @@ export class SyncEngine {
 				rlog().info("conflict", `Resolved: ${change.path} → keep-remote`);
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
-				this.syncedHashes.set(normalized, localHash);
+				this.syncState.set(normalized, { hash: localHash, version: change.version });
 				rlog().info("pull", `Unchanged: ${change.path}`);
 				return false;
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
 			await this.app.vault.modify(existing, change.content);
-			this.syncedHashes.set(normalized, fnv1a(change.content));
+			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
 			rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
 			return true;
 		} else {
 			// New file — create it
 			await this.createFileWithFolders(normalized, change.content);
-			this.syncedHashes.set(normalized, fnv1a(change.content));
+			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
 			rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
 			return true;
 		}
@@ -992,7 +1052,7 @@ export class SyncEngine {
 		const pulled = await this.pull();
 		const pushed = await this.pushModifiedFiles(prePullSync);
 
-		// Persist syncedHashes updated during push (pull already saved its own)
+		// Persist syncState updated during push (pull already saved its own)
 		if (pushed > 0) {
 			await this.saveData({ lastSync: this.lastSync });
 		}
