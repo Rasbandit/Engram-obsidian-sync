@@ -153,6 +153,7 @@ describe("SyncEngine.handleModify", () => {
 			"Notes/Test.md",
 			"# Test\n\nContent",
 			expect.any(Number),
+			undefined,
 		);
 	});
 
@@ -231,6 +232,7 @@ describe("SyncEngine.handleRename", () => {
 			"Notes/Renamed.md",
 			expect.any(String),
 			expect.any(Number),
+			undefined,
 		);
 	});
 });
@@ -888,6 +890,7 @@ describe("SyncEngine conflict resolution", () => {
 			"Notes/Conflict.md",
 			"# Local version",
 			expect.any(Number),
+			undefined,
 		);
 		expect(mockApp.vault.modify).not.toHaveBeenCalled();
 	});
@@ -1487,6 +1490,7 @@ describe("SyncEngine pull accuracy", () => {
 			"Notes/Modified.md",
 			expect.any(String),
 			expect.any(Number),
+			undefined,
 		);
 	});
 
@@ -1966,13 +1970,13 @@ describe("request pacer", () => {
 });
 
 describe("SyncEngine.pushAll echo suppression fix", () => {
-	test("pushAll() pushes files even when syncedHashes match", async () => {
+	test("pushAll() pushes files even when syncState hashes match", async () => {
 		const engine = createEngine();
 		const file = new TFile("Notes/Existing.md", Date.now());
 		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file]);
 		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Existing\n\nContent");
 
-		// Simulate syncedHashes being populated (as happens after pull)
+		// Simulate syncState being populated (as happens after pull)
 		// by doing a pull that writes this file, then clearing the mock
 		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
 			changes: [{
@@ -2005,6 +2009,7 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 			"Notes/Existing.md",
 			"# Existing\n\nContent",
 			expect.any(Number),
+			undefined,
 		);
 	});
 
@@ -2078,6 +2083,7 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 			"Notes/DuringPull.md",
 			"# User edit during pull",
 			expect.any(Number),
+			undefined,
 		);
 	});
 });
