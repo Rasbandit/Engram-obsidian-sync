@@ -149,6 +149,8 @@ export interface ConflictInfo {
 	localMtime: number;
 	remoteContent: string;
 	remoteMtime: number;
+	/** Common ancestor content from last successful sync (for 3-way merge). */
+	baseContent?: string;
 }
 
 /** User's choice for resolving a sync conflict. */

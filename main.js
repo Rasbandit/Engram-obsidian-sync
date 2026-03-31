@@ -523,6 +523,8 @@ var SyncEngine = class {
      *  the last sync (Obsidian sets mtime to "now" on vault.modify(),
      *  making mtime-based detection unreliable). */
     this.syncState = /* @__PURE__ */ new Map();
+    /** Optional base content store for 3-way merge (Step 2+). */
+    this.baseStore = null;
     /** Called whenever sync status changes (for status bar updates). */
     this.onStatusChange = null;
     /** Called when a conflict is detected. Return the user's resolution.
@@ -690,6 +692,7 @@ var SyncEngine = class {
   }
   /** Handle a vault rename event. */
   async handleRename(file, oldPath) {
+    var _a;
     if (!this.ready) return;
     if (!this.isSyncable(file)) return;
     const isBinary = this.isBinaryFile(file);
@@ -717,6 +720,9 @@ var SyncEngine = class {
           });
         }
       }
+    }
+    if (!isBinary) {
+      (_a = this.baseStore) == null ? void 0 : _a.rename((0, import_obsidian2.normalizePath)(oldPath), (0, import_obsidian2.normalizePath)(file.path));
     }
     if (!this.shouldIgnore(file.path)) {
       await this.pushFile(file);
@@ -781,6 +787,7 @@ var SyncEngine = class {
   /** Push a single file to Engram. Returns true on success.
    *  When force is true, skip echo suppression (used by pushAll). */
   async pushFile(file, force = false) {
+    var _a, _b, _c, _d, _e, _f;
     if (this.pushing.has(file.path)) return false;
     await this.acquirePushSlot();
     this.pushing.add(file.path);
@@ -830,6 +837,9 @@ var SyncEngine = class {
             if (!("conflict" in forceResp)) {
               const np = (0, import_obsidian2.normalizePath)(file.path);
               this.syncState.set(np, { hash, version: forceResp.note.version });
+              if (forceResp.note.version != null) {
+                (_a = this.baseStore) == null ? void 0 : _a.set(np, content, forceResp.note.version);
+              }
             }
           } else if (resolution.choice === "keep-remote") {
             const localFile = this.app.vault.getAbstractFileByPath(file.path);
@@ -837,6 +847,7 @@ var SyncEngine = class {
               await this.app.vault.modify(localFile, serverNote.content);
               const np = (0, import_obsidian2.normalizePath)(file.path);
               this.syncState.set(np, { hash: fnv1a(serverNote.content), version: serverNote.version });
+              (_b = this.baseStore) == null ? void 0 : _b.set(np, serverNote.content, serverNote.version);
             }
           } else if (resolution.choice === "merge" && resolution.mergedContent != null) {
             const mergeResp = await this.api.pushNote(file.path, resolution.mergedContent, mtime);
@@ -847,6 +858,9 @@ var SyncEngine = class {
             if (!("conflict" in mergeResp)) {
               const np = (0, import_obsidian2.normalizePath)(file.path);
               this.syncState.set(np, { hash: fnv1a(resolution.mergedContent), version: mergeResp.note.version });
+              if (mergeResp.note.version != null) {
+                (_c = this.baseStore) == null ? void 0 : _c.set(np, resolution.mergedContent, mergeResp.note.version);
+              }
             }
           }
           return false;
@@ -863,8 +877,15 @@ var SyncEngine = class {
           }
           this.syncState.delete((0, import_obsidian2.normalizePath)(file.path));
           this.syncState.set((0, import_obsidian2.normalizePath)(serverPath), { hash, version: serverVersion });
+          (_d = this.baseStore) == null ? void 0 : _d.delete((0, import_obsidian2.normalizePath)(file.path));
+          if (serverVersion != null) {
+            (_e = this.baseStore) == null ? void 0 : _e.set((0, import_obsidian2.normalizePath)(serverPath), content, serverVersion);
+          }
         } else {
           this.syncState.set((0, import_obsidian2.normalizePath)(file.path), { hash, version: serverVersion });
+          if (serverVersion != null) {
+            (_f = this.baseStore) == null ? void 0 : _f.set((0, import_obsidian2.normalizePath)(file.path), content, serverVersion);
+          }
         }
       }
       success = true;
@@ -1094,6 +1115,7 @@ var SyncEngine = class {
    *  Returns true when a file was actually created, modified, or trashed.
    *  When forceOverwrite is true, skip conflict detection and always apply. */
   async applyChange(change, forceOverwrite = false) {
+    var _a, _b, _c, _d, _e, _f;
     if (this.shouldIgnore(change.path)) return false;
     const normalized = (0, import_obsidian2.normalizePath)(change.path);
     if (change.deleted) {
@@ -1102,6 +1124,7 @@ var SyncEngine = class {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
         this.syncState.delete(normalized);
+        (_a = this.baseStore) == null ? void 0 : _a.delete(normalized);
         rlog().info("pull", `Deleted: ${change.path}`);
         return true;
       }
@@ -1159,6 +1182,9 @@ var SyncEngine = class {
           try {
             await this.createFileWithFolders(conflictPath, change.content);
             this.syncState.set((0, import_obsidian2.normalizePath)(conflictPath), { hash: fnv1a(change.content), version: change.version });
+            if (change.version != null) {
+              (_b = this.baseStore) == null ? void 0 : _b.set((0, import_obsidian2.normalizePath)(conflictPath), change.content, change.version);
+            }
             rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-both | copyPath=${conflictPath}`);
           } catch (e) {
             rlog().error(
@@ -1172,6 +1198,9 @@ var SyncEngine = class {
           try {
             await this.app.vault.modify(existing, resolution.mergedContent);
             this.syncState.set(normalized, { hash: fnv1a(resolution.mergedContent), version: change.version });
+            if (change.version != null) {
+              (_c = this.baseStore) == null ? void 0 : _c.set(normalized, resolution.mergedContent, change.version);
+            }
             await this.pushFile(existing);
             rlog().info(
               "conflict",
@@ -1189,16 +1218,25 @@ var SyncEngine = class {
         rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-remote`);
       } else if (localContent === change.content) {
         this.syncState.set(normalized, { hash: localHash, version: change.version });
+        if (change.version != null) {
+          (_d = this.baseStore) == null ? void 0 : _d.set(normalized, change.content, change.version);
+        }
         rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
       await this.app.vault.modify(existing, change.content);
       this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+      if (change.version != null) {
+        (_e = this.baseStore) == null ? void 0 : _e.set(normalized, change.content, change.version);
+      }
       rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
       return true;
     } else {
       await this.createFileWithFolders(normalized, change.content);
       this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+      if (change.version != null) {
+        (_f = this.baseStore) == null ? void 0 : _f.set(normalized, change.content, change.version);
+      }
       rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
       return true;
     }
@@ -2619,6 +2657,82 @@ var SearchView = class extends import_obsidian7.ItemView {
   }
 };
 
+// src/base-store.ts
+var DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
+var BaseStore = class {
+  constructor(adapter, storagePath, maxBytes = DEFAULT_MAX_BYTES) {
+    this.adapter = adapter;
+    this.storagePath = storagePath;
+    this.maxBytes = maxBytes;
+    this.entries = /* @__PURE__ */ new Map();
+    this.bytes = 0;
+  }
+  get(path) {
+    return this.entries.get(path);
+  }
+  set(path, content, version) {
+    const existing = this.entries.get(path);
+    if (existing) {
+      this.bytes -= this.entryBytes(path, existing);
+    }
+    const entry = { content, version, ts: Date.now() };
+    this.entries.set(path, entry);
+    this.bytes += this.entryBytes(path, entry);
+  }
+  delete(path) {
+    const existing = this.entries.get(path);
+    if (existing) {
+      this.bytes -= this.entryBytes(path, existing);
+      this.entries.delete(path);
+    }
+  }
+  rename(oldPath, newPath) {
+    const entry = this.entries.get(oldPath);
+    if (!entry) return;
+    this.bytes -= this.entryBytes(oldPath, entry);
+    this.entries.delete(oldPath);
+    this.entries.set(newPath, entry);
+    this.bytes += this.entryBytes(newPath, entry);
+  }
+  /** Evict oldest entries until total size is under the given limit. */
+  prune(maxBytes = this.maxBytes) {
+    if (this.bytes <= maxBytes) return;
+    const sorted = [...this.entries.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (const [path, entry] of sorted) {
+      if (this.bytes <= maxBytes) break;
+      this.bytes -= this.entryBytes(path, entry);
+      this.entries.delete(path);
+    }
+  }
+  /** Approximate total byte size of all entries. */
+  estimateBytes() {
+    return this.bytes;
+  }
+  async save() {
+    const obj = Object.fromEntries(this.entries);
+    await this.adapter.write(this.storagePath, JSON.stringify(obj));
+  }
+  async load() {
+    try {
+      const raw = await this.adapter.read(this.storagePath);
+      const obj = JSON.parse(raw);
+      this.entries.clear();
+      this.bytes = 0;
+      for (const [path, entry] of Object.entries(obj)) {
+        this.entries.set(path, entry);
+        this.bytes += this.entryBytes(path, entry);
+      }
+    } catch (e) {
+      this.entries.clear();
+      this.bytes = 0;
+    }
+  }
+  /** Rough byte estimate for a single entry (path key + content + overhead). */
+  entryBytes(path, entry) {
+    return (path.length + entry.content.length) * 2 + 32;
+  }
+};
+
 // src/main.ts
 var EngramSyncPlugin = class extends import_obsidian8.Plugin {
   constructor() {
@@ -2630,6 +2744,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     this.noteStream = null;
     this.statusBarEl = null;
     this.sseConnected = false;
+    this.baseStore = null;
   }
   async onload() {
     var _a;
@@ -2653,6 +2768,9 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
         await this.savePluginData(data.lastSync);
       }
     );
+    const basesPath = `${this.manifest.dir}/sync-bases.json`;
+    this.baseStore = new BaseStore(this.app.vault.adapter, basesPath);
+    this.syncEngine.baseStore = this.baseStore;
     this.syncEngine.onStatusChange = (status) => {
       this.updateStatusBar(status);
     };
@@ -2701,9 +2819,11 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       })
     );
     this.registerDomEvent(document, "visibilitychange", () => {
+      var _a2;
       if (document.visibilityState === "hidden") {
         rlog().flush();
         this.savePluginData(this.syncEngine.getLastSync());
+        (_a2 = this.baseStore) == null ? void 0 : _a2.save();
       }
     });
     this.addCommand({
@@ -2811,8 +2931,10 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     });
     this.setupNoteStream();
     this.app.workspace.onLayoutReady(async () => {
+      var _a2;
       devLog().log("lifecycle", "layout ready \u2014 starting initial sync");
       rlog().info("lifecycle", "Layout ready \u2014 starting initial sync");
+      await ((_a2 = this.baseStore) == null ? void 0 : _a2.load());
       try {
         if (this.settings.apiUrl && this.settings.apiKey) {
           await this.doSyncWithFirstSyncCheck();
@@ -2823,12 +2945,14 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     });
   }
   onunload() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     devLog().log("lifecycle", "plugin unloading");
     rlog().info("lifecycle", "Plugin unloading");
     this.savePluginData(this.syncEngine.getLastSync());
-    (_a = this.syncEngine) == null ? void 0 : _a.destroy();
-    (_b = this.noteStream) == null ? void 0 : _b.disconnect();
+    (_a = this.baseStore) == null ? void 0 : _a.prune();
+    (_b = this.baseStore) == null ? void 0 : _b.save();
+    (_c = this.syncEngine) == null ? void 0 : _c.destroy();
+    (_d = this.noteStream) == null ? void 0 : _d.disconnect();
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;

@@ -5,6 +5,7 @@ import { App, TFile, TFolder, TAbstractFile, Notice, normalizePath } from "obsid
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
 import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, FileSyncState, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus, VersionConflictResponse } from "./types";
 import { OfflineQueue } from "./offline-queue";
+import { BaseStore } from "./base-store";
 import { devLog } from "./dev-log";
 import { rlog } from "./remote-log";
 
@@ -89,6 +90,9 @@ export class SyncEngine {
 	 *  the last sync (Obsidian sets mtime to "now" on vault.modify(),
 	 *  making mtime-based detection unreliable). */
 	private syncState: Map<string, FileSyncState> = new Map();
+
+	/** Optional base content store for 3-way merge (Step 2+). */
+	baseStore: BaseStore | null = null;
 
 	/** Called whenever sync status changes (for status bar updates). */
 	onStatusChange: ((status: SyncStatus) => void) | null = null;
@@ -335,6 +339,11 @@ export class SyncEngine {
 			}
 		}
 
+		// Move base content entry to new path before pushing
+		if (!isBinary) {
+			this.baseStore?.rename(normalizePath(oldPath), normalizePath(file.path));
+		}
+
 		// Push new path if it isn't ignored
 		if (!this.shouldIgnore(file.path)) {
 			await this.pushFile(file as TFile);
@@ -474,6 +483,9 @@ export class SyncEngine {
 						if (!("conflict" in forceResp)) {
 							const np = normalizePath(file.path);
 							this.syncState.set(np, { hash, version: forceResp.note.version });
+							if (forceResp.note.version != null) {
+								this.baseStore?.set(np, content, forceResp.note.version);
+							}
 						}
 					} else if (resolution.choice === "keep-remote") {
 						const localFile = this.app.vault.getAbstractFileByPath(file.path);
@@ -481,6 +493,7 @@ export class SyncEngine {
 							await this.app.vault.modify(localFile, serverNote.content);
 							const np = normalizePath(file.path);
 							this.syncState.set(np, { hash: fnv1a(serverNote.content), version: serverNote.version });
+							this.baseStore?.set(np, serverNote.content, serverNote.version);
 						}
 					} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
 						const mergeResp = await this.api.pushNote(file.path, resolution.mergedContent, mtime);
@@ -491,6 +504,9 @@ export class SyncEngine {
 						if (!("conflict" in mergeResp)) {
 							const np = normalizePath(file.path);
 							this.syncState.set(np, { hash: fnv1a(resolution.mergedContent), version: mergeResp.note.version });
+							if (mergeResp.note.version != null) {
+								this.baseStore?.set(np, resolution.mergedContent, mergeResp.note.version);
+							}
 						}
 					}
 					// skip and keep-both handled by returning false / not pushing
@@ -511,8 +527,15 @@ export class SyncEngine {
 					}
 					this.syncState.delete(normalizePath(file.path));
 					this.syncState.set(normalizePath(serverPath), { hash, version: serverVersion });
+					this.baseStore?.delete(normalizePath(file.path));
+					if (serverVersion != null) {
+						this.baseStore?.set(normalizePath(serverPath), content, serverVersion);
+					}
 				} else {
 					this.syncState.set(normalizePath(file.path), { hash, version: serverVersion });
+					if (serverVersion != null) {
+						this.baseStore?.set(normalizePath(file.path), content, serverVersion);
+					}
 				}
 			}
 			success = true;
@@ -787,6 +810,7 @@ export class SyncEngine {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
 				this.syncState.delete(normalized);
+				this.baseStore?.delete(normalized);
 				rlog().info("pull", `Deleted: ${change.path}`);
 				return true;
 			}
@@ -864,6 +888,9 @@ export class SyncEngine {
 					try {
 						await this.createFileWithFolders(conflictPath, change.content);
 						this.syncState.set(normalizePath(conflictPath), { hash: fnv1a(change.content), version: change.version });
+						if (change.version != null) {
+							this.baseStore?.set(normalizePath(conflictPath), change.content, change.version);
+						}
 						rlog().info("conflict", `Resolved: ${change.path} → keep-both | copyPath=${conflictPath}`);
 					} catch (e) {
 						rlog().error("conflict",
@@ -877,6 +904,9 @@ export class SyncEngine {
 					try {
 						await this.app.vault.modify(existing, resolution.mergedContent);
 						this.syncState.set(normalized, { hash: fnv1a(resolution.mergedContent), version: change.version });
+						if (change.version != null) {
+							this.baseStore?.set(normalized, resolution.mergedContent, change.version);
+						}
 						await this.pushFile(existing);
 						rlog().info("conflict",
 							`Resolved: ${change.path} → merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`,
@@ -894,6 +924,9 @@ export class SyncEngine {
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
 				this.syncState.set(normalized, { hash: localHash, version: change.version });
+				if (change.version != null) {
+					this.baseStore?.set(normalized, change.content, change.version);
+				}
 				rlog().info("pull", `Unchanged: ${change.path}`);
 				return false;
 			}
@@ -901,12 +934,18 @@ export class SyncEngine {
 			// Apply remote change (no conflict, or keep-remote chosen)
 			await this.app.vault.modify(existing, change.content);
 			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+			if (change.version != null) {
+				this.baseStore?.set(normalized, change.content, change.version);
+			}
 			rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
 			return true;
 		} else {
 			// New file — create it
 			await this.createFileWithFolders(normalized, change.content);
 			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+			if (change.version != null) {
+				this.baseStore?.set(normalized, change.content, change.version);
+			}
 			rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
 			return true;
 		}

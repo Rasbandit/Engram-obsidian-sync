@@ -16,6 +16,7 @@ import { SearchModal } from "./search-modal";
 import { SearchView, SEARCH_VIEW_TYPE } from "./search-view";
 
 import { QueueEntry } from "./types";
+import { BaseStore } from "./base-store";
 import { initDevLog, destroyDevLog, devLog } from "./dev-log";
 import { initRemoteLog, destroyRemoteLog, rlog } from "./remote-log";
 
@@ -37,6 +38,7 @@ export default class EngramSyncPlugin extends Plugin {
 	noteStream: NoteStream | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private sseConnected: boolean = false;
+	private baseStore: BaseStore | null = null;
 
 	async onload(): Promise<void> {
 		initDevLog();
@@ -63,6 +65,11 @@ export default class EngramSyncPlugin extends Plugin {
 				await this.savePluginData(data.lastSync);
 			},
 		);
+
+		// Base content store for 3-way merge (lazy-loaded after layout ready)
+		const basesPath = `${this.manifest.dir}/sync-bases.json`;
+		this.baseStore = new BaseStore(this.app.vault.adapter, basesPath);
+		this.syncEngine.baseStore = this.baseStore;
 
 		this.syncEngine.onStatusChange = (status) => {
 			this.updateStatusBar(status);
@@ -128,6 +135,7 @@ export default class EngramSyncPlugin extends Plugin {
 			if (document.visibilityState === "hidden") {
 				rlog().flush();
 				this.savePluginData(this.syncEngine.getLastSync());
+				this.baseStore?.save();
 			}
 		});
 
@@ -256,6 +264,7 @@ export default class EngramSyncPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(async () => {
 			devLog().log("lifecycle", "layout ready — starting initial sync");
 			rlog().info("lifecycle", "Layout ready — starting initial sync");
+			await this.baseStore?.load();
 			try {
 				if (this.settings.apiUrl && this.settings.apiKey) {
 					await this.doSyncWithFirstSyncCheck();
@@ -271,6 +280,8 @@ export default class EngramSyncPlugin extends Plugin {
 		rlog().info("lifecycle", "Plugin unloading");
 		// Best-effort save before teardown — hashes must be exported before destroy
 		this.savePluginData(this.syncEngine.getLastSync());
+		this.baseStore?.prune();
+		this.baseStore?.save();
 		this.syncEngine?.destroy();
 		this.noteStream?.disconnect();
 		if (this.syncInterval) {
