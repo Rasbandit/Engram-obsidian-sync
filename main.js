@@ -79,14 +79,21 @@ var EngramApi = class {
       return { ok: false, error: "Connection failed" };
     }
   }
-  /** Push a note to Engram. */
-  async pushNote(path, content, mtime) {
-    const resp = await this.request("POST", "/notes", {
-      path,
-      content,
-      mtime
-    });
-    return resp.json;
+  /** Push a note to Engram.
+   *  When version is provided, the server uses optimistic concurrency control:
+   *  returns 409 with the current server state if the version doesn't match. */
+  async pushNote(path, content, mtime, version) {
+    const body = { path, content, mtime };
+    if (version !== void 0) body.version = version;
+    try {
+      const resp = await this.request("POST", "/notes", body);
+      return resp.json;
+    } catch (e) {
+      if (typeof e === "object" && e !== null && e.status === 409) {
+        return e.json;
+      }
+      throw e;
+    }
   }
   /** Get changes since a timestamp. */
   async getChanges(since) {
@@ -439,6 +446,7 @@ function isHttpStatus(e, status) {
 var ECHO_COOLDOWN_MS = 5e3;
 var HEALTH_CHECK_INTERVAL_MS = 3e4;
 var ALWAYS_IGNORED = [".obsidian/", ".trash/", ".git/"];
+var STALE_THRESHOLD_S = 3600;
 function fnv1a(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -510,11 +518,11 @@ var SyncEngine = class {
     // 0 = unlimited
     this.requestTimestamps = [];
     this.queue = new OfflineQueue();
-    /** Content hashes of files last written by the sync engine.
+    /** Per-file sync metadata (content hash + server version).
      *  Used to detect whether the user actually modified a file since
      *  the last sync (Obsidian sets mtime to "now" on vault.modify(),
      *  making mtime-based detection unreliable). */
-    this.syncedHashes = /* @__PURE__ */ new Map();
+    this.syncState = /* @__PURE__ */ new Map();
     /** Called whenever sync status changes (for status bar updates). */
     this.onStatusChange = null;
     /** Called when a conflict is detected. Return the user's resolution.
@@ -541,14 +549,28 @@ var SyncEngine = class {
   getLastSync() {
     return this.lastSync;
   }
-  /** Export synced hashes for persistence across sessions. */
-  exportHashes() {
-    return Object.fromEntries(this.syncedHashes);
+  /** Export sync state for persistence across sessions. */
+  exportSyncState() {
+    return Object.fromEntries(this.syncState);
   }
-  /** Import previously persisted synced hashes. */
+  /** Export hash-only projection for backwards-compatible dual-write. */
+  exportHashes() {
+    const result = {};
+    for (const [path, state] of this.syncState) {
+      result[path] = state.hash;
+    }
+    return result;
+  }
+  /** Import sync state from persisted data. */
+  importSyncState(data) {
+    for (const [path, state] of Object.entries(data)) {
+      this.syncState.set(path, state);
+    }
+  }
+  /** Import legacy hash-only format (migration from old plugin versions). */
   importHashes(data) {
     for (const [path, hash] of Object.entries(data)) {
-      this.syncedHashes.set(path, hash);
+      this.syncState.set(path, { hash });
     }
   }
   /** Get current sync status snapshot. */
@@ -785,14 +807,52 @@ var SyncEngine = class {
       } else {
         const content = await this.app.vault.read(file);
         const hash = fnv1a(content);
-        const syncedHash = this.syncedHashes.get((0, import_obsidian2.normalizePath)(file.path));
-        if (!force && syncedHash !== void 0 && hash === syncedHash) {
+        const existing = this.syncState.get((0, import_obsidian2.normalizePath)(file.path));
+        if (!force && existing !== void 0 && hash === existing.hash) {
           devLog().log("push", `skip (echo): ${file.path}`);
           rlog().info("push", `Echo skip: ${file.path} | hash=${hash}`);
           return false;
         }
-        const resp = await this.api.pushNote(file.path, content, mtime);
+        const resp = await this.api.pushNote(file.path, content, mtime, existing == null ? void 0 : existing.version);
+        if ("conflict" in resp) {
+          const serverNote = resp.server_note;
+          devLog().log("push", `version conflict: ${file.path} (local=${existing == null ? void 0 : existing.version} server=${serverNote.version})`);
+          rlog().warn("conflict", `Version conflict on push: ${file.path} | localVer=${existing == null ? void 0 : existing.version} | serverVer=${serverNote.version}`);
+          const resolution = await this.resolveConflict({
+            path: file.path,
+            localContent: content,
+            localMtime: mtime,
+            remoteContent: serverNote.content,
+            remoteMtime: serverNote.mtime
+          });
+          if (resolution.choice === "keep-local") {
+            const forceResp = await this.api.pushNote(file.path, content, mtime);
+            if (!("conflict" in forceResp)) {
+              const np = (0, import_obsidian2.normalizePath)(file.path);
+              this.syncState.set(np, { hash, version: forceResp.note.version });
+            }
+          } else if (resolution.choice === "keep-remote") {
+            const localFile = this.app.vault.getAbstractFileByPath(file.path);
+            if (localFile && localFile instanceof import_obsidian2.TFile) {
+              await this.app.vault.modify(localFile, serverNote.content);
+              const np = (0, import_obsidian2.normalizePath)(file.path);
+              this.syncState.set(np, { hash: fnv1a(serverNote.content), version: serverNote.version });
+            }
+          } else if (resolution.choice === "merge" && resolution.mergedContent != null) {
+            const mergeResp = await this.api.pushNote(file.path, resolution.mergedContent, mtime);
+            const localFile = this.app.vault.getAbstractFileByPath(file.path);
+            if (localFile && localFile instanceof import_obsidian2.TFile) {
+              await this.app.vault.modify(localFile, resolution.mergedContent);
+            }
+            if (!("conflict" in mergeResp)) {
+              const np = (0, import_obsidian2.normalizePath)(file.path);
+              this.syncState.set(np, { hash: fnv1a(resolution.mergedContent), version: mergeResp.note.version });
+            }
+          }
+          return false;
+        }
         const serverPath = resp.note.path;
+        const serverVersion = resp.note.version;
         if (serverPath && serverPath !== file.path) {
           const localFile = this.app.vault.getAbstractFileByPath(file.path);
           if (localFile) {
@@ -801,10 +861,10 @@ var SyncEngine = class {
             rlog().info("push", `Renamed: ${file.path} \u2192 ${serverPath} (server sanitized)`);
             new import_obsidian2.Notice(`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`);
           }
-          this.syncedHashes.delete((0, import_obsidian2.normalizePath)(file.path));
-          this.syncedHashes.set((0, import_obsidian2.normalizePath)(serverPath), hash);
+          this.syncState.delete((0, import_obsidian2.normalizePath)(file.path));
+          this.syncState.set((0, import_obsidian2.normalizePath)(serverPath), { hash, version: serverVersion });
         } else {
-          this.syncedHashes.set((0, import_obsidian2.normalizePath)(file.path), hash);
+          this.syncState.set((0, import_obsidian2.normalizePath)(file.path), { hash, version: serverVersion });
         }
       }
       success = true;
@@ -1041,7 +1101,7 @@ var SyncEngine = class {
       if (existing2 && existing2 instanceof import_obsidian2.TFile) {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
-        this.syncedHashes.delete(normalized);
+        this.syncState.delete(normalized);
         rlog().info("pull", `Deleted: ${change.path}`);
         return true;
       }
@@ -1051,8 +1111,16 @@ var SyncEngine = class {
     if (existing && existing instanceof import_obsidian2.TFile) {
       const localContent = await this.app.vault.read(existing);
       const localHash = fnv1a(localContent);
-      const lastSyncedHash = this.syncedHashes.get(normalized);
-      const localModified = lastSyncedHash === void 0 ? localContent !== change.content : localHash !== lastSyncedHash;
+      const lastSynced = this.syncState.get(normalized);
+      const lastSyncedHash = lastSynced == null ? void 0 : lastSynced.hash;
+      let localModified;
+      if (lastSyncedHash !== void 0) {
+        localModified = localHash !== lastSyncedHash;
+      } else {
+        const localMtimeS = existing.stat.mtime / 1e3;
+        const stale = change.mtime - localMtimeS > STALE_THRESHOLD_S;
+        localModified = stale ? false : localContent !== change.content;
+      }
       if (!forceOverwrite && localModified && localContent !== change.content) {
         const localMtime = existing.stat.mtime / 1e3;
         devLog().log("pull", `conflict: ${change.path} (localHash=${localHash} syncedHash=${lastSyncedHash})`);
@@ -1074,7 +1142,7 @@ var SyncEngine = class {
         } else if (resolution.choice === "keep-local") {
           try {
             await this.pushFile(existing);
-            this.syncedHashes.set(normalized, localHash);
+            this.syncState.set(normalized, { hash: localHash, version: lastSynced == null ? void 0 : lastSynced.version });
             rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-local | pushOk=true`);
           } catch (e) {
             rlog().error(
@@ -1090,7 +1158,7 @@ var SyncEngine = class {
           const conflictPath = `${baseName} (conflict ${date}).md`;
           try {
             await this.createFileWithFolders(conflictPath, change.content);
-            this.syncedHashes.set((0, import_obsidian2.normalizePath)(conflictPath), fnv1a(change.content));
+            this.syncState.set((0, import_obsidian2.normalizePath)(conflictPath), { hash: fnv1a(change.content), version: change.version });
             rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-both | copyPath=${conflictPath}`);
           } catch (e) {
             rlog().error(
@@ -1103,7 +1171,7 @@ var SyncEngine = class {
         } else if (resolution.choice === "merge" && resolution.mergedContent != null) {
           try {
             await this.app.vault.modify(existing, resolution.mergedContent);
-            this.syncedHashes.set(normalized, fnv1a(resolution.mergedContent));
+            this.syncState.set(normalized, { hash: fnv1a(resolution.mergedContent), version: change.version });
             await this.pushFile(existing);
             rlog().info(
               "conflict",
@@ -1120,17 +1188,17 @@ var SyncEngine = class {
         }
         rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-remote`);
       } else if (localContent === change.content) {
-        this.syncedHashes.set(normalized, localHash);
+        this.syncState.set(normalized, { hash: localHash, version: change.version });
         rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
       await this.app.vault.modify(existing, change.content);
-      this.syncedHashes.set(normalized, fnv1a(change.content));
+      this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
       rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
       return true;
     } else {
       await this.createFileWithFolders(normalized, change.content);
-      this.syncedHashes.set(normalized, fnv1a(change.content));
+      this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
       rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
       return true;
     }
@@ -2605,8 +2673,11 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     if ((_a = saved == null ? void 0 : saved.offlineQueue) == null ? void 0 : _a.length) {
       this.syncEngine.queue.load(saved.offlineQueue);
     }
-    if (saved == null ? void 0 : saved.syncedHashes) {
+    if (saved == null ? void 0 : saved.syncState) {
+      this.syncEngine.importSyncState(saved.syncState);
+    } else if (saved == null ? void 0 : saved.syncedHashes) {
       this.syncEngine.importHashes(saved.syncedHashes);
+      devLog().log("lifecycle", "Migrated legacy syncedHashes \u2192 syncState");
     }
     this.addSettingTab(new EngramSyncSettingTab(this.app, this));
     this.registerEvent(
@@ -2792,6 +2863,8 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       settings: this.settings,
       lastSync,
       offlineQueue: offlineQueue != null ? offlineQueue : this.syncEngine.queue.all(),
+      syncState: this.syncEngine.exportSyncState(),
+      // Dual-write legacy format for rollback safety (remove after one release cycle)
       syncedHashes: this.syncEngine.exportHashes()
     });
   }
