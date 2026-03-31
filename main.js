@@ -1674,7 +1674,8 @@ var DEFAULT_SETTINGS = {
   liveSyncEnabled: false,
   maxFileSizeMB: 5,
   conflictViewMode: "unified",
-  remoteLoggingEnabled: false
+  remoteLoggingEnabled: false,
+  conflictResolution: "auto"
 };
 
 // src/sync.ts
@@ -2878,6 +2879,24 @@ var SyncEngine = class {
   }
   /** Resolve a conflict via callback or auto-resolve as keep-remote. */
   async resolveConflict(info) {
+    if (this.settings.conflictResolution === "auto") {
+      const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "").slice(0, 15);
+      const normalized = (0, import_obsidian2.normalizePath)(info.path);
+      const baseName = normalized.replace(/\.md$/, "");
+      const conflictPath = `${baseName} (conflict ${ts}).md`;
+      try {
+        await this.createFileWithFolders(conflictPath, info.remoteContent);
+        this.syncState.set((0, import_obsidian2.normalizePath)(conflictPath), {
+          hash: fnv1a(info.remoteContent),
+          version: void 0
+        });
+        rlog().info("conflict", `Auto-resolved: ${info.path} \u2192 conflict file ${conflictPath}`);
+        new import_obsidian2.Notice(`Engram Sync: conflict \u2014 saved copy as "${conflictPath.split("/").pop()}"`, 8e3);
+      } catch (e) {
+        rlog().error("conflict", `Failed to create conflict file: ${conflictPath} | err=${e instanceof Error ? e.message : e}`);
+      }
+      return { choice: "keep-local" };
+    }
     if (this.onConflict) {
       return this.onConflict(info);
     }
@@ -3260,6 +3279,12 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
           this.plugin.settings.maxFileSizeMB = num;
           await this.plugin.saveSettings();
         }
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Conflict resolution").setDesc("How to handle conflicts that can't be auto-merged. Auto creates a conflict copy file (non-blocking). Modal shows an interactive diff dialog.").addDropdown(
+      (dropdown) => dropdown.addOption("auto", "Automatic (conflict files)").addOption("modal", "Interactive (diff modal)").setValue(this.plugin.settings.conflictResolution).onChange(async (value) => {
+        this.plugin.settings.conflictResolution = value;
+        await this.plugin.saveSettings();
       })
     );
     new import_obsidian3.Setting(containerEl).setName("Remote logging").setDesc("Send sync errors and lifecycle events to the server for remote debugging. Useful for diagnosing mobile sync issues.").addToggle(

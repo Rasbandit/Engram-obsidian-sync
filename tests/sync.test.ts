@@ -779,6 +779,10 @@ describe("SyncEngine.getStatus + onStatusChange", () => {
 });
 
 describe("SyncEngine conflict resolution", () => {
+	// Use modal mode for interactive conflict tests
+	const createConflictEngine = (overrides = {}) =>
+		createEngine({ conflictResolution: "modal", ...overrides });
+
 	const makeChange = (overrides = {}): any => ({
 		path: "Notes/Conflict.md",
 		title: "Conflict Note",
@@ -800,7 +804,7 @@ describe("SyncEngine conflict resolution", () => {
 	const REMOTE_MTIME = 1709345700;
 
 	test("detects conflict when both local and remote changed since lastSync", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -868,7 +872,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("keep-local pushes local version to server", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -896,7 +900,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("keep-remote overwrites local with remote content", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -911,7 +915,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("keep-both creates a conflict copy and keeps local", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -932,7 +936,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("skip does nothing", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -949,7 +953,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("defaults to keep-remote when no onConflict handler set", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
@@ -1010,7 +1014,7 @@ describe("SyncEngine conflict resolution", () => {
 	});
 
 	test("still conflicts when firstSync but local file was recently modified", async () => {
-		const engine = createEngine();
+		const engine = createConflictEngine();
 		engine.setLastSync(LAST_SYNC);
 
 		// Local file has mtime within the stale threshold (30 min ago)
@@ -1418,6 +1422,10 @@ describe("SyncEngine pull accuracy", () => {
 		// Local file has a LATER mtime than remote (simulates Obsidian setting mtime to "now")
 		const localFile = new TFile("Notes/Existing.md", Date.now());
 		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		// Content matches the synced hash → user didn't edit locally → no conflict
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Old content");
+		// Establish sync state so the engine knows this file was previously synced
+		engine.importSyncState({ "Notes/Existing.md": { hash: 1126570110 } }); // fnv1a("# Old content")
 
 		const result = await engine.applyChange({
 			path: "Notes/Existing.md",

@@ -488,10 +488,17 @@ export class SyncEngine {
 									this.baseStore?.set(np, merge.merged, mergeResp.note.version);
 								}
 							}
-							rlog().info("conflict", `Auto-merged (push): ${file.path} | mergedLen=${merge.merged.length}`);
+							rlog().info("conflict",
+								`Auto-merged (push): ${file.path}` +
+								` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
+								` | remoteLen=${serverNote.content.length} | mergedLen=${merge.merged.length}`);
 							return false;
 						}
-						rlog().info("conflict", `Auto-merge failed (push): ${file.path} | conflicts=${merge.conflicts.length}`);
+						rlog().info("conflict",
+							`Auto-merge failed (push): ${file.path}` +
+							` | conflicts=${merge.conflicts.length}` +
+							` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
+							` | remoteLen=${serverNote.content.length}`);
 					}
 
 					// Fall back to interactive conflict resolution
@@ -899,10 +906,17 @@ export class SyncEngine {
 						} catch (e) {
 							rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
 						}
-						rlog().info("conflict", `Auto-merged (pull): ${change.path} | mergedLen=${merge.merged.length}`);
+						rlog().info("conflict",
+							`Auto-merged (pull): ${change.path}` +
+							` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
+							` | remoteLen=${change.content.length} | mergedLen=${merge.merged.length}`);
 						return true;
 					}
-					rlog().info("conflict", `Auto-merge failed (pull): ${change.path} | conflicts=${merge.conflicts.length}`);
+					rlog().info("conflict",
+						`Auto-merge failed (pull): ${change.path}` +
+						` | conflicts=${merge.conflicts.length}` +
+						` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
+						` | remoteLen=${change.content.length}`);
 				}
 
 				// Fall back to interactive conflict resolution
@@ -1051,6 +1065,30 @@ export class SyncEngine {
 
 	/** Resolve a conflict via callback or auto-resolve as keep-remote. */
 	private async resolveConflict(info: ConflictInfo): Promise<ConflictResolution> {
+		// Auto mode: create conflict copy file instead of blocking modal
+		if (this.settings.conflictResolution === "auto") {
+			const ts = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15); // YYYYMMDDTHHmmss
+			const normalized = normalizePath(info.path);
+			const baseName = normalized.replace(/\.md$/, "");
+			const conflictPath = `${baseName} (conflict ${ts}).md`;
+			try {
+				await this.createFileWithFolders(conflictPath, info.remoteContent);
+				this.syncState.set(normalizePath(conflictPath), {
+					hash: fnv1a(info.remoteContent),
+					version: undefined,
+				});
+				rlog().info("conflict",
+					`Auto-resolved: ${info.path} → conflict file ${conflictPath}` +
+					` | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}` +
+					` | hasBase=${info.baseContent != null}`);
+				new Notice(`Engram Sync: conflict — saved copy as "${conflictPath.split("/").pop()}"`, 8000);
+			} catch (e) {
+				rlog().error("conflict", `Failed to create conflict file: ${conflictPath} | err=${e instanceof Error ? e.message : e}`);
+			}
+			// Keep local as-is, remote saved as conflict copy
+			return { choice: "keep-local" };
+		}
+
 		if (this.onConflict) {
 			return this.onConflict(info);
 		}

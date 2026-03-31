@@ -18,6 +18,10 @@ export interface EngramSyncSettings {
 	conflictViewMode: "unified" | "side-by-side";
 	/** Send errors and sync lifecycle events to the server for remote debugging */
 	remoteLoggingEnabled: boolean;
+	/** How to handle conflicts that can't be auto-merged.
+	 *  "auto" creates a conflict copy file (non-blocking).
+	 *  "modal" shows the interactive diff modal. */
+	conflictResolution: "auto" | "modal";
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {
@@ -30,6 +34,7 @@ export const DEFAULT_SETTINGS: EngramSyncSettings = {
 	maxFileSizeMB: 5,
 	conflictViewMode: "unified",
 	remoteLoggingEnabled: false,
+	conflictResolution: "auto",
 };
 
 /** A note as returned by POST /notes */

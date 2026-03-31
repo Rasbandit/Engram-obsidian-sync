@@ -105,6 +105,20 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Conflict resolution")
+			.setDesc("How to handle conflicts that can't be auto-merged. Auto creates a conflict copy file (non-blocking). Modal shows an interactive diff dialog.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("auto", "Automatic (conflict files)")
+					.addOption("modal", "Interactive (diff modal)")
+					.setValue(this.plugin.settings.conflictResolution)
+					.onChange(async (value) => {
+						this.plugin.settings.conflictResolution = value as "auto" | "modal";
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Remote logging")
 			.setDesc("Send sync errors and lifecycle events to the server for remote debugging. Useful for diagnosing mobile sync issues.")
 			.addToggle((toggle) =>
