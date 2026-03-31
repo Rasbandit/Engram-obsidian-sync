@@ -2396,10 +2396,16 @@ var SyncEngine = class {
                   (_b = this.baseStore) == null ? void 0 : _b.set(np, merge.merged, mergeResp.note.version);
                 }
               }
-              rlog().info("conflict", `Auto-merged (push): ${file.path} | mergedLen=${merge.merged.length}`);
+              rlog().info(
+                "conflict",
+                `Auto-merged (push): ${file.path} | baseLen=${pushBase.content.length} | localLen=${content.length} | remoteLen=${serverNote.content.length} | mergedLen=${merge.merged.length}`
+              );
               return false;
             }
-            rlog().info("conflict", `Auto-merge failed (push): ${file.path} | conflicts=${merge.conflicts.length}`);
+            rlog().info(
+              "conflict",
+              `Auto-merge failed (push): ${file.path} | conflicts=${merge.conflicts.length} | baseLen=${pushBase.content.length} | localLen=${content.length} | remoteLen=${serverNote.content.length}`
+            );
           }
           const resolution = await this.resolveConflict({
             path: file.path,
@@ -2743,10 +2749,16 @@ var SyncEngine = class {
             } catch (e) {
               rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
             }
-            rlog().info("conflict", `Auto-merged (pull): ${change.path} | mergedLen=${merge.merged.length}`);
+            rlog().info(
+              "conflict",
+              `Auto-merged (pull): ${change.path} | baseLen=${pullBase.content.length} | localLen=${localContent.length} | remoteLen=${change.content.length} | mergedLen=${merge.merged.length}`
+            );
             return true;
           }
-          rlog().info("conflict", `Auto-merge failed (pull): ${change.path} | conflicts=${merge.conflicts.length}`);
+          rlog().info(
+            "conflict",
+            `Auto-merge failed (pull): ${change.path} | conflicts=${merge.conflicts.length} | baseLen=${pullBase.content.length} | localLen=${localContent.length} | remoteLen=${change.content.length}`
+          );
         }
         const resolution = await this.resolveConflict({
           path: change.path,
@@ -2890,7 +2902,10 @@ var SyncEngine = class {
           hash: fnv1a(info.remoteContent),
           version: void 0
         });
-        rlog().info("conflict", `Auto-resolved: ${info.path} \u2192 conflict file ${conflictPath}`);
+        rlog().info(
+          "conflict",
+          `Auto-resolved: ${info.path} \u2192 conflict file ${conflictPath} | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length} | hasBase=${info.baseContent != null}`
+        );
         new import_obsidian2.Notice(`Engram Sync: conflict \u2014 saved copy as "${conflictPath.split("/").pop()}"`, 8e3);
       } catch (e) {
         rlog().error("conflict", `Failed to create conflict file: ${conflictPath} | err=${e instanceof Error ? e.message : e}`);
