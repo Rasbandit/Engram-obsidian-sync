@@ -978,6 +978,60 @@ describe("SyncEngine conflict resolution", () => {
 		expect(mockApp.vault.trash).toHaveBeenCalled();
 	});
 
+	test("no conflict when firstSync and local file is stale (mtime older than remote)", async () => {
+		const engine = createEngine();
+		engine.setLastSync(LAST_SYNC);
+
+		// Local file has old mtime (2 weeks ago) — user hasn't touched it
+		const TWO_WEEKS_AGO_MS = (REMOTE_MTIME - 14 * 86400) * 1000;
+		const localFile = new TFile("Notes/Conflict.md", TWO_WEEKS_AGO_MS);
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Old local version");
+
+		// No syncedHash exists (firstSync=true scenario)
+		// Remote has newer content with recent mtime
+		let conflictCalled = false;
+		engine.onConflict = async () => {
+			conflictCalled = true;
+			return { choice: "keep-remote" };
+		};
+
+		await engine.applyChange(makeChange({
+			content: "# Updated remote version",
+			mtime: REMOTE_MTIME,
+		}));
+
+		// Should NOT trigger conflict — local is stale, remote is newer
+		expect(conflictCalled).toBe(false);
+		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remote version");
+	});
+
+	test("still conflicts when firstSync but local file was recently modified", async () => {
+		const engine = createEngine();
+		engine.setLastSync(LAST_SYNC);
+
+		// Local file has mtime within the stale threshold (30 min ago)
+		// — user plausibly edited it, so conflict should still trigger
+		const THIRTY_MIN_AGO_MS = (REMOTE_MTIME - 1800) * 1000;
+		const localFile = new TFile("Notes/Conflict.md", THIRTY_MIN_AGO_MS);
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# User just edited this");
+
+		let conflictCalled = false;
+		engine.onConflict = async () => {
+			conflictCalled = true;
+			return { choice: "keep-remote" };
+		};
+
+		await engine.applyChange(makeChange({
+			content: "# Remote version",
+			mtime: REMOTE_MTIME,
+		}));
+
+		// SHOULD trigger conflict — local was recently edited
+		expect(conflictCalled).toBe(true);
+	});
+
 	test("no false conflict when remote appends to previously synced file", async () => {
 		const engine = createEngine();
 		engine.setLastSync(LAST_SYNC);
