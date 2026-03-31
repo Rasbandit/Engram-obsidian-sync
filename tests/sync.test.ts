@@ -1039,6 +1039,104 @@ describe("SyncEngine conflict resolution", () => {
 		expect(conflictCalled).toBe(true);
 	});
 
+	test("3-way merge overlap falls through to conflict handler with baseContent", async () => {
+		const engine = createConflictEngine();
+		engine.setLastSync(LAST_SYNC);
+
+		// Wire up a real BaseStore with the base content
+		const { BaseStore } = require("../src/base-store");
+		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
+		baseStore.set("Notes/Conflict.md", "# Title\nBase content here", 1);
+		engine.baseStore = baseStore;
+
+		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		// Both sides edited the same line — overlap guaranteed
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Title\nLocal edit here");
+
+		let conflictReceived: any = null;
+		engine.onConflict = async (info) => {
+			conflictReceived = info;
+			return { choice: "keep-remote" };
+		};
+
+		await engine.applyChange(makeChange({
+			content: "# Title\nRemote edit here",
+			mtime: REMOTE_MTIME,
+		}));
+
+		// 3-way merge should have failed, falling through to onConflict
+		expect(conflictReceived).not.toBeNull();
+		expect(conflictReceived.baseContent).toBe("# Title\nBase content here");
+		expect(conflictReceived.localContent).toBe("# Title\nLocal edit here");
+		expect(conflictReceived.remoteContent).toBe("# Title\nRemote edit here");
+	});
+
+	test("no baseStore entry skips merge, still detects conflict", async () => {
+		const engine = createConflictEngine();
+		engine.setLastSync(LAST_SYNC);
+
+		// No baseStore set — simulates first sync after v0.6.0 upgrade
+		engine.baseStore = null;
+
+		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
+		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+
+		let conflictReceived: any = null;
+		engine.onConflict = async (info) => {
+			conflictReceived = info;
+			return { choice: "keep-remote" };
+		};
+
+		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
+
+		expect(conflictReceived).not.toBeNull();
+		expect(conflictReceived.path).toBe("Notes/Conflict.md");
+		expect(conflictReceived.baseContent).toBeUndefined();
+	});
+
+	test("3-way merge clean auto-resolves without calling conflict handler", async () => {
+		const engine = createConflictEngine();
+		engine.setLastSync(LAST_SYNC);
+
+		// Wire up BaseStore with the base content
+		const { BaseStore } = require("../src/base-store");
+		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
+		baseStore.set("Notes/Conflict.md", "# Title\nSection A\n\nSection B", 1);
+		engine.baseStore = baseStore;
+
+		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
+		(mockApp.vault.getAbstractFileByPath as jest.Mock)
+			.mockReturnValueOnce(localFile)  // applyChange lookup
+			.mockReturnValueOnce(localFile); // pushFile lookup
+		// Local edited Section A, remote edited Section B — non-overlapping
+		(mockApp.vault.read as jest.Mock)
+			.mockResolvedValueOnce("# Title\nLocal A\n\nSection B")   // conflict check
+			.mockResolvedValueOnce("# Title\nLocal A\n\nRemote B");   // pushFile reads merged
+
+		let conflictCalled = false;
+		engine.onConflict = async () => {
+			conflictCalled = true;
+			return { choice: "keep-remote" };
+		};
+
+		await engine.applyChange(makeChange({
+			content: "# Title\nSection A\n\nRemote B",
+			mtime: REMOTE_MTIME,
+		}));
+
+		// Should auto-merge without calling conflict handler
+		expect(conflictCalled).toBe(false);
+		// Vault should be modified with merged content
+		expect(mockApp.vault.modify).toHaveBeenCalledWith(
+			localFile,
+			"# Title\nLocal A\n\nRemote B",
+		);
+	});
+
 	test("no false conflict when remote appends to previously synced file", async () => {
 		const engine = createEngine();
 		engine.setLastSync(LAST_SYNC);
