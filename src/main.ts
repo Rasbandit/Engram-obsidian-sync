@@ -9,7 +9,7 @@ import { EngramApi } from "./api";
 import { EngramSyncSettings, DEFAULT_SETTINGS, FileSyncState, SyncStatus } from "./types";
 import { SyncEngine } from "./sync";
 import { EngramSyncSettingTab } from "./settings";
-import { NoteStream } from "./stream";
+import { NoteChannel } from "./channel";
 import { FirstSyncModal } from "./first-sync-modal";
 import { ConflictModal } from "./conflict-modal";
 import { SearchModal } from "./search-modal";
@@ -35,7 +35,7 @@ export default class EngramSyncPlugin extends Plugin {
 	api: EngramApi = new EngramApi("", "");
 	syncEngine: SyncEngine = null!;
 	private syncInterval: ReturnType<typeof setInterval> | null = null;
-	noteStream: NoteStream | null = null;
+	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private sseConnected: boolean = false;
 	private baseStore: BaseStore | null = null;
@@ -330,7 +330,7 @@ export default class EngramSyncPlugin extends Plugin {
 	}
 
 	setupNoteStream(): void {
-		// Disconnect existing stream
+		// Disconnect existing channel
 		this.noteStream?.disconnect();
 		this.noteStream = null;
 
@@ -341,25 +341,32 @@ export default class EngramSyncPlugin extends Plugin {
 			return;
 		}
 
-		this.noteStream = new NoteStream(apiUrl, apiKey);
+		// Fetch user_id (needed for channel topic "sync:{user_id}"), then connect
+		this.api.getMe().then((user) => {
+			const channel = new NoteChannel(apiUrl, apiKey, String(user.id));
 
-		this.noteStream.onEvent = (event) => {
-			this.syncEngine.handleStreamEvent(event);
-		};
+			channel.onEvent = (event) => {
+				this.syncEngine.handleStreamEvent(event);
+			};
 
-		this.noteStream.onStatusChange = (connected) => {
-			this.sseConnected = connected;
-			this.updateStatusBar(this.syncEngine.getStatus());
-			// Catch-up pull on reconnect to cover missed events
-			if (connected) {
-				this.syncEngine.pull().catch((e) => {
-					console.error("Engram Sync: catch-up pull failed", e);
-					rlog().error("sse", `Catch-up pull on SSE reconnect failed: ${e instanceof Error ? e.message : e}`);
-				});
-			}
-		};
+			channel.onStatusChange = (connected) => {
+				this.sseConnected = connected;
+				this.updateStatusBar(this.syncEngine.getStatus());
+				// Catch-up pull on reconnect to cover missed events during disconnect
+				if (connected) {
+					this.syncEngine.pull().catch((e) => {
+						console.error("Engram Sync: catch-up pull failed", e);
+						rlog().error("channel", `Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`);
+					});
+				}
+			};
 
-		this.noteStream.connect();
+			this.noteStream = channel;
+			channel.connect();
+		}).catch((e) => {
+			console.error("Engram Sync: failed to fetch user id for channel", e);
+			rlog().error("channel", `getMe() failed: ${e instanceof Error ? e.message : e}`);
+		});
 	}
 
 	/** Run sync, showing first-sync modal if no prior sync state exists. */

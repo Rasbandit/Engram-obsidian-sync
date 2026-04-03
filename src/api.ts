@@ -60,6 +60,12 @@ export class EngramApi {
 		}
 	}
 
+	/** Get the current authenticated user (id + email). Used to determine channel topic. */
+	async getMe(): Promise<{ id: number; email: string }> {
+		const resp = await this.request("GET", "/me");
+		return (resp.json as { user: { id: number; email: string } }).user;
+	}
+
 	/** Authenticated ping — verifies both connectivity and API key. */
 	async ping(): Promise<{ ok: boolean; error?: string }> {
 		try {

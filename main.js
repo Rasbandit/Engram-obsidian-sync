@@ -1529,6 +1529,11 @@ var EngramApi = class {
       return false;
     }
   }
+  /** Get the current authenticated user (id + email). Used to determine channel topic. */
+  async getMe() {
+    const resp = await this.request("GET", "/me");
+    return resp.json.user;
+  }
   /** Authenticated ping — verifies both connectivity and API key. */
   async ping() {
     try {
@@ -3371,10 +3376,14 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
   }
 };
 
-// src/stream.ts
-var NoteStream = class {
-  constructor(baseUrl, apiKey) {
-    this.controller = null;
+// src/channel.ts
+var NoteChannel = class {
+  constructor(baseUrl, apiKey, userId) {
+    this.ws = null;
+    this.ref = 0;
+    this.joinRef = "1";
+    this.heartbeatTimer = null;
+    this.reconnectTimer = null;
     this.reconnectMs = 1e3;
     this.maxReconnectMs = 6e4;
     this.connected = false;
@@ -3382,26 +3391,112 @@ var NoteStream = class {
     this.onStatusChange = null;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.apiKey = apiKey;
+    this.userId = userId;
   }
-  updateConfig(baseUrl, apiKey) {
+  updateConfig(baseUrl, apiKey, userId) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.apiKey = apiKey;
+    this.userId = userId;
   }
-  async connect() {
-    if (this.controller) return;
+  connect() {
+    if (this.ws) return;
     this.reconnectMs = 1e3;
-    await this.startStream();
+    this.openSocket();
   }
   disconnect() {
-    if (this.controller) {
-      this.controller.abort();
-      this.controller = null;
+    this.clearTimers();
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
     }
     this.setConnected(false);
-    rlog().info("sse", "SSE disconnected");
+    rlog().info("channel", "Channel disconnected");
   }
   isConnected() {
     return this.connected;
+  }
+  // ---------------------------------------------------------------------------
+  // Private
+  // ---------------------------------------------------------------------------
+  openSocket() {
+    const wsBase = this.baseUrl.replace(/^http/, "ws").replace(/^https/, "wss");
+    const url = `${wsBase}/socket/websocket?token=${encodeURIComponent(this.apiKey)}&vsn=2.0.0`;
+    try {
+      this.ws = new WebSocket(url);
+    } catch (e) {
+      rlog().error("channel", `WebSocket open error: ${e}`);
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws.onopen = () => {
+      this.reconnectMs = 1e3;
+      this.joinChannel();
+      this.startHeartbeat();
+      rlog().info("channel", "WebSocket opened, joining channel");
+    };
+    this.ws.onmessage = (evt) => {
+      this.handleMessage(evt.data);
+    };
+    this.ws.onerror = (e) => {
+      rlog().error("channel", `WebSocket error: ${JSON.stringify(e)}`);
+    };
+    this.ws.onclose = () => {
+      this.clearTimers();
+      this.ws = null;
+      this.setConnected(false);
+      rlog().info("channel", `Channel closed, reconnecting in ${this.reconnectMs}ms`);
+      this.scheduleReconnect();
+    };
+  }
+  joinChannel() {
+    this.send([this.joinRef, String(++this.ref), `sync:${this.userId}`, "phx_join", {}]);
+  }
+  startHeartbeat() {
+    this.heartbeatTimer = setInterval(() => {
+      var _a;
+      if (((_a = this.ws) == null ? void 0 : _a.readyState) === WebSocket.OPEN) {
+        this.send([null, String(++this.ref), "phoenix", "heartbeat", {}]);
+      }
+    }, 3e4);
+  }
+  handleMessage(raw) {
+    var _a, _b;
+    let msg;
+    try {
+      msg = JSON.parse(raw);
+    } catch (e) {
+      rlog().error("channel", `Failed to parse message: ${raw}`);
+      return;
+    }
+    const [_joinRef, _ref, _topic, event, payload] = msg;
+    if (event === "phx_reply") {
+      const status = payload.status;
+      if (status === "ok" && !this.connected) {
+        this.setConnected(true);
+        rlog().info("channel", `Joined sync:${this.userId}`);
+      } else if (status === "error") {
+        rlog().error("channel", `Channel join error: ${JSON.stringify(payload)}`);
+      }
+      return;
+    }
+    if (event === "note_changed" && payload) {
+      const p = payload;
+      const streamEvent = {
+        event_type: p.event_type,
+        path: p.path,
+        timestamp: Date.now(),
+        kind: (_a = p.kind) != null ? _a : "note"
+      };
+      rlog().info("channel", `Event: ${streamEvent.event_type} ${streamEvent.path}`);
+      (_b = this.onEvent) == null ? void 0 : _b.call(this, streamEvent);
+    }
+  }
+  send(msg) {
+    var _a;
+    if (((_a = this.ws) == null ? void 0 : _a.readyState) === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+    }
   }
   setConnected(value) {
     var _a;
@@ -3410,72 +3505,22 @@ var NoteStream = class {
       (_a = this.onStatusChange) == null ? void 0 : _a.call(this, value);
     }
   }
-  async startStream() {
-    var _a;
-    this.controller = new AbortController();
-    try {
-      const resp = await fetch(`${this.baseUrl}/notes/stream`, {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`
-        },
-        signal: this.controller.signal
-      });
-      if (!resp.ok || !resp.body) {
-        throw new Error(`SSE connect failed: HTTP ${resp.status}`);
-      }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-      let currentData = "";
-      this.setConnected(true);
-      this.reconnectMs = 1e3;
-      rlog().info("sse", "SSE connected");
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            currentData = line.slice(6);
-          } else if (line === "") {
-            if (currentEvent === "note_change" && currentData) {
-              try {
-                const event = JSON.parse(currentData);
-                (_a = this.onEvent) == null ? void 0 : _a.call(this, event);
-              } catch (e) {
-                console.error("Engram SSE: failed to parse event", e);
-              }
-            }
-            currentEvent = "";
-            currentData = "";
-          }
-        }
-      }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") {
-        return;
-      }
-      console.error("Engram SSE: stream error", e);
-      rlog().error("sse", `SSE stream error: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
-    } finally {
-      this.setConnected(false);
+  clearTimers() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
-    if (this.controller && !this.controller.signal.aborted) {
-      const jitter = Math.random() * this.reconnectMs * 0.5;
-      const delay = this.reconnectMs + jitter;
-      console.log(`Engram SSE: reconnecting in ${Math.round(delay)}ms`);
-      rlog().info("sse", `SSE reconnecting in ${Math.round(delay)}ms`);
-      this.controller = null;
-      setTimeout(() => {
-        this.reconnectMs = Math.min(this.reconnectMs * 2, this.maxReconnectMs);
-        this.startStream();
-      }, delay);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+  }
+  scheduleReconnect() {
+    const jitter = Math.random() * this.reconnectMs * 0.5;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectMs = Math.min(this.reconnectMs * 2, this.maxReconnectMs);
+      this.openSocket();
+    }, this.reconnectMs + jitter);
   }
 };
 
@@ -4638,21 +4683,27 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       this.updateStatusBar(this.syncEngine.getStatus());
       return;
     }
-    this.noteStream = new NoteStream(apiUrl, apiKey);
-    this.noteStream.onEvent = (event) => {
-      this.syncEngine.handleStreamEvent(event);
-    };
-    this.noteStream.onStatusChange = (connected) => {
-      this.sseConnected = connected;
-      this.updateStatusBar(this.syncEngine.getStatus());
-      if (connected) {
-        this.syncEngine.pull().catch((e) => {
-          console.error("Engram Sync: catch-up pull failed", e);
-          rlog().error("sse", `Catch-up pull on SSE reconnect failed: ${e instanceof Error ? e.message : e}`);
-        });
-      }
-    };
-    this.noteStream.connect();
+    this.api.getMe().then((user) => {
+      const channel = new NoteChannel(apiUrl, apiKey, String(user.id));
+      channel.onEvent = (event) => {
+        this.syncEngine.handleStreamEvent(event);
+      };
+      channel.onStatusChange = (connected) => {
+        this.sseConnected = connected;
+        this.updateStatusBar(this.syncEngine.getStatus());
+        if (connected) {
+          this.syncEngine.pull().catch((e) => {
+            console.error("Engram Sync: catch-up pull failed", e);
+            rlog().error("channel", `Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`);
+          });
+        }
+      };
+      this.noteStream = channel;
+      channel.connect();
+    }).catch((e) => {
+      console.error("Engram Sync: failed to fetch user id for channel", e);
+      rlog().error("channel", `getMe() failed: ${e instanceof Error ? e.message : e}`);
+    });
   }
   /** Run sync, showing first-sync modal if no prior sync state exists. */
   async doSyncWithFirstSyncCheck() {
