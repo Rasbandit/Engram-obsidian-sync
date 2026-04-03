@@ -60,7 +60,6 @@ npm run build         # Build the plugin (production)
 | `tests/api.test.ts` | 25 | All EngramApi methods (pushNote, getChanges, deleteNote, getRateLimit, getManifest, search), base64 utilities, auth headers, URL encoding, error handling |
 | `tests/offline-queue.test.ts` | 17 | Enqueue/dequeue, deduplication by path, oldest-first ordering, load/clear, debounced persistence, coalesced writes, destroy cancels timers |
 | `tests/remote-log.test.ts` | 15 | Buffer management, flush threshold (20 entries), ring buffer overflow (200 cap), flush-on-disable, singleton lifecycle |
-| `tests/stream.test.ts` | 10 | NoteStream: connect/disconnect state, auth headers, SSE event parsing, idempotent connect, error handling |
 
 ### Test configuration
 

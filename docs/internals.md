@@ -11,7 +11,7 @@
 | `src/types.ts` | ~175 | All interfaces: settings, API responses, queue entries, sync status |
 | `src/settings.ts` | ~178 | Settings tab UI (PluginSettingTab) |
 | `src/offline-queue.ts` | ~80 | Persistent offline retry queue (Map-based, dedupes by path, debounced persistence) |
-| `src/stream.ts` | ~132 | SSE client for `/notes/stream` (fetch + ReadableStream, not EventSource) |
+| `src/channel.ts` | ~185 | Phoenix WebSocket channel client for real-time sync (replaces SSE) |
 | `src/first-sync-modal.ts` | ~62 | First-sync confirmation modal (Push All / Pull Only / Cancel) |
 | `src/conflict-modal.ts` | ~126 | Conflict resolution modal (Keep Local / Keep Remote / Keep Both / Skip) |
 | `src/search-modal.ts` | ~140 | Quick search modal (Mod+Shift+S) — semantic search with debounce, arrow nav |
@@ -33,7 +33,7 @@ EngramSyncPlugin (main.ts)
 │   ├── push semaphore: max 5 concurrent (acquirePushSlot/releasePushSlot)
 │   ├── request pacer: sliding window from configureRateLimit()
 │   └── onConflict: (path, local, remote) → ConflictChoice (wired to ConflictModal)
-├── noteStream: NoteStream (stream.ts)
+├── noteStream: NoteChannel (channel.ts)
 ├── SearchModal (search-modal.ts) — opened via Mod+Shift+S command
 ├── SearchView (search-view.ts) — registered as "engram-search-view" ItemView
 ├── devLog: DevLogBuffer (dev-log.ts) — globalThis.__engramLog (dev builds only)
