@@ -6,14 +6,8 @@ export interface EngramSyncSettings {
 	apiKey: string;
 	/** Glob patterns to ignore (one per line). Defaults: .obsidian/, .trash/, .git/ */
 	ignorePatterns: string;
-	/** Pull interval in minutes (0 = manual only) */
-	syncIntervalMinutes: number;
 	/** Debounce delay in ms for modify events */
 	debounceMs: number;
-	/** Enable SSE live sync for near-instant remote change notifications */
-	liveSyncEnabled: boolean;
-	/** Maximum file size in MB for binary attachments (images, PDFs, etc.) */
-	maxFileSizeMB: number;
 	/** Preferred conflict diff view: unified or side-by-side */
 	conflictViewMode: "unified" | "side-by-side";
 	/** Send errors and sync lifecycle events to the server for remote debugging */
@@ -28,10 +22,7 @@ export const DEFAULT_SETTINGS: EngramSyncSettings = {
 	apiUrl: "",
 	apiKey: "",
 	ignorePatterns: "",
-	syncIntervalMinutes: 5,
 	debounceMs: 2000,
-	liveSyncEnabled: false,
-	maxFileSizeMB: 5,
 	conflictViewMode: "unified",
 	remoteLoggingEnabled: false,
 	conflictResolution: "auto",
@@ -79,7 +70,7 @@ export interface DeleteResponse {
 	path: string;
 }
 
-/** A note change event from the SSE stream */
+/** A note change event from the WebSocket stream */
 export interface NoteStreamEvent {
 	event_type: "upsert" | "delete";
 	path: string;
