@@ -17,7 +17,7 @@ declare const DEV_MODE: boolean;
 interface LogEntry {
 	t: string;    // ISO timestamp
 	ms: number;   // epoch ms (for duration math)
-	cat: string;  // category: pull, push, queue, sse, error, lifecycle
+	cat: string;  // category: pull, push, queue, ws, error, lifecycle
 	msg: string;
 }
 
