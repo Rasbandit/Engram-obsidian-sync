@@ -63,21 +63,33 @@ describe("base64ToArrayBuffer", () => {
 // EngramApi
 // ---------------------------------------------------------------------------
 
+const TEST_SERVER = "http://localhost:8000";
+const TEST_API_BASE = `${TEST_SERVER}/api`;
+const TEST_KEY = "engram_testkey";
+
 describe("EngramApi", () => {
     let api: EngramApi;
 
     beforeEach(() => {
-        api = new EngramApi("http://localhost:8000", "engram_testkey");
+        api = new EngramApi(TEST_SERVER, TEST_KEY);
     });
 
     describe("updateConfig", () => {
-        test("strips trailing slashes from URL", () => {
+        test("strips trailing slashes and appends /api", () => {
             api.updateConfig("http://example.com///", "key2");
-            // Verify by making a request and checking the URL
             mockRequestUrl.mockResolvedValueOnce({ status: 200, json: { status: "ok" } } as any);
             api.health();
             expect(mockRequestUrl).toHaveBeenCalledWith(
-                expect.objectContaining({ url: "http://example.com/health" }),
+                expect.objectContaining({ url: "http://example.com/api/health" }),
+            );
+        });
+
+        test("does not double-append /api if already present", () => {
+            api.updateConfig("http://example.com/api", "key2");
+            mockRequestUrl.mockResolvedValueOnce({ status: 200, json: { status: "ok" } } as any);
+            api.health();
+            expect(mockRequestUrl).toHaveBeenCalledWith(
+                expect.objectContaining({ url: "http://example.com/api/health" }),
             );
         });
     });
@@ -131,7 +143,7 @@ describe("EngramApi", () => {
             expect(mockRequestUrl).toHaveBeenCalledWith(
                 expect.objectContaining({
                     method: "POST",
-                    url: "http://localhost:8000/notes",
+                    url: `${TEST_API_BASE}/notes`,
                     body: JSON.stringify({ path: "Notes/Test.md", content: "# Hello", mtime: 1234567890 }),
                 }),
             );
