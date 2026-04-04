@@ -1,8 +1,8 @@
 /**
  * Phoenix Channel client for Engram real-time sync.
  *
- * Drop-in replacement for NoteStream (SSE). Uses the Phoenix v2 WebSocket
- * wire protocol natively — no phoenix npm package needed.
+ * Uses the Phoenix v2 WebSocket wire protocol natively — no phoenix npm
+ * package needed.
  *
  * Protocol: messages are JSON arrays [join_ref, ref, topic, event, payload]
  */
