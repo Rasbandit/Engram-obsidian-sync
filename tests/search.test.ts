@@ -22,7 +22,7 @@ describe("EngramApi.search", () => {
 		const resp = await api.search("omega oils");
 
 		expect(mockRequestUrl).toHaveBeenCalledWith({
-			url: "http://localhost:8000/search",
+			url: "http://localhost:8000/api/search",
 			method: "POST",
 			headers: {
 				Authorization: "Bearer test-key",

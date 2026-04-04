@@ -21,10 +21,18 @@ export class EngramApi {
 	constructor(
 		private baseUrl: string,
 		private apiKey: string,
-	) {}
+	) {
+		this.baseUrl = EngramApi.normalizeBaseUrl(baseUrl);
+	}
+
+	/** Strip trailing slashes and append /api if not already present. */
+	private static normalizeBaseUrl(url: string): string {
+		const base = url.replace(/\/+$/, "");
+		return base.endsWith("/api") ? base : `${base}/api`;
+	}
 
 	updateConfig(baseUrl: string, apiKey: string): void {
-		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		this.baseUrl = EngramApi.normalizeBaseUrl(baseUrl);
 		this.apiKey = apiKey;
 	}
 
