@@ -25,7 +25,7 @@ A TypeScript sync client. It does NOT parse markdown, generate embeddings, or ta
 2. **Push changes to Engram** — POST /notes with file content + metadata
 3. **Pull changes from Engram** — GET /notes/changes on startup and periodically
 4. **Write remote changes to vault** — files created/edited via MCP or other devices
-5. **Settings panel** — Engram URL, API key, ignore patterns, sync interval
+5. **Settings panel** — Engram URL, API key, ignore patterns, conflict resolution
 
 ### Does NOT
 
@@ -44,17 +44,17 @@ Doc-only changes (CLAUDE.md, docs/) can be committed and pushed directly to main
 **Tests are the spec. If a test fails, fix the app — not the test.**
 
 ```bash
-npm test              # Run all 224 unit tests
+npm test              # Run all 223 unit tests
 npm test -- --verbose # Verbose output
 npm test -- --coverage # With coverage report
 npm run build         # Build the plugin (production)
 ```
 
-### Test files (224 tests across 8 files)
+### Test files (223 tests across 8 files)
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `tests/sync.test.ts` | 117 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, WebSocket events, echo suppression, status tracking, first sync detection, 3-way merge, destroy |
+| `tests/sync.test.ts` | 116 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, WebSocket events, echo suppression, status tracking, first sync detection, 3-way merge, destroy |
 | `tests/api.test.ts` | 25 | All EngramApi methods (pushNote, getChanges, deleteNote, getRateLimit, getManifest, search), base64 utilities, auth headers, URL encoding, error handling |
 | `tests/diff.test.ts` | 17 | computeDiff, groupIntoHunks, buildMergedContent (line-by-line diff, hunk context, merge choices) |
 | `tests/three-way-merge.test.ts` | 15 | 3-way merge via diff-match-patch: clean merges, overlap detection, fallback behavior |
