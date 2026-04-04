@@ -1674,10 +1674,7 @@ var DEFAULT_SETTINGS = {
   apiUrl: "",
   apiKey: "",
   ignorePatterns: "",
-  syncIntervalMinutes: 5,
   debounceMs: 2e3,
-  liveSyncEnabled: false,
-  maxFileSizeMB: 5,
   conflictViewMode: "unified",
   remoteLoggingEnabled: false,
   conflictResolution: "auto"
@@ -2362,12 +2359,6 @@ var SyncEngine = class {
       const mtime = file.stat.mtime / 1e3;
       if (isBinary) {
         const buffer = await this.app.vault.readBinary(file);
-        const maxBytes = this.settings.maxFileSizeMB * 1024 * 1024;
-        if (buffer.byteLength > maxBytes) {
-          this.lastError = `File too large: ${file.path} (${Math.round(buffer.byteLength / 1024 / 1024)}MB > ${this.settings.maxFileSizeMB}MB)`;
-          this.emitStatus();
-          return false;
-        }
         const base64 = arrayBufferToBase64(buffer);
         const mimeType = this.getMimeType(file);
         await this.api.pushAttachment(file.path, base64, mimeType, mtime);
@@ -2499,7 +2490,7 @@ var SyncEngine = class {
     }
     return success;
   }
-  /** Suppress SSE echoes for a path for ECHO_COOLDOWN_MS after push. */
+  /** Suppress WebSocket echoes for a path for ECHO_COOLDOWN_MS after push. */
   markRecentlyPushed(path) {
     const existing = this.recentlyPushed.get(path);
     if (existing) clearTimeout(existing);
@@ -2645,18 +2636,18 @@ var SyncEngine = class {
       await this.flushPostPullPushes();
     }
   }
-  /** Handle an SSE stream event (upsert or delete). */
+  /** Handle a WebSocket stream event (upsert or delete). */
   async handleStreamEvent(event) {
     var _a, _b;
     if (this.shouldIgnore(event.path)) return;
-    devLog().log("sse", `${event.event_type} ${(_a = event.kind) != null ? _a : "note"}: ${event.path}`);
-    rlog().info("sse", `Event: ${event.event_type} ${(_b = event.kind) != null ? _b : "note"}: ${event.path}`);
+    devLog().log("ws", `${event.event_type} ${(_a = event.kind) != null ? _a : "note"}: ${event.path}`);
+    rlog().info("ws", `Event: ${event.event_type} ${(_b = event.kind) != null ? _b : "note"}: ${event.path}`);
     if (this.pushing.has(event.path)) {
-      rlog().info("sse", `Echo skip (pushing): ${event.path}`);
+      rlog().info("ws", `Echo skip (pushing): ${event.path}`);
       return;
     }
     if (this.recentlyPushed.has(event.path)) {
-      rlog().info("sse", `Echo skip (recently pushed): ${event.path}`);
+      rlog().info("ws", `Echo skip (recently pushed): ${event.path}`);
       return;
     }
     const isAttachment = event.kind === "attachment";
@@ -2695,7 +2686,7 @@ var SyncEngine = class {
           });
         }
       } catch (e) {
-        console.error(`Engram Sync: failed to fetch content for SSE event ${event.path}`, e);
+        console.error(`Engram Sync: failed to fetch content for WebSocket event ${event.path}`, e);
       }
     }
   }
@@ -2856,7 +2847,7 @@ var SyncEngine = class {
     }
   }
   /** Apply a remote attachment change to the vault.
-   *  If contentBase64 is provided (from SSE), use it directly. Otherwise fetch it.
+   *  If contentBase64 is provided (from WebSocket), use it directly. Otherwise fetch it.
    *  Returns true when a file was actually created, modified, or trashed. */
   async applyAttachmentChange(change, contentBase64) {
     if (this.shouldIgnore(change.path)) return false;
@@ -3247,6 +3238,22 @@ var SyncEngine = class {
 
 // src/settings.ts
 var import_obsidian3 = require("obsidian");
+var PROBLEMATIC_DIRS = [
+  { pattern: "node_modules/", label: "node_modules", desc: "Node.js dependencies" },
+  { pattern: ".venv/", label: ".venv", desc: "Python virtual environment" },
+  { pattern: "venv/", label: "venv", desc: "Python virtual environment" },
+  { pattern: "__pycache__/", label: "__pycache__", desc: "Python bytecode cache" },
+  { pattern: "vendor/", label: "vendor", desc: "Vendored dependencies" },
+  { pattern: ".gradle/", label: ".gradle", desc: "Gradle build cache" },
+  { pattern: "target/", label: "target", desc: "Rust/Java build output" },
+  { pattern: "build/", label: "build", desc: "Build output" },
+  { pattern: ".next/", label: ".next", desc: "Next.js build output" },
+  { pattern: "dist/", label: "dist", desc: "Distribution build output" },
+  { pattern: ".cargo/", label: ".cargo", desc: "Cargo cache" },
+  { pattern: "Pods/", label: "Pods", desc: "CocoaPods dependencies" },
+  { pattern: ".dart_tool/", label: ".dart_tool", desc: "Dart tool cache" },
+  { pattern: ".cache/", label: ".cache", desc: "Generic cache directory" }
+];
 var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -3256,64 +3263,53 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Engram Sync Settings" });
+    this.renderStatus(containerEl);
+    containerEl.createEl("h3", { text: "Connection" });
     new import_obsidian3.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
       (text) => text.setPlaceholder("http://localhost:8000").setValue(this.plugin.settings.apiUrl).onChange(async (value) => {
         this.plugin.settings.apiUrl = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("API Key").setDesc("Bearer token from Engram settings page (starts with engram_)").addText(
-      (text) => text.setPlaceholder("engram_abc123...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
+      text.setPlaceholder("engram_abc123...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value;
         await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Sync interval (minutes)").setDesc("How often to pull remote changes. 0 = manual only.").addText(
-      (text) => text.setPlaceholder("5").setValue(String(this.plugin.settings.syncIntervalMinutes)).onChange(async (value) => {
-        const num = parseInt(value, 10);
-        if (!isNaN(num) && num >= 0) {
-          this.plugin.settings.syncIntervalMinutes = num;
-          await this.plugin.saveSettings();
+      });
+      text.inputEl.type = "password";
+      text.inputEl.style.fontFamily = "monospace";
+    }).addExtraButton(
+      (btn) => btn.setIcon("eye").setTooltip("Show/hide API key").onClick(() => {
+        const input = containerEl.querySelector(
+          'input[type="password"], input[data-revealed="true"]'
+        );
+        if (!input) return;
+        if (input.type === "password") {
+          input.type = "text";
+          input.dataset.revealed = "true";
+          btn.setIcon("eye-off");
+        } else {
+          input.type = "password";
+          delete input.dataset.revealed;
+          btn.setIcon("eye");
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Debounce (ms)").setDesc("Delay after editing before pushing to Engram. Prevents flooding during typing.").addText(
-      (text) => text.setPlaceholder("2000").setValue(String(this.plugin.settings.debounceMs)).onChange(async (value) => {
-        const num = parseInt(value, 10);
-        if (!isNaN(num) && num >= 100) {
-          this.plugin.settings.debounceMs = num;
-          await this.plugin.saveSettings();
-        }
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Live sync (SSE)").setDesc("Receive remote changes in near real-time via Server-Sent Events. When off, uses interval polling.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.liveSyncEnabled).onChange(async (value) => {
-        this.plugin.settings.liveSyncEnabled = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Max file size (MB)").setDesc("Maximum size for binary attachments (images, PDFs, etc.). Files larger than this are skipped.").addText(
-      (text) => text.setPlaceholder("5").setValue(String(this.plugin.settings.maxFileSizeMB)).onChange(async (value) => {
-        const num = parseInt(value, 10);
-        if (!isNaN(num) && num >= 1 && num <= 100) {
-          this.plugin.settings.maxFileSizeMB = num;
-          await this.plugin.saveSettings();
-        }
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Conflict resolution").setDesc("How to handle conflicts that can't be auto-merged. Auto creates a conflict copy file (non-blocking). Modal shows an interactive diff dialog.").addDropdown(
-      (dropdown) => dropdown.addOption("auto", "Automatic (conflict files)").addOption("modal", "Interactive (diff modal)").setValue(this.plugin.settings.conflictResolution).onChange(async (value) => {
-        this.plugin.settings.conflictResolution = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Remote logging").setDesc("Send sync errors and lifecycle events to the server for remote debugging. Useful for diagnosing mobile sync issues.").addToggle(
+    new import_obsidian3.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
         this.plugin.settings.remoteLoggingEnabled = value;
         await this.plugin.saveSettings();
       })
     );
-    const ignoreSetting = new import_obsidian3.Setting(containerEl).setName("Ignore patterns").setDesc("Extra paths to skip (one per line). Folder patterns end with /. Built-in ignores (.obsidian/, .trash/, .git/) are always applied.").addTextArea((text) => {
+    new import_obsidian3.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
+      (btn) => btn.setButtonText("Test").onClick(async () => {
+        const { ok, error } = await this.plugin.api.ping();
+        new import_obsidian3.Notice(ok ? "Engram: connected!" : `Engram: ${error}`);
+      })
+    );
+    containerEl.createEl("h3", { text: "Ignore Patterns" });
+    this.renderIgnoreWarnings(containerEl);
+    const ignoreSetting = new import_obsidian3.Setting(containerEl).setName("Custom patterns").setDesc("Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/").addTextArea((text) => {
       text.setPlaceholder("drafts/\nsecret.md").setValue(this.plugin.settings.ignorePatterns).onChange(async (value) => {
         this.plugin.settings.ignorePatterns = value;
         await this.plugin.saveSettings();
@@ -3324,15 +3320,23 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
     ignoreSetting.settingEl.style.flexDirection = "column";
     ignoreSetting.settingEl.style.alignItems = "flex-start";
     ignoreSetting.settingEl.style.gap = "8px";
-    containerEl.createEl("h3", { text: "Actions" });
-    new import_obsidian3.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
-      (btn) => btn.setButtonText("Test").onClick(async () => {
-        const { ok, error } = await this.plugin.api.ping();
-        new import_obsidian3.Notice(
-          ok ? "Engram: connected!" : `Engram: ${error}`
-        );
+    containerEl.createEl("h3", { text: "Sync Behavior" });
+    new import_obsidian3.Setting(containerEl).setName("Conflict resolution").setDesc("How to handle conflicts. Automatic creates a conflict copy. Interactive shows a diff dialog.").addDropdown(
+      (dropdown) => dropdown.addOption("auto", "Automatic (conflict files)").addOption("modal", "Interactive (diff modal)").setValue(this.plugin.settings.conflictResolution).onChange(async (value) => {
+        this.plugin.settings.conflictResolution = value;
+        await this.plugin.saveSettings();
       })
     );
+    new import_obsidian3.Setting(containerEl).setName("Debounce (ms)").setDesc("Delay after editing before pushing. Prevents flooding during typing.").addText(
+      (text) => text.setPlaceholder("2000").setValue(String(this.plugin.settings.debounceMs)).onChange(async (value) => {
+        const num = parseInt(value, 10);
+        if (!isNaN(num) && num >= 100) {
+          this.plugin.settings.debounceMs = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    containerEl.createEl("h3", { text: "Actions" });
     new import_obsidian3.Setting(containerEl).setName("Sync now").setDesc("Pull remote changes and push local changes").addButton(
       (btn) => btn.setButtonText("Sync").onClick(async () => {
         new import_obsidian3.Notice("Engram Sync: syncing...");
@@ -3348,11 +3352,13 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Push entire vault").setDesc("Initial import \u2014 push all syncable files to Engram. Only needed once.").addButton(
+    new import_obsidian3.Setting(containerEl).setName("Push entire vault").setDesc("Push all syncable files to Engram. Only needed for initial import.").addButton(
       (btn) => btn.setButtonText("Push All").setWarning().onClick(async () => {
+        const count = this.plugin.syncEngine.countSyncableFiles();
+        if (!confirm(`Push ${count} files to Engram? This may overwrite server content.`)) return;
         try {
-          const count = await this.plugin.syncEngine.pushAll();
-          new import_obsidian3.Notice(`Engram Sync: pushed ${count} files`);
+          const pushed = await this.plugin.syncEngine.pushAll();
+          new import_obsidian3.Notice(`Engram Sync: pushed ${pushed} files`);
         } catch (e) {
           new import_obsidian3.Notice(
             `Engram Sync: ${e instanceof Error ? e.message : "push failed"}`
@@ -3360,8 +3366,9 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Pull all from server").setDesc("Force-pull every note and attachment from the server, overwriting local copies. No conflict prompts.").addButton(
+    new import_obsidian3.Setting(containerEl).setName("Pull all from server").setDesc("Force-pull every note and attachment, overwriting local copies.").addButton(
       (btn) => btn.setButtonText("Pull All").setWarning().onClick(async () => {
+        if (!confirm("Pull all files from server? Local changes will be overwritten.")) return;
         try {
           new import_obsidian3.Notice("Engram Sync: pulling all from server...");
           const count = await this.plugin.syncEngine.pullAll();
@@ -3373,6 +3380,86 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       })
     );
+  }
+  /** Render connection status indicator at the top of settings. */
+  renderStatus(containerEl) {
+    const statusEl = containerEl.createDiv({ cls: "engram-status-bar" });
+    const status = this.plugin.syncEngine.getStatus();
+    const live = this.plugin.isLiveConnected();
+    let dotColor;
+    let label;
+    if (status.state === "offline") {
+      dotColor = "#e03e3e";
+      label = "Disconnected";
+    } else if (status.state === "error") {
+      dotColor = "#e03e3e";
+      label = `Error: ${status.error || "unknown"}`;
+    } else if (live) {
+      dotColor = "#28a745";
+      label = "Connected \u2014 live sync active";
+    } else if (this.plugin.settings.apiUrl && this.plugin.settings.apiKey) {
+      dotColor = "#e5a100";
+      label = "Connected \u2014 polling";
+    } else {
+      dotColor = "#888";
+      label = "Not configured";
+    }
+    const dot = statusEl.createSpan({ cls: "engram-status-dot" });
+    dot.style.display = "inline-block";
+    dot.style.width = "8px";
+    dot.style.height = "8px";
+    dot.style.borderRadius = "50%";
+    dot.style.backgroundColor = dotColor;
+    dot.style.marginRight = "8px";
+    statusEl.createSpan({ text: label });
+    if (status.lastSync) {
+      const date = new Date(status.lastSync);
+      const timeEl = statusEl.createDiv({ cls: "engram-status-time" });
+      timeEl.style.fontSize = "0.85em";
+      timeEl.style.color = "var(--text-muted)";
+      timeEl.style.marginTop = "2px";
+      timeEl.setText(`Last sync: ${date.toLocaleString()}`);
+    }
+    statusEl.style.marginBottom = "16px";
+    statusEl.style.padding = "8px 12px";
+    statusEl.style.borderRadius = "6px";
+    statusEl.style.backgroundColor = "var(--background-secondary)";
+  }
+  /** Scan vault for problematic directories and render warnings with add-to-ignore buttons. */
+  renderIgnoreWarnings(containerEl) {
+    const currentIgnores = this.plugin.settings.ignorePatterns;
+    const detected = [];
+    for (const dir of PROBLEMATIC_DIRS) {
+      if (currentIgnores.includes(dir.pattern)) continue;
+      const folder = this.app.vault.getAbstractFileByPath(dir.label);
+      if (folder && folder instanceof import_obsidian3.TFolder) {
+        let count = 0;
+        const walk = (f) => {
+          for (const child of f.children) {
+            if (child instanceof import_obsidian3.TFolder) walk(child);
+            else count++;
+          }
+        };
+        walk(folder);
+        detected.push({ ...dir, count });
+      }
+    }
+    if (detected.length === 0) return;
+    for (const item of detected) {
+      const warning = new import_obsidian3.Setting(containerEl).setName(`\u26A0 Detected: ${item.label}/ (${item.count.toLocaleString()} files)`).setDesc(`${item.desc} \u2014 should not be synced`).addButton(
+        (btn) => btn.setButtonText("Add to ignores").setCta().onClick(async () => {
+          const current = this.plugin.settings.ignorePatterns.trim();
+          this.plugin.settings.ignorePatterns = current ? `${current}
+${item.pattern}` : item.pattern;
+          await this.plugin.saveSettings();
+          new import_obsidian3.Notice(`Added ${item.pattern} to ignore patterns`);
+          this.display();
+        })
+      );
+      warning.settingEl.style.backgroundColor = "var(--background-modifier-error-rgb, rgba(255,0,0,0.05))";
+      warning.settingEl.style.borderRadius = "6px";
+      warning.settingEl.style.padding = "8px";
+    }
   }
 };
 
@@ -4415,7 +4502,7 @@ var BaseStore = class {
 };
 
 // src/main.ts
-var EngramSyncPlugin = class extends import_obsidian8.Plugin {
+var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -4424,8 +4511,12 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     this.syncInterval = null;
     this.noteStream = null;
     this.statusBarEl = null;
-    this.sseConnected = false;
+    this.liveConnected = false;
     this.baseStore = null;
+  }
+  /** Whether the WebSocket channel is currently connected (for settings UI). */
+  isLiveConnected() {
+    return this.liveConnected;
   }
   async onload() {
     var _a;
@@ -4677,19 +4768,29 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     var _a;
     (_a = this.noteStream) == null ? void 0 : _a.disconnect();
     this.noteStream = null;
-    const { apiUrl, apiKey, liveSyncEnabled } = this.settings;
-    if (!liveSyncEnabled || !apiUrl || !apiKey) {
-      this.sseConnected = false;
+    const { apiUrl, apiKey } = this.settings;
+    if (!apiUrl || !apiKey) {
+      this.liveConnected = false;
       this.updateStatusBar(this.syncEngine.getStatus());
       return;
     }
+    this.connectChannel();
+  }
+  /** Attempt to connect the WebSocket channel with retry on getMe() failure. */
+  connectChannel(attempt = 0) {
+    const maxAttempts = 5;
+    const baseDelay = 2e3;
     this.api.getMe().then((user) => {
-      const channel = new NoteChannel(apiUrl, apiKey, String(user.id));
+      const channel = new NoteChannel(
+        this.settings.apiUrl,
+        this.settings.apiKey,
+        String(user.id)
+      );
       channel.onEvent = (event) => {
         this.syncEngine.handleStreamEvent(event);
       };
       channel.onStatusChange = (connected) => {
-        this.sseConnected = connected;
+        this.liveConnected = connected;
         this.updateStatusBar(this.syncEngine.getStatus());
         if (connected) {
           this.syncEngine.pull().catch((e) => {
@@ -4702,7 +4803,11 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       channel.connect();
     }).catch((e) => {
       console.error("Engram Sync: failed to fetch user id for channel", e);
-      rlog().error("channel", `getMe() failed: ${e instanceof Error ? e.message : e}`);
+      rlog().error("channel", `getMe() failed (attempt ${attempt + 1}/${maxAttempts}): ${e instanceof Error ? e.message : e}`);
+      if (attempt < maxAttempts - 1) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        setTimeout(() => this.connectChannel(attempt + 1), delay);
+      }
     });
   }
   /** Run sync, showing first-sync modal if no prior sync state exists. */
@@ -4736,7 +4841,7 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
       }
     }
   }
-  /** Update status bar text and tooltip based on sync state + SSE connection. */
+  /** Update status bar text and tooltip based on sync state + WebSocket connection. */
   updateStatusBar(status) {
     if (!this.statusBarEl) return;
     let text;
@@ -4753,9 +4858,9 @@ var EngramSyncPlugin = class extends import_obsidian8.Plugin {
     } else if (status.pending > 0) {
       text = `Engram: pending (${status.pending})`;
       tooltip = `${status.pending} file(s) queued`;
-    } else if (this.sseConnected) {
+    } else if (this.liveConnected) {
       text = "Engram: live";
-      tooltip = "SSE connected \u2014 real-time sync active";
+      tooltip = "WebSocket connected \u2014 live sync active";
     } else {
       text = "Engram: ready";
       tooltip = "Click to sync";
@@ -4773,22 +4878,21 @@ Last sync: ${date.toLocaleString()}`;
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
-    const minutes = this.settings.syncIntervalMinutes;
-    if (minutes > 0 && this.settings.apiUrl && this.settings.apiKey) {
-      this.syncInterval = setInterval(
-        async () => {
-          try {
-            const pulled = await this.syncEngine.pull();
-            if (pulled > 0) {
-              new import_obsidian8.Notice(`Engram Sync: pulled ${pulled} changes`);
-            }
-          } catch (e) {
-            console.error("Engram Sync: periodic pull failed", e);
-            new import_obsidian8.Notice("Engram Sync: pull failed \u2014 check connection");
+    if (!this.settings.apiUrl || !this.settings.apiKey) return;
+    this.syncInterval = setInterval(
+      async () => {
+        try {
+          const pulled = await this.syncEngine.pull();
+          if (pulled > 0) {
+            new import_obsidian8.Notice(`Engram Sync: pulled ${pulled} changes`);
           }
-        },
-        minutes * 60 * 1e3
-      );
-    }
+        } catch (e) {
+          console.error("Engram Sync: periodic pull failed", e);
+        }
+      },
+      _EngramSyncPlugin.FALLBACK_POLL_MS
+    );
   }
 };
+_EngramSyncPlugin.FALLBACK_POLL_MS = 5 * 60 * 1e3;
+var EngramSyncPlugin = _EngramSyncPlugin;
