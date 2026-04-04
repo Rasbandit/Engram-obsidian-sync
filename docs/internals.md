@@ -4,21 +4,22 @@
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/main.ts` | ~320 | Plugin lifecycle, vault event wiring, commands, status bar, settings I/O |
-| `src/sync.ts` | ~900 | Core sync engine: push, pull, fullSync, debounce, offline queue, conflicts, request pacer |
-| `src/api.ts` | ~195 | HTTP client wrapping `requestUrl()` for all Engram REST calls |
-| `src/dev-log.ts` | ~80 | Dev-only diagnostic ring buffer (compile-time stripped in production) |
-| `src/types.ts` | ~175 | All interfaces: settings, API responses, queue entries, sync status |
-| `src/settings.ts` | ~178 | Settings tab UI (PluginSettingTab) |
-| `src/offline-queue.ts` | ~80 | Persistent offline retry queue (Map-based, dedupes by path, debounced persistence) |
-| `src/channel.ts` | ~185 | Phoenix WebSocket channel client for real-time sync (replaces SSE) |
+| `src/main.ts` | ~470 | Plugin lifecycle, vault event wiring, commands, status bar, settings I/O |
+| `src/sync.ts` | ~1500 | Core sync engine: push, pull, fullSync, debounce, offline queue, conflicts, 3-way merge, request pacer |
+| `src/api.ts` | ~230 | HTTP client wrapping `requestUrl()` for all Engram REST calls |
+| `src/types.ts` | ~270 | All interfaces: settings, API responses, queue entries, sync status |
+| `src/settings.ts` | ~230 | Settings tab UI (PluginSettingTab) |
+| `src/channel.ts` | ~185 | Phoenix WebSocket channel client for real-time sync |
+| `src/conflict-modal.ts` | ~350 | Conflict resolution modal (Keep Local / Keep Remote / Keep Both / Skip) |
+| `src/diff.ts` | ~305 | Line-level diff engine (Myers' algorithm) for conflict resolution |
+| `src/three-way-merge.ts` | ~160 | 3-way merge using diff-match-patch with overlap detection |
+| `src/base-store.ts` | ~110 | Persists last-synced note content for 3-way merge base |
+| `src/remote-log.ts` | ~160 | Ships plugin errors and lifecycle events to backend |
+| `src/offline-queue.ts` | ~90 | Persistent offline retry queue (Map-based, dedupes by path, debounced persistence) |
+| `src/dev-log.ts` | ~100 | Dev-only diagnostic ring buffer (compile-time stripped in production) |
+| `src/search-modal.ts` | ~165 | Quick search modal (Mod+Shift+S) — semantic search with debounce, arrow nav |
+| `src/search-view.ts` | ~220 | Sidebar search view (ItemView) — persistent search panel with preview pane |
 | `src/first-sync-modal.ts` | ~62 | First-sync confirmation modal (Push All / Pull Only / Cancel) |
-| `src/conflict-modal.ts` | ~126 | Conflict resolution modal (Keep Local / Keep Remote / Keep Both / Skip) |
-| `src/search-modal.ts` | ~140 | Quick search modal (Mod+Shift+S) — semantic search with debounce, arrow nav |
-| `src/search-view.ts` | ~180 | Sidebar search view (ItemView) — persistent search panel with preview pane |
-| `tests/sync.test.ts` | ~1750 | Unit tests for SyncEngine (Jest + ts-jest) — 107 tests |
-| `tests/search.test.ts` | ~120 | Unit tests for search API + debounce |
-| `tests/__mocks__/obsidian.ts` | — | Mock Obsidian API for tests |
 
 ### Class Relationships
 
@@ -29,11 +30,14 @@ EngramSyncPlugin (main.ts)
 ├── syncEngine: SyncEngine (sync.ts)
 │   ├── api: EngramApi (shared instance)
 │   ├── queue: OfflineQueue (offline-queue.ts, debounced persistence)
+│   ├── baseStore: BaseStore (base-store.ts, last-synced content for 3-way merge)
 │   ├── ready gate: events suppressed until setReady()
 │   ├── push semaphore: max 5 concurrent (acquirePushSlot/releasePushSlot)
 │   ├── request pacer: sliding window from configureRateLimit()
+│   ├── 3-way merge: threeWayMerge() (three-way-merge.ts) + diff engine (diff.ts)
 │   └── onConflict: (path, local, remote) → ConflictChoice (wired to ConflictModal)
-├── noteStream: NoteChannel (channel.ts)
+├── noteChannel: NoteChannel (channel.ts) — Phoenix WebSocket for real-time sync
+├── remoteLog: RemoteLog (remote-log.ts) — ships errors/lifecycle to backend
 ├── SearchModal (search-modal.ts) — opened via Mod+Shift+S command
 ├── SearchView (search-view.ts) — registered as "engram-search-view" ItemView
 ├── devLog: DevLogBuffer (dev-log.ts) — globalThis.__engramLog (dev builds only)
@@ -63,7 +67,7 @@ All endpoints require `Authorization: Bearer <api_key>`. Path params use `encode
 | `GET` | `/attachments/changes?since={iso}` | — | `{changes[], server_time}` |
 | `DELETE` | `/attachments/{path}` | — | `{deleted, path}` |
 | `POST` | `/search` | `{query, limit?, tags?}` | `{query, results[{text, title?, heading_path?, source_path?, tags[], wikilinks[], score, vector_score, rerank_score}]}` |
-| `GET` | `/notes/stream` | SSE stream, `Authorization` header | `event: note_change\ndata: {event_type, path, timestamp, kind?}` |
+| `WS` | `/notes/ws` | Phoenix WebSocket channel (replaces former SSE `/notes/stream`) | `{event_type, path, timestamp, kind?}` via `note:changes` topic |
 | `GET` | `/rate-limit` | — | `{requests_per_minute}` (0 = unlimited) |
 | `GET` | `/health` | No auth required | Health check |
 
@@ -88,7 +92,7 @@ All endpoints require `Authorization: Bearer <api_key>`. Path params use `encode
 
 Plugin uses `server_time` as `since` for the next sync — no missed changes even with clock drift.
 
-For the full backend endpoint list, see `docs/engram-backend.md`.
+For the full backend endpoint list, see `../engram-workspace/docs/api-contract.md`.
 
 ### Sync Algorithm — Key Flows
 
@@ -116,9 +120,9 @@ For the full backend endpoint list, see `docs/engram-backend.md`.
 4. On failure → `enqueueChange()` with path only (content-free) → offline queue
 5. Batch operations (pushAll, pushModifiedFiles): chunks of 10, sequential batches
 
-**SSE echo suppression:**
+**WebSocket echo suppression:**
 - After successful push: `markRecentlyPushed(path, 5000ms)`
-- SSE handler skips events for paths that are `pushing` or `recentlyPushed`
+- Channel handler skips events for paths that are `pushing` or `recentlyPushed`
 - Prevents write-back loops
 
 **Offline cycle:**
@@ -174,7 +178,7 @@ User patterns (from settings textarea, one per line):
 ### Known Quirks
 
 - **Obsidian resets mtime on vault.modify()** — cannot use mtime to decide whether to apply remote changes. Conflict detection uses lastSync comparison instead. (2026-03)
-- **SSE uses fetch(), not EventSource** — EventSource doesn't support custom Authorization headers
+- **Real-time sync uses Phoenix WebSocket** — native WebSocket via `channel.ts`, not SSE (migrated in v0.6.0)
 - **requestUrl()** — Obsidian's built-in HTTP, bypasses CORS, required for mobile support
 - **Conflict copies** — named `{stem} (conflict YYYY-MM-DD).{ext}`, not timestamped to the second
 
@@ -232,7 +236,7 @@ Compile-time gated via `DEV_MODE` constant (set in `esbuild.config.mjs`).
 
 - **Dev builds** (`npm run dev`): ring buffer of 500 entries on `globalThis.__engramLog`
 - **Production builds** (`npm run build`): all methods are no-ops, zero overhead
-- Categories: `lifecycle`, `push`, `pull`, `error`, `sse`, `queue`, `pacer`
+- Categories: `lifecycle`, `push`, `pull`, `error`, `sse` (legacy name, covers WebSocket), `queue`, `pacer`
 - CDP queryable: `globalThis.__engramLog.dump(50)`, `.filter("push")`, `.stats()`
 
 ### Build & Test Commands

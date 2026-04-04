@@ -44,22 +44,24 @@ Doc-only changes (CLAUDE.md, docs/) can be committed and pushed directly to main
 **Tests are the spec. If a test fails, fix the app — not the test.**
 
 ```bash
-npm test              # Run all 201 unit tests
+npm test              # Run all 224 unit tests
 npm test -- --verbose # Verbose output
 npm test -- --coverage # With coverage report
 npm run build         # Build the plugin (production)
 ```
 
-### Test files (201 tests across 7 files)
+### Test files (224 tests across 8 files)
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `tests/sync.test.ts` | ~100 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, SSE events, echo suppression, status tracking, first sync detection, destroy |
-| `tests/diff.test.ts` | ~30 | computeDiff, groupIntoHunks, buildMergedContent (line-by-line diff, hunk context, merge choices) |
-| `tests/search.test.ts` | ~4 | EngramApi.search, SearchModal debounce |
+| `tests/sync.test.ts` | 117 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, WebSocket events, echo suppression, status tracking, first sync detection, 3-way merge, destroy |
 | `tests/api.test.ts` | 25 | All EngramApi methods (pushNote, getChanges, deleteNote, getRateLimit, getManifest, search), base64 utilities, auth headers, URL encoding, error handling |
+| `tests/diff.test.ts` | 17 | computeDiff, groupIntoHunks, buildMergedContent (line-by-line diff, hunk context, merge choices) |
+| `tests/three-way-merge.test.ts` | 15 | 3-way merge via diff-match-patch: clean merges, overlap detection, fallback behavior |
 | `tests/offline-queue.test.ts` | 17 | Enqueue/dequeue, deduplication by path, oldest-first ordering, load/clear, debounced persistence, coalesced writes, destroy cancels timers |
 | `tests/remote-log.test.ts` | 15 | Buffer management, flush threshold (20 entries), ring buffer overflow (200 cap), flush-on-disable, singleton lifecycle |
+| `tests/base-store.test.ts` | 13 | BaseStore: persist/retrieve last-synced content for 3-way merge base |
+| `tests/search.test.ts` | 5 | EngramApi.search, SearchModal debounce |
 
 ### Test configuration
 
@@ -70,7 +72,7 @@ npm run build         # Build the plugin (production)
 
 ### Untested files (UI-heavy, minimal testable logic)
 
-`settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`, `dev-log.ts`
+`settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`, `channel.ts`, `dev-log.ts`
 
 ## Build & Install
 
