@@ -761,20 +761,20 @@ export class SyncEngine {
 		}
 	}
 
-	/** Handle an SSE stream event (upsert or delete). */
+	/** Handle a WebSocket stream event (upsert or delete). */
 	async handleStreamEvent(event: NoteStreamEvent): Promise<void> {
 		if (this.shouldIgnore(event.path)) return;
-		devLog().log("sse", `${event.event_type} ${event.kind ?? "note"}: ${event.path}`);
-		rlog().info("sse", `Event: ${event.event_type} ${event.kind ?? "note"}: ${event.path}`);
+		devLog().log("ws", `${event.event_type} ${event.kind ?? "note"}: ${event.path}`);
+		rlog().info("ws", `Event: ${event.event_type} ${event.kind ?? "note"}: ${event.path}`);
 
 		// Echo suppression — skip events for notes we're currently pushing
-		// or have recently finished pushing (SSE events arrive after push completes)
+		// or have recently finished pushing (WebSocket events arrive after push completes)
 		if (this.pushing.has(event.path)) {
-			rlog().info("sse", `Echo skip (pushing): ${event.path}`);
+			rlog().info("ws", `Echo skip (pushing): ${event.path}`);
 			return;
 		}
 		if (this.recentlyPushed.has(event.path)) {
-			rlog().info("sse", `Echo skip (recently pushed): ${event.path}`);
+			rlog().info("ws", `Echo skip (recently pushed): ${event.path}`);
 			return;
 		}
 
@@ -816,7 +816,7 @@ export class SyncEngine {
 					});
 				}
 			} catch (e) {
-				console.error(`Engram Sync: failed to fetch content for SSE event ${event.path}`, e);
+				console.error(`Engram Sync: failed to fetch content for WebSocket event ${event.path}`, e);
 			}
 		}
 	}
@@ -1011,7 +1011,7 @@ export class SyncEngine {
 	}
 
 	/** Apply a remote attachment change to the vault.
-	 *  If contentBase64 is provided (from SSE), use it directly. Otherwise fetch it.
+	 *  If contentBase64 is provided (from WebSocket), use it directly. Otherwise fetch it.
 	 *  Returns true when a file was actually created, modified, or trashed. */
 	async applyAttachmentChange(change: AttachmentChange, contentBase64?: string): Promise<boolean> {
 		if (this.shouldIgnore(change.path)) return false;

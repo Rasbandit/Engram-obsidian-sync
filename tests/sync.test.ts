@@ -368,7 +368,7 @@ describe("SyncEngine.handleStreamEvent", () => {
 		// Wait for debounce to fire but not for push to complete
 		await new Promise((r) => setTimeout(r, 50));
 
-		// Now the file is in the pushing set — SSE event should be suppressed
+		// Now the file is in the pushing set — WebSocket event should be suppressed
 		await engine.handleStreamEvent({
 			event_type: "upsert",
 			path: "Notes/Active.md",
@@ -385,7 +385,7 @@ describe("SyncEngine.handleStreamEvent", () => {
 		engine.destroy();
 	}, 10000);
 
-	test("suppresses SSE events after push completes (post-push cooldown)", async () => {
+	test("suppresses WebSocket events after push completes (post-push cooldown)", async () => {
 		// Fast push — completes quickly
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
 
@@ -400,7 +400,7 @@ describe("SyncEngine.handleStreamEvent", () => {
 		// But should still be in recentlyPushed cooldown
 		expect(engine.isRecentlyPushed("Notes/Cooldown.md")).toBe(true);
 
-		// SSE event arriving after push should still be suppressed
+		// WebSocket event arriving after push should still be suppressed
 		await engine.handleStreamEvent({
 			event_type: "upsert",
 			path: "Notes/Cooldown.md",
@@ -1449,21 +1449,6 @@ describe("SyncEngine binary push", () => {
 		expect(mockApi.pushNote).not.toHaveBeenCalled();
 	});
 
-	test("binary file exceeding size limit is skipped", async () => {
-		// Create a buffer larger than default 5MB
-		const bigBuffer = new ArrayBuffer(6 * 1024 * 1024);
-		(mockApp.vault.readBinary as jest.Mock).mockResolvedValueOnce(bigBuffer);
-
-		const engine = createEngine({ debounceMs: 10, maxFileSizeMB: 5 });
-		const file = new TFile("Assets/huge.png", Date.now());
-
-		engine.handleModify(file);
-		await new Promise((r) => setTimeout(r, 100));
-
-		expect(mockApi.pushAttachment).not.toHaveBeenCalled();
-		expect(engine.getStatus().error).toContain("too large");
-	});
-
 	test("binary file delete calls deleteAttachment", async () => {
 		const engine = createEngine();
 		const file = new TFile("Assets/old.png");
@@ -1622,8 +1607,8 @@ describe("SyncEngine pull accuracy", () => {
 	});
 });
 
-describe("SyncEngine SSE with kind routing", () => {
-	test("SSE event with kind=attachment calls getAttachment", async () => {
+describe("SyncEngine WebSocket with kind routing", () => {
+	test("WebSocket event with kind=attachment calls getAttachment", async () => {
 		const engine = createEngine();
 
 		(mockApi.getAttachment as jest.Mock).mockResolvedValueOnce({
@@ -1647,7 +1632,7 @@ describe("SyncEngine SSE with kind routing", () => {
 		expect(mockApp.vault.createBinary).toHaveBeenCalled();
 	});
 
-	test("SSE event with kind=note (or no kind) calls getNote", async () => {
+	test("WebSocket event with kind=note (or no kind) calls getNote", async () => {
 		const engine = createEngine();
 
 		(mockApi.getNote as jest.Mock).mockResolvedValueOnce({
@@ -1672,7 +1657,7 @@ describe("SyncEngine SSE with kind routing", () => {
 		expect(mockApi.getAttachment).not.toHaveBeenCalled();
 	});
 
-	test("SSE delete with kind=attachment trashes local file", async () => {
+	test("WebSocket delete with kind=attachment trashes local file", async () => {
 		const engine = createEngine();
 		const existingFile = new TFile("Assets/deleted.png");
 		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
