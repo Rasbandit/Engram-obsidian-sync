@@ -16,7 +16,7 @@ function isHttpStatus(e: unknown, status: number): boolean {
 	return typeof e === "object" && e !== null && (e as { status?: number }).status === status;
 }
 
-/** How long (ms) after a push completes to suppress SSE echoes for that path. */
+/** How long (ms) after a push completes to suppress WebSocket echoes for that path. */
 const ECHO_COOLDOWN_MS = 5000;
 
 /** How often (ms) to check connectivity when offline. */
@@ -441,20 +441,13 @@ export class SyncEngine {
 			const mtime = file.stat.mtime / 1000; // Obsidian uses ms, Engram uses seconds
 			if (isBinary) {
 				const buffer = await this.app.vault.readBinary(file);
-				// Size check
-				const maxBytes = this.settings.maxFileSizeMB * 1024 * 1024;
-				if (buffer.byteLength > maxBytes) {
-					this.lastError = `File too large: ${file.path} (${Math.round(buffer.byteLength / 1024 / 1024)}MB > ${this.settings.maxFileSizeMB}MB)`;
-					this.emitStatus();
-					return false;
-				}
 				const base64 = arrayBufferToBase64(buffer);
 				const mimeType = this.getMimeType(file);
 				await this.api.pushAttachment(file.path, base64, mimeType, mtime);
 			} else {
 				const content = await this.app.vault.read(file);
 				// Echo suppression — skip pushing if content matches what the
-				// sync engine last wrote (pull/SSE). Prevents the pull→push loop
+				// sync engine last wrote (pull/WebSocket). Prevents the pull→push loop
 				// where vault.modify() triggers handleModify() for every pulled file.
 				const hash = fnv1a(content);
 				const existing = this.syncState.get(normalizePath(file.path));
@@ -592,7 +585,7 @@ export class SyncEngine {
 			this.pushing.delete(file.path);
 			this.releasePushSlot();
 			// Keep path suppressed for a cooldown period after push completes.
-			// SSE events often arrive after the push finishes, and without this
+			// WebSocket events often arrive after the push finishes, and without this
 			// the echo suppression in handleStreamEvent would miss them.
 			this.markRecentlyPushed(file.path);
 			this.emitStatus();
@@ -600,7 +593,7 @@ export class SyncEngine {
 		return success;
 	}
 
-	/** Suppress SSE echoes for a path for ECHO_COOLDOWN_MS after push. */
+	/** Suppress WebSocket echoes for a path for ECHO_COOLDOWN_MS after push. */
 	private markRecentlyPushed(path: string): void {
 		const existing = this.recentlyPushed.get(path);
 		if (existing) clearTimeout(existing);
@@ -900,9 +893,10 @@ export class SyncEngine {
 						if (change.version != null) {
 							this.baseStore?.set(normalized, merge.merged, change.version);
 						}
-						// Push merged result to server
+						// Push merged result to server (force=true to bypass echo suppression,
+						// since syncState.hash was just updated to match merged content)
 						try {
-							await this.pushFile(existing);
+							await this.pushFile(existing, true);
 						} catch (e) {
 							rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
 						}

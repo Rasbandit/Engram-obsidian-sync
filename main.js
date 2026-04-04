@@ -2750,7 +2750,7 @@ var SyncEngine = class {
               (_c = this.baseStore) == null ? void 0 : _c.set(normalized, merge.merged, change.version);
             }
             try {
-              await this.pushFile(existing);
+              await this.pushFile(existing, true);
             } catch (e) {
               rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
             }
