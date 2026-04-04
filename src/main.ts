@@ -37,7 +37,13 @@ export default class EngramSyncPlugin extends Plugin {
 	private syncInterval: ReturnType<typeof setInterval> | null = null;
 	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
-	private sseConnected: boolean = false;
+	private liveConnected: boolean = false;
+
+	/** Whether the WebSocket channel is currently connected (for settings UI). */
+	isLiveConnected(): boolean {
+		return this.liveConnected;
+	}
+
 	private baseStore: BaseStore | null = null;
 
 	async onload(): Promise<void> {
@@ -257,7 +263,7 @@ export default class EngramSyncPlugin extends Plugin {
 			}
 		});
 
-		// SSE live sync
+		// WebSocket live sync
 		this.setupNoteStream();
 
 		// Initial sync on startup (after workspace is ready)
@@ -334,23 +340,34 @@ export default class EngramSyncPlugin extends Plugin {
 		this.noteStream?.disconnect();
 		this.noteStream = null;
 
-		const { apiUrl, apiKey, liveSyncEnabled } = this.settings;
-		if (!liveSyncEnabled || !apiUrl || !apiKey) {
-			this.sseConnected = false;
+		const { apiUrl, apiKey } = this.settings;
+		if (!apiUrl || !apiKey) {
+			this.liveConnected = false;
 			this.updateStatusBar(this.syncEngine.getStatus());
 			return;
 		}
 
-		// Fetch user_id (needed for channel topic "sync:{user_id}"), then connect
+		this.connectChannel();
+	}
+
+	/** Attempt to connect the WebSocket channel with retry on getMe() failure. */
+	private connectChannel(attempt = 0): void {
+		const maxAttempts = 5;
+		const baseDelay = 2000;
+
 		this.api.getMe().then((user) => {
-			const channel = new NoteChannel(apiUrl, apiKey, String(user.id));
+			const channel = new NoteChannel(
+				this.settings.apiUrl,
+				this.settings.apiKey,
+				String(user.id),
+			);
 
 			channel.onEvent = (event) => {
 				this.syncEngine.handleStreamEvent(event);
 			};
 
 			channel.onStatusChange = (connected) => {
-				this.sseConnected = connected;
+				this.liveConnected = connected;
 				this.updateStatusBar(this.syncEngine.getStatus());
 				// Catch-up pull on reconnect to cover missed events during disconnect
 				if (connected) {
@@ -365,7 +382,12 @@ export default class EngramSyncPlugin extends Plugin {
 			channel.connect();
 		}).catch((e) => {
 			console.error("Engram Sync: failed to fetch user id for channel", e);
-			rlog().error("channel", `getMe() failed: ${e instanceof Error ? e.message : e}`);
+			rlog().error("channel", `getMe() failed (attempt ${attempt + 1}/${maxAttempts}): ${e instanceof Error ? e.message : e}`);
+
+			if (attempt < maxAttempts - 1) {
+				const delay = baseDelay * Math.pow(2, attempt);
+				setTimeout(() => this.connectChannel(attempt + 1), delay);
+			}
 		});
 	}
 
@@ -405,7 +427,7 @@ export default class EngramSyncPlugin extends Plugin {
 		}
 	}
 
-	/** Update status bar text and tooltip based on sync state + SSE connection. */
+	/** Update status bar text and tooltip based on sync state + WebSocket connection. */
 	private updateStatusBar(status: SyncStatus): void {
 		if (!this.statusBarEl) return;
 
@@ -426,9 +448,9 @@ export default class EngramSyncPlugin extends Plugin {
 		} else if (status.pending > 0) {
 			text = `Engram: pending (${status.pending})`;
 			tooltip = `${status.pending} file(s) queued`;
-		} else if (this.sseConnected) {
+		} else if (this.liveConnected) {
 			text = "Engram: live";
-			tooltip = "SSE connected — real-time sync active";
+			tooltip = "WebSocket connected — live sync active";
 		} else {
 			text = "Engram: ready";
 			tooltip = "Click to sync";
@@ -443,28 +465,28 @@ export default class EngramSyncPlugin extends Plugin {
 		this.statusBarEl.setAttribute("aria-label", tooltip);
 	}
 
+	private static readonly FALLBACK_POLL_MS = 5 * 60 * 1000;
+
 	private startSyncInterval(): void {
 		if (this.syncInterval) {
 			clearInterval(this.syncInterval);
 			this.syncInterval = null;
 		}
 
-		const minutes = this.settings.syncIntervalMinutes;
-		if (minutes > 0 && this.settings.apiUrl && this.settings.apiKey) {
-			this.syncInterval = setInterval(
-				async () => {
-					try {
-						const pulled = await this.syncEngine.pull();
-						if (pulled > 0) {
-							new Notice(`Engram Sync: pulled ${pulled} changes`);
-						}
-					} catch (e) {
-						console.error("Engram Sync: periodic pull failed", e);
-						new Notice("Engram Sync: pull failed — check connection");
+		if (!this.settings.apiUrl || !this.settings.apiKey) return;
+
+		this.syncInterval = setInterval(
+			async () => {
+				try {
+					const pulled = await this.syncEngine.pull();
+					if (pulled > 0) {
+						new Notice(`Engram Sync: pulled ${pulled} changes`);
 					}
-				},
-				minutes * 60 * 1000,
-			);
-		}
+				} catch (e) {
+					console.error("Engram Sync: periodic pull failed", e);
+				}
+			},
+			EngramSyncPlugin.FALLBACK_POLL_MS,
+		);
 	}
 }
