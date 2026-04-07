@@ -243,4 +243,86 @@ describe("EngramApi", () => {
             expect(opts.headers.Authorization).toBe("Bearer engram_testkey");
         });
     });
+
+    describe("X-Vault-ID header", () => {
+        test("includes X-Vault-ID when vaultId is set", async () => {
+            api.setVaultId("42");
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 200,
+                json: { changes: [], server_time: "2026-01-01T00:00:00Z" },
+            } as any);
+            await api.getChanges("2026-01-01T00:00:00Z");
+            expect(mockRequestUrl).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        "X-Vault-ID": "42",
+                    }),
+                }),
+            );
+        });
+
+        test("omits X-Vault-ID when vaultId is null", async () => {
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 200,
+                json: { changes: [], server_time: "2026-01-01T00:00:00Z" },
+            } as any);
+            await api.getChanges("2026-01-01T00:00:00Z");
+            const headers = mockRequestUrl.mock.calls[0][0].headers;
+            expect(headers["X-Vault-ID"]).toBeUndefined();
+        });
+
+        test("setVaultId updates the header for subsequent requests", async () => {
+            api.setVaultId("10");
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 200,
+                json: { changes: [], server_time: "2026-01-01T00:00:00Z" },
+            } as any);
+            await api.getChanges("2026-01-01T00:00:00Z");
+            expect(mockRequestUrl.mock.calls[0][0].headers["X-Vault-ID"]).toBe("10");
+
+            api.setVaultId("20");
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 200,
+                json: { changes: [], server_time: "2026-01-01T00:00:00Z" },
+            } as any);
+            await api.getChanges("2026-01-01T00:00:00Z");
+            expect(mockRequestUrl.mock.calls[1][0].headers["X-Vault-ID"]).toBe("20");
+        });
+    });
+
+    describe("registerVault", () => {
+        test("sends POST to /vaults/register with name and client_id", async () => {
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 201,
+                json: { id: 7, name: "My Vault", slug: "my-vault", is_default: true },
+            } as any);
+            const result = await api.registerVault("My Vault", "abc123hash");
+            expect(mockRequestUrl).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    url: `${TEST_API_BASE}/vaults/register`,
+                    method: "POST",
+                    body: JSON.stringify({ name: "My Vault", client_id: "abc123hash" }),
+                }),
+            );
+            expect(result).toEqual({ id: 7, name: "My Vault", slug: "my-vault", is_default: true });
+        });
+
+        test("returns existing vault on 200", async () => {
+            mockRequestUrl.mockResolvedValueOnce({
+                status: 200,
+                json: { id: 5, name: "Existing", slug: "existing", is_default: false },
+            } as any);
+            const result = await api.registerVault("Existing", "def456hash");
+            expect(result).toEqual({ id: 5, name: "Existing", slug: "existing", is_default: false });
+        });
+
+        test("throws vault_limit_reached on 402", async () => {
+            const error = { status: 402, json: { error: "vault_limit_reached", limit: 1 } };
+            mockRequestUrl.mockRejectedValueOnce(error);
+            await expect(api.registerVault("Third Vault", "ghi789hash")).rejects.toMatchObject({
+                status: 402,
+                json: { error: "vault_limit_reached", limit: 1 },
+            });
+        });
+    });
 });
