@@ -21,20 +21,28 @@ export class NoteChannel {
 	private baseUrl: string;
 	private apiKey: string;
 	private userId: string;
+	private vaultId: string | null;
 
 	onEvent: ((event: NoteStreamEvent) => void) | null = null;
 	onStatusChange: ((connected: boolean) => void) | null = null;
+	onVaultDeleted: (() => void) | null = null;
 
-	constructor(baseUrl: string, apiKey: string, userId: string) {
+	constructor(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null) {
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 		this.apiKey = apiKey;
 		this.userId = userId;
+		this.vaultId = vaultId;
 	}
 
-	updateConfig(baseUrl: string, apiKey: string, userId: string): void {
+	updateConfig(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null): void {
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 		this.apiKey = apiKey;
 		this.userId = userId;
+		this.vaultId = vaultId;
+	}
+
+	private get topic(): string {
+		return this.vaultId ? `sync:${this.userId}:${this.vaultId}` : `sync:${this.userId}`;
 	}
 
 	connect(): void {
@@ -99,7 +107,7 @@ export class NoteChannel {
 	}
 
 	private joinChannel(): void {
-		this.send([this.joinRef, String(++this.ref), `sync:${this.userId}`, "phx_join", {}]);
+		this.send([this.joinRef, String(++this.ref), this.topic, "phx_join", {}]);
 	}
 
 	private startHeartbeat(): void {
@@ -131,10 +139,16 @@ export class NoteChannel {
 			const status = (payload as { status?: string }).status;
 			if (status === "ok" && !this.connected) {
 				this.setConnected(true);
-				rlog().info("channel", `Joined sync:${this.userId}`);
+				rlog().info("channel", `Joined ${this.topic}`);
 			} else if (status === "error") {
 				rlog().error("channel", `Channel join error: ${JSON.stringify(payload)}`);
 			}
+			return;
+		}
+
+		if (event === "vault_deleted") {
+			rlog().info("channel", "Received vault_deleted event");
+			this.onVaultDeleted?.();
 			return;
 		}
 
