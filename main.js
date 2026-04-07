@@ -1494,19 +1494,32 @@ var import_obsidian8 = require("obsidian");
 
 // src/api.ts
 var import_obsidian = require("obsidian");
-var EngramApi = class {
+var EngramApi = class _EngramApi {
   constructor(baseUrl, apiKey) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
+    this.vaultId = null;
+    this.baseUrl = _EngramApi.normalizeBaseUrl(baseUrl);
+  }
+  setVaultId(id) {
+    this.vaultId = id;
+  }
+  /** Strip trailing slashes and append /api if not already present. */
+  static normalizeBaseUrl(url) {
+    const base = url.replace(/\/+$/, "");
+    return base.endsWith("/api") ? base : `${base}/api`;
   }
   updateConfig(baseUrl, apiKey) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = _EngramApi.normalizeBaseUrl(baseUrl);
     this.apiKey = apiKey;
   }
   async request(method, path, body) {
     const headers = {
       Authorization: `Bearer ${this.apiKey}`
     };
+    if (this.vaultId) {
+      headers["X-Vault-ID"] = this.vaultId;
+    }
     if (body !== void 0) {
       headers["Content-Type"] = "application/json";
     }
@@ -1533,6 +1546,15 @@ var EngramApi = class {
   async getMe() {
     const resp = await this.request("GET", "/me");
     return resp.json.user;
+  }
+  /** Register this vault with the backend. Returns existing vault if client_id matches.
+   *  Throws with status 402 if user has reached their vault limit (free tier). */
+  async registerVault(name, clientId) {
+    const resp = await this.request("POST", "/vaults/register", {
+      name,
+      client_id: clientId
+    });
+    return resp.json;
   }
   /** Authenticated ping — verifies both connectivity and API key. */
   async ping() {
@@ -1677,13 +1699,21 @@ var DEFAULT_SETTINGS = {
   debounceMs: 2e3,
   conflictViewMode: "unified",
   remoteLoggingEnabled: false,
-  conflictResolution: "auto"
+  conflictResolution: "auto",
+  vaultId: null,
+  clientId: ""
 };
 
 // src/sync.ts
 var import_obsidian2 = require("obsidian");
 
 // src/offline-queue.ts
+function dedupKey(pathOrEntry, vaultId) {
+  if (typeof pathOrEntry === "object") {
+    return pathOrEntry.vaultId ? `${pathOrEntry.vaultId}:${pathOrEntry.path}` : pathOrEntry.path;
+  }
+  return vaultId ? `${vaultId}:${pathOrEntry}` : pathOrEntry;
+}
 var OfflineQueue = class {
   constructor(persistDelayMs = 1e3) {
     this.entries = /* @__PURE__ */ new Map();
@@ -1699,17 +1729,17 @@ var OfflineQueue = class {
   load(entries) {
     this.entries.clear();
     for (const entry of entries) {
-      this.entries.set(entry.path, entry);
+      this.entries.set(dedupKey(entry), entry);
     }
   }
   /** Add or replace a queued change for a path. Persistence is debounced. */
   async enqueue(entry) {
-    this.entries.set(entry.path, entry);
+    this.entries.set(dedupKey(entry), entry);
     this.schedulePersist();
   }
   /** Remove a path from the queue (after successful sync). Persists immediately. */
-  async dequeue(path) {
-    this.entries.delete(path);
+  async dequeue(path, vaultId) {
+    this.entries.delete(dedupKey(path, vaultId));
     await this.persistNow();
   }
   /** Get all entries sorted by timestamp (oldest first). */
@@ -2217,6 +2247,7 @@ var SyncEngine = class {
   }
   /** Handle a vault delete event. */
   async handleDelete(file) {
+    var _a;
     if (!this.ready) return;
     if (!this.isSyncable(file)) return;
     if (this.shouldIgnore(file.path)) return;
@@ -2243,13 +2274,14 @@ var SyncEngine = class {
         path: file.path,
         action: "delete",
         kind: isBinary ? "attachment" : "note",
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        vaultId: (_a = this.settings.vaultId) != null ? _a : void 0
       });
     }
   }
   /** Handle a vault rename event. */
   async handleRename(file, oldPath) {
-    var _a;
+    var _a, _b;
     if (!this.ready) return;
     if (!this.isSyncable(file)) return;
     const isBinary = this.isBinaryFile(file);
@@ -2273,13 +2305,14 @@ var SyncEngine = class {
             path: oldPath,
             action: "delete",
             kind: isBinary ? "attachment" : "note",
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            vaultId: (_a = this.settings.vaultId) != null ? _a : void 0
           });
         }
       }
     }
     if (!isBinary) {
-      (_a = this.baseStore) == null ? void 0 : _a.rename((0, import_obsidian2.normalizePath)(oldPath), (0, import_obsidian2.normalizePath)(file.path));
+      (_b = this.baseStore) == null ? void 0 : _b.rename((0, import_obsidian2.normalizePath)(oldPath), (0, import_obsidian2.normalizePath)(file.path));
     }
     if (!this.shouldIgnore(file.path)) {
       await this.pushFile(file);
@@ -2344,7 +2377,7 @@ var SyncEngine = class {
   /** Push a single file to Engram. Returns true on success.
    *  When force is true, skip echo suppression (used by pushAll). */
   async pushFile(file, force = false) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
     if (this.pushing.has(file.path)) return false;
     await this.acquirePushSlot();
     this.pushing.add(file.path);
@@ -2409,7 +2442,8 @@ var SyncEngine = class {
             localMtime: mtime,
             remoteContent: serverNote.content,
             remoteMtime: serverNote.mtime,
-            baseContent: pushBase == null ? void 0 : pushBase.content
+            baseContent: pushBase == null ? void 0 : pushBase.content,
+            vaultName: this.app.vault.getName()
           });
           if (resolution.choice === "keep-local") {
             const forceResp = await this.api.pushNote(file.path, content, mtime);
@@ -2480,7 +2514,8 @@ var SyncEngine = class {
         action: "upsert",
         kind: isBinary ? "attachment" : "note",
         mtime: file.stat.mtime / 1e3,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        vaultId: (_i = this.settings.vaultId) != null ? _i : void 0
       });
     } finally {
       this.pushing.delete(file.path);
@@ -2762,7 +2797,8 @@ var SyncEngine = class {
           localMtime,
           remoteContent: change.content,
           remoteMtime: change.mtime,
-          baseContent: pullBase == null ? void 0 : pullBase.content
+          baseContent: pullBase == null ? void 0 : pullBase.content,
+          vaultName: this.app.vault.getName()
         });
         if (resolution.choice === "skip") {
           rlog().info("conflict", `Resolved: ${change.path} \u2192 skip`);
@@ -3148,6 +3184,7 @@ var SyncEngine = class {
   }
   /** Flush queued changes oldest-first. Stops on first failure. */
   async flushQueue() {
+    var _a, _b, _c;
     const entries = this.queue.all();
     if (entries.length === 0) return 0;
     devLog().log("queue", `flush start \u2014 ${entries.length} entries`);
@@ -3173,7 +3210,7 @@ var SyncEngine = class {
           if (!base64) {
             const file = this.app.vault.getAbstractFileByPath(entry.path);
             if (!(file instanceof import_obsidian2.TFile)) {
-              await this.queue.dequeue(entry.path);
+              await this.queue.dequeue(entry.path, (_a = this.settings.vaultId) != null ? _a : void 0);
               flushed++;
               continue;
             }
@@ -3189,7 +3226,7 @@ var SyncEngine = class {
           if (content === void 0) {
             const file = this.app.vault.getAbstractFileByPath(entry.path);
             if (!(file instanceof import_obsidian2.TFile)) {
-              await this.queue.dequeue(entry.path);
+              await this.queue.dequeue(entry.path, (_b = this.settings.vaultId) != null ? _b : void 0);
               flushed++;
               continue;
             }
@@ -3198,7 +3235,7 @@ var SyncEngine = class {
           }
           await this.api.pushNote(entry.path, content, mtime);
         }
-        await this.queue.dequeue(entry.path);
+        await this.queue.dequeue(entry.path, (_c = this.settings.vaultId) != null ? _c : void 0);
         flushed++;
       } catch (e) {
         this.goOffline();
@@ -3465,7 +3502,7 @@ ${item.pattern}` : item.pattern;
 
 // src/channel.ts
 var NoteChannel = class {
-  constructor(baseUrl, apiKey, userId) {
+  constructor(baseUrl, apiKey, userId, vaultId = null) {
     this.ws = null;
     this.ref = 0;
     this.joinRef = "1";
@@ -3476,14 +3513,20 @@ var NoteChannel = class {
     this.connected = false;
     this.onEvent = null;
     this.onStatusChange = null;
+    this.onVaultDeleted = null;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.apiKey = apiKey;
     this.userId = userId;
+    this.vaultId = vaultId;
   }
-  updateConfig(baseUrl, apiKey, userId) {
+  updateConfig(baseUrl, apiKey, userId, vaultId = null) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.apiKey = apiKey;
     this.userId = userId;
+    this.vaultId = vaultId;
+  }
+  get topic() {
+    return this.vaultId ? `sync:${this.userId}:${this.vaultId}` : `sync:${this.userId}`;
   }
   connect() {
     if (this.ws) return;
@@ -3537,7 +3580,7 @@ var NoteChannel = class {
     };
   }
   joinChannel() {
-    this.send([this.joinRef, String(++this.ref), `sync:${this.userId}`, "phx_join", {}]);
+    this.send([this.joinRef, String(++this.ref), this.topic, "phx_join", {}]);
   }
   startHeartbeat() {
     this.heartbeatTimer = setInterval(() => {
@@ -3548,7 +3591,7 @@ var NoteChannel = class {
     }, 3e4);
   }
   handleMessage(raw) {
-    var _a, _b;
+    var _a, _b, _c;
     let msg;
     try {
       msg = JSON.parse(raw);
@@ -3561,10 +3604,15 @@ var NoteChannel = class {
       const status = payload.status;
       if (status === "ok" && !this.connected) {
         this.setConnected(true);
-        rlog().info("channel", `Joined sync:${this.userId}`);
+        rlog().info("channel", `Joined ${this.topic}`);
       } else if (status === "error") {
         rlog().error("channel", `Channel join error: ${JSON.stringify(payload)}`);
       }
+      return;
+    }
+    if (event === "vault_deleted") {
+      rlog().info("channel", "Received vault_deleted event");
+      (_a = this.onVaultDeleted) == null ? void 0 : _a.call(this);
       return;
     }
     if (event === "note_changed" && payload) {
@@ -3573,10 +3621,10 @@ var NoteChannel = class {
         event_type: p.event_type,
         path: p.path,
         timestamp: Date.now(),
-        kind: (_a = p.kind) != null ? _a : "note"
+        kind: (_b = p.kind) != null ? _b : "note"
       };
       rlog().info("channel", `Event: ${streamEvent.event_type} ${streamEvent.path}`);
-      (_b = this.onEvent) == null ? void 0 : _b.call(this, streamEvent);
+      (_c = this.onEvent) == null ? void 0 : _c.call(this, streamEvent);
     }
   }
   send(msg) {
@@ -3872,7 +3920,8 @@ var ConflictModal = class extends import_obsidian5.Modal {
   // ── Header ──────────────────────────────────────────────────────
   renderHeader(root) {
     const header = root.createEl("header", { cls: "engram-conflict-header" });
-    header.createEl("h2", { text: "Sync Conflict" });
+    const title = this.info.vaultName ? `Sync Conflict \u2014 ${this.info.vaultName}` : "Sync Conflict";
+    header.createEl("h2", { text: title });
     header.createEl("code", { text: this.info.path, cls: "engram-conflict-path" });
     const meta = header.createEl("aside", { cls: "engram-conflict-meta" });
     meta.createEl("span", {
@@ -4502,6 +4551,16 @@ var BaseStore = class {
 };
 
 // src/main.ts
+async function generateClientId(app) {
+  var _a, _b;
+  const basePath = (_b = (_a = app.vault.adapter).getBasePath) == null ? void 0 : _b.call(_a);
+  const input = basePath || app.vault.getName();
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
@@ -4524,6 +4583,9 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
     devLog().log("lifecycle", "plugin loading");
     await this.loadSettings();
     this.api = new EngramApi(this.settings.apiUrl, this.settings.apiKey);
+    if (this.settings.vaultId) {
+      this.api.setVaultId(this.settings.vaultId);
+    }
     const remoteLogger = initRemoteLog();
     remoteLogger.configure(
       (entries) => this.api.pushLogs(entries),
@@ -4709,6 +4771,11 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       await ((_a2 = this.baseStore) == null ? void 0 : _a2.load());
       try {
         if (this.settings.apiUrl && this.settings.apiKey) {
+          const registered = await this.registerVault();
+          if (!registered) {
+            rlog().info("lifecycle", "Vault not registered \u2014 skipping initial sync");
+            return;
+          }
           await this.doSyncWithFirstSyncCheck();
         }
       } finally {
@@ -4739,19 +4806,56 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       DEFAULT_SETTINGS,
       data == null ? void 0 : data.settings
     );
+    if (!this.settings.clientId) {
+      this.settings.clientId = await generateClientId(this.app);
+      await this.saveData({ ...data, settings: this.settings });
+    }
   }
   async saveSettings() {
     this.api.updateConfig(this.settings.apiUrl, this.settings.apiKey);
+    this.api.setVaultId(this.settings.vaultId);
     this.syncEngine.updateSettings(this.settings);
     rlog().setEnabled(this.settings.remoteLoggingEnabled);
     this.startSyncInterval();
     this.setupNoteStream();
     await this.savePluginData(this.syncEngine.getLastSync());
     if (this.settings.apiUrl && this.settings.apiKey) {
-      this.doSyncWithFirstSyncCheck().catch((e) => {
+      this.registerVault().then((registered) => {
+        if (!registered) return;
+        return this.doSyncWithFirstSyncCheck();
+      }).catch((e) => {
         console.error("Engram Sync: sync after settings change failed", e);
         rlog().error("lifecycle", `Sync after settings change failed: ${e instanceof Error ? e.message : e}`);
       });
+    }
+  }
+  /** Register this vault with the backend. Must be called before sync starts.
+   *  Returns true if registration succeeded (or vault was already registered).
+   *  Returns false if the user hit their vault limit (402). */
+  async registerVault() {
+    if (this.settings.vaultId) {
+      this.api.setVaultId(this.settings.vaultId);
+      return true;
+    }
+    try {
+      const result = await this.api.registerVault(
+        this.app.vault.getName(),
+        this.settings.clientId
+      );
+      this.settings.vaultId = String(result.id);
+      this.api.setVaultId(this.settings.vaultId);
+      await this.saveSettings();
+      rlog().info("lifecycle", `Vault registered: id=${result.id} slug=${result.slug}`);
+      return true;
+    } catch (e) {
+      if (typeof e === "object" && e !== null && e.status === 402) {
+        new import_obsidian8.Notice("Engram: Upgrade to Pro for multi-vault sync.");
+        rlog().info("lifecycle", "Vault registration blocked \u2014 vault limit reached (402)");
+        return false;
+      }
+      console.error("Engram Sync: vault registration failed", e);
+      rlog().error("lifecycle", `Vault registration failed: ${e instanceof Error ? e.message : e}`);
+      return false;
     }
   }
   async savePluginData(lastSync, offlineQueue) {
@@ -4784,7 +4888,8 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       const channel = new NoteChannel(
         this.settings.apiUrl,
         this.settings.apiKey,
-        String(user.id)
+        String(user.id),
+        this.settings.vaultId
       );
       channel.onEvent = (event) => {
         this.syncEngine.handleStreamEvent(event);
@@ -4798,6 +4903,15 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
             rlog().error("channel", `Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`);
           });
         }
+      };
+      channel.onVaultDeleted = () => {
+        var _a;
+        new import_obsidian8.Notice("Engram: This vault has been deleted on the server.");
+        rlog().info("lifecycle", "Vault deleted on server \u2014 clearing vaultId");
+        this.settings.vaultId = null;
+        this.api.setVaultId(null);
+        this.savePluginData(this.syncEngine.getLastSync());
+        (_a = this.noteStream) == null ? void 0 : _a.disconnect();
       };
       this.noteStream = channel;
       channel.connect();
