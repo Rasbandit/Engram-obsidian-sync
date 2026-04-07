@@ -20,6 +20,18 @@ import { BaseStore } from "./base-store";
 import { initDevLog, destroyDevLog, devLog } from "./dev-log";
 import { initRemoteLog, destroyRemoteLog, rlog } from "./remote-log";
 
+/** Generate a stable client ID for vault registration.
+ *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
+async function generateClientId(app: import("obsidian").App): Promise<string> {
+	const basePath = (app.vault.adapter as any).getBasePath?.() as string | undefined;
+	const input = basePath || app.vault.getName();
+	const encoder = new TextEncoder();
+	const data = encoder.encode(input);
+	const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+	const hashArray = new Uint8Array(hashBuffer);
+	return Array.from(hashArray).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 interface PluginData {
 	settings: EngramSyncSettings;
 	lastSync: string;
@@ -52,6 +64,9 @@ export default class EngramSyncPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.api = new EngramApi(this.settings.apiUrl, this.settings.apiKey);
+		if (this.settings.vaultId) {
+			this.api.setVaultId(this.settings.vaultId);
+		}
 
 		// Remote logging for mobile debugging
 		const remoteLogger = initRemoteLog();
@@ -273,6 +288,11 @@ export default class EngramSyncPlugin extends Plugin {
 			await this.baseStore?.load();
 			try {
 				if (this.settings.apiUrl && this.settings.apiKey) {
+					const registered = await this.registerVault();
+					if (!registered) {
+						rlog().info("lifecycle", "Vault not registered — skipping initial sync");
+						return;
+					}
 					await this.doSyncWithFirstSyncCheck();
 				}
 			} finally {
@@ -305,10 +325,16 @@ export default class EngramSyncPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			data?.settings,
 		);
+		// Generate stable client ID on first load (persisted forever)
+		if (!this.settings.clientId) {
+			this.settings.clientId = await generateClientId(this.app);
+			await this.saveData({ ...data, settings: this.settings });
+		}
 	}
 
 	async saveSettings(): Promise<void> {
 		this.api.updateConfig(this.settings.apiUrl, this.settings.apiKey);
+		this.api.setVaultId(this.settings.vaultId);
 		this.syncEngine.updateSettings(this.settings);
 		rlog().setEnabled(this.settings.remoteLoggingEnabled);
 		this.startSyncInterval();
@@ -317,10 +343,44 @@ export default class EngramSyncPlugin extends Plugin {
 
 		// Trigger sync when settings are configured (shows modal on first sync)
 		if (this.settings.apiUrl && this.settings.apiKey) {
-			this.doSyncWithFirstSyncCheck().catch((e) => {
+			this.registerVault().then((registered) => {
+				if (!registered) return;
+				return this.doSyncWithFirstSyncCheck();
+			}).catch((e) => {
 				console.error("Engram Sync: sync after settings change failed", e);
 				rlog().error("lifecycle", `Sync after settings change failed: ${e instanceof Error ? e.message : e}`);
 			});
+		}
+	}
+
+	/** Register this vault with the backend. Must be called before sync starts.
+	 *  Returns true if registration succeeded (or vault was already registered).
+	 *  Returns false if the user hit their vault limit (402). */
+	private async registerVault(): Promise<boolean> {
+		if (this.settings.vaultId) {
+			this.api.setVaultId(this.settings.vaultId);
+			return true;
+		}
+
+		try {
+			const result = await this.api.registerVault(
+				this.app.vault.getName(),
+				this.settings.clientId,
+			);
+			this.settings.vaultId = String(result.id);
+			this.api.setVaultId(this.settings.vaultId);
+			await this.saveSettings();
+			rlog().info("lifecycle", `Vault registered: id=${result.id} slug=${result.slug}`);
+			return true;
+		} catch (e: unknown) {
+			if (typeof e === "object" && e !== null && (e as { status?: number }).status === 402) {
+				new Notice("Engram: Upgrade to Pro for multi-vault sync.");
+				rlog().info("lifecycle", "Vault registration blocked — vault limit reached (402)");
+				return false;
+			}
+			console.error("Engram Sync: vault registration failed", e);
+			rlog().error("lifecycle", `Vault registration failed: ${e instanceof Error ? e.message : e}`);
+			return false;
 		}
 	}
 
@@ -360,6 +420,7 @@ export default class EngramSyncPlugin extends Plugin {
 				this.settings.apiUrl,
 				this.settings.apiKey,
 				String(user.id),
+				this.settings.vaultId,
 			);
 
 			channel.onEvent = (event) => {
@@ -376,6 +437,15 @@ export default class EngramSyncPlugin extends Plugin {
 						rlog().error("channel", `Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`);
 					});
 				}
+			};
+
+			channel.onVaultDeleted = () => {
+				new Notice("Engram: This vault has been deleted on the server.");
+				rlog().info("lifecycle", "Vault deleted on server — clearing vaultId");
+				this.settings.vaultId = null;
+				this.api.setVaultId(null);
+				this.saveSettings();
+				this.noteStream?.disconnect();
 			};
 
 			this.noteStream = channel;
