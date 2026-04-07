@@ -16,6 +16,11 @@ export interface EngramSyncSettings {
 	 *  "auto" creates a conflict copy file (non-blocking).
 	 *  "modal" shows the interactive diff modal. */
 	conflictResolution: "auto" | "modal";
+	/** Server-assigned vault ID. Populated after registration. Null until first sync. */
+	vaultId: string | null;
+	/** Stable client-generated vault identifier (SHA-256 of vault absolute path).
+	 *  Generated once on first load, persisted forever. Used for idempotent registration. */
+	clientId: string;
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {
@@ -26,6 +31,8 @@ export const DEFAULT_SETTINGS: EngramSyncSettings = {
 	conflictViewMode: "unified",
 	remoteLoggingEnabled: false,
 	conflictResolution: "auto",
+	vaultId: null,
+	clientId: "",
 };
 
 /** A note as returned by POST /notes */
@@ -94,6 +101,8 @@ export interface QueueEntry {
 	timestamp: number;
 	/** Whether this is a note or attachment. */
 	kind?: "note" | "attachment";
+	/** Vault ID for dedup isolation. */
+	vaultId?: string;
 }
 
 /** Request body for POST /search */
@@ -147,6 +156,8 @@ export interface ConflictInfo {
 	remoteMtime: number;
 	/** Common ancestor content from last successful sync (for 3-way merge). */
 	baseContent?: string;
+	/** Vault name for display in conflict modal. */
+	vaultName?: string;
 }
 
 /** User's choice for resolving a sync conflict. */
@@ -252,6 +263,14 @@ export interface ManifestResponse {
 	attachments: ManifestEntry[];
 	total_notes: number;
 	total_attachments: number;
+}
+
+/** Response from POST /api/vaults/register */
+export interface VaultRegistrationResponse {
+	id: number;
+	name: string;
+	slug: string;
+	is_default: boolean;
 }
 
 /** Result of reconciliation — files that differ between local and server. */

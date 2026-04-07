@@ -14,15 +14,22 @@ import {
 	NoteDetail,
 	NoteResponse,
 	SearchResponse,
+	VaultRegistrationResponse,
 	VersionConflictResponse,
 } from "./types";
 
 export class EngramApi {
+	private vaultId: string | null = null;
+
 	constructor(
 		private baseUrl: string,
 		private apiKey: string,
 	) {
 		this.baseUrl = EngramApi.normalizeBaseUrl(baseUrl);
+	}
+
+	setVaultId(id: string | null): void {
+		this.vaultId = id;
 	}
 
 	/** Strip trailing slashes and append /api if not already present. */
@@ -44,6 +51,9 @@ export class EngramApi {
 		const headers: Record<string, string> = {
 			Authorization: `Bearer ${this.apiKey}`,
 		};
+		if (this.vaultId) {
+			headers["X-Vault-ID"] = this.vaultId;
+		}
 		if (body !== undefined) {
 			headers["Content-Type"] = "application/json";
 		}
@@ -72,6 +82,16 @@ export class EngramApi {
 	async getMe(): Promise<{ id: number; email: string }> {
 		const resp = await this.request("GET", "/me");
 		return (resp.json as { user: { id: number; email: string } }).user;
+	}
+
+	/** Register this vault with the backend. Returns existing vault if client_id matches.
+	 *  Throws with status 402 if user has reached their vault limit (free tier). */
+	async registerVault(name: string, clientId: string): Promise<VaultRegistrationResponse> {
+		const resp = await this.request("POST", "/vaults/register", {
+			name,
+			client_id: clientId,
+		});
+		return resp.json as VaultRegistrationResponse;
 	}
 
 	/** Authenticated ping — verifies both connectivity and API key. */

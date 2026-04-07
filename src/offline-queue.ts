@@ -1,11 +1,21 @@
 /**
  * Offline queue — persists failed sync operations for retry when connectivity returns.
  *
- * Deduplicates by path: newer entries for the same path replace older ones.
+ * Deduplicates by composite key "{vaultId}:{path}" (or just "{path}" if no vaultId).
  * Entries are flushed oldest-first.
  * Persistence is debounced to avoid O(n²) serialization during rapid enqueues.
  */
 import { QueueEntry } from "./types";
+
+/** Build the composite dedup key: "{vaultId}:{path}" or just "{path}" if no vaultId. */
+function dedupKey(entry: QueueEntry): string;
+function dedupKey(path: string, vaultId?: string): string;
+function dedupKey(pathOrEntry: string | QueueEntry, vaultId?: string): string {
+	if (typeof pathOrEntry === "object") {
+		return pathOrEntry.vaultId ? `${pathOrEntry.vaultId}:${pathOrEntry.path}` : pathOrEntry.path;
+	}
+	return vaultId ? `${vaultId}:${pathOrEntry}` : pathOrEntry;
+}
 
 export class OfflineQueue {
 	private entries: Map<string, QueueEntry> = new Map();
@@ -26,19 +36,19 @@ export class OfflineQueue {
 	load(entries: QueueEntry[]): void {
 		this.entries.clear();
 		for (const entry of entries) {
-			this.entries.set(entry.path, entry);
+			this.entries.set(dedupKey(entry), entry);
 		}
 	}
 
 	/** Add or replace a queued change for a path. Persistence is debounced. */
 	async enqueue(entry: QueueEntry): Promise<void> {
-		this.entries.set(entry.path, entry);
+		this.entries.set(dedupKey(entry), entry);
 		this.schedulePersist();
 	}
 
 	/** Remove a path from the queue (after successful sync). Persists immediately. */
-	async dequeue(path: string): Promise<void> {
-		this.entries.delete(path);
+	async dequeue(path: string, vaultId?: string): Promise<void> {
+		this.entries.delete(dedupKey(path, vaultId));
 		await this.persistNow();
 	}
 

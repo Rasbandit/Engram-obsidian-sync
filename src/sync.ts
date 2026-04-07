@@ -298,6 +298,7 @@ export class SyncEngine {
 				action: "delete",
 				kind: isBinary ? "attachment" : "note",
 				timestamp: Date.now(),
+				vaultId: this.settings.vaultId ?? undefined,
 			});
 		}
 	}
@@ -335,6 +336,7 @@ export class SyncEngine {
 						action: "delete",
 						kind: isBinary ? "attachment" : "note",
 						timestamp: Date.now(),
+						vaultId: this.settings.vaultId ?? undefined,
 					});
 				}
 			}
@@ -502,6 +504,7 @@ export class SyncEngine {
 						remoteContent: serverNote.content,
 						remoteMtime: serverNote.mtime,
 						baseContent: pushBase?.content,
+						vaultName: this.app.vault.getName(),
 					});
 					if (resolution.choice === "keep-local") {
 						// Re-push without version (unconditional overwrite)
@@ -580,6 +583,7 @@ export class SyncEngine {
 				kind: isBinary ? "attachment" : "note",
 				mtime: file.stat.mtime / 1000,
 				timestamp: Date.now(),
+				vaultId: this.settings.vaultId ?? undefined,
 			});
 		} finally {
 			this.pushing.delete(file.path);
@@ -921,6 +925,7 @@ export class SyncEngine {
 					remoteContent: change.content,
 					remoteMtime: change.mtime,
 					baseContent: pullBase?.content,
+					vaultName: this.app.vault.getName(),
 				});
 
 				if (resolution.choice === "skip") {
@@ -1424,7 +1429,7 @@ export class SyncEngine {
 					if (!base64) {
 						const file = this.app.vault.getAbstractFileByPath(entry.path);
 						if (!(file instanceof TFile)) {
-							await this.queue.dequeue(entry.path);
+							await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
 							flushed++;
 							continue;
 						}
@@ -1441,7 +1446,7 @@ export class SyncEngine {
 					if (content === undefined) {
 						const file = this.app.vault.getAbstractFileByPath(entry.path);
 						if (!(file instanceof TFile)) {
-							await this.queue.dequeue(entry.path);
+							await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
 							flushed++;
 							continue;
 						}
@@ -1450,7 +1455,7 @@ export class SyncEngine {
 					}
 					await this.api.pushNote(entry.path, content, mtime!);
 				}
-				await this.queue.dequeue(entry.path);
+				await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
 				flushed++;
 			} catch {
 				// Lost connectivity again — stop flushing

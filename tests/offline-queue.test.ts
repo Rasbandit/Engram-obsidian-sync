@@ -4,9 +4,10 @@
 import { OfflineQueue } from "../src/offline-queue";
 import { QueueEntry } from "../src/types";
 
-function makeEntry(path: string, timestamp?: number): QueueEntry {
+function makeEntry(path: string, timestamp?: number, vaultId?: string): QueueEntry {
     return {
         path,
+        vaultId,
         content: `content of ${path}`,
         mtime: timestamp || Date.now(),
         timestamp: timestamp || Date.now(),
@@ -184,6 +185,56 @@ describe("OfflineQueue persistence", () => {
         await q.enqueue(makeEntry("a.md"));
         await q.dequeue("a.md");
         await q.clear();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Destroy
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Vault-scoped dedup
+// ---------------------------------------------------------------------------
+
+describe("OfflineQueue vault-scoped dedup", () => {
+    test("same path in different vaults are kept separate", async () => {
+        const q = new OfflineQueue();
+        await q.enqueue(makeEntry("README.md", 1000, "vault-1"));
+        await q.enqueue(makeEntry("README.md", 2000, "vault-2"));
+        expect(q.size).toBe(2);
+    });
+
+    test("same path and vault deduplicates as before", async () => {
+        const q = new OfflineQueue();
+        await q.enqueue(makeEntry("README.md", 1000, "vault-1"));
+        await q.enqueue(makeEntry("README.md", 2000, "vault-1"));
+        expect(q.size).toBe(1);
+        expect(q.all()[0].timestamp).toBe(2000);
+    });
+
+    test("dequeue with vaultId removes correct entry", async () => {
+        const q = new OfflineQueue();
+        await q.enqueue(makeEntry("README.md", 1000, "vault-1"));
+        await q.enqueue(makeEntry("README.md", 2000, "vault-2"));
+        await q.dequeue("README.md", "vault-1");
+        expect(q.size).toBe(1);
+        expect(q.all()[0].vaultId).toBe("vault-2");
+    });
+
+    test("entries without vaultId still work (backwards compat)", async () => {
+        const q = new OfflineQueue();
+        await q.enqueue(makeEntry("a.md", 1000));
+        await q.enqueue(makeEntry("a.md", 2000));
+        expect(q.size).toBe(1);
+    });
+
+    test("load preserves vaultId in dedup key", () => {
+        const q = new OfflineQueue();
+        q.load([
+            makeEntry("README.md", 1000, "vault-1"),
+            makeEntry("README.md", 2000, "vault-2"),
+        ]);
+        expect(q.size).toBe(2);
     });
 });
 

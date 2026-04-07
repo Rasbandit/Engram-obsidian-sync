@@ -70,7 +70,10 @@ export class ConflictModal extends Modal {
 
 	private renderHeader(root: HTMLElement): void {
 		const header = root.createEl("header", { cls: "engram-conflict-header" });
-		header.createEl("h2", { text: "Sync Conflict" });
+		const title = this.info.vaultName
+			? `Sync Conflict — ${this.info.vaultName}`
+			: "Sync Conflict";
+		header.createEl("h2", { text: title });
 		header.createEl("code", { text: this.info.path, cls: "engram-conflict-path" });
 
 		const meta = header.createEl("aside", { cls: "engram-conflict-meta" });
