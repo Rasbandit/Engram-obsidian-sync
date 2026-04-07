@@ -444,7 +444,8 @@ export default class EngramSyncPlugin extends Plugin {
 				rlog().info("lifecycle", "Vault deleted on server — clearing vaultId");
 				this.settings.vaultId = null;
 				this.api.setVaultId(null);
-				this.saveSettings();
+				// Use savePluginData instead of saveSettings to avoid triggering re-registration
+				this.savePluginData(this.syncEngine.getLastSync());
 				this.noteStream?.disconnect();
 			};
 
