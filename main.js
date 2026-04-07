@@ -3514,13 +3514,13 @@ var NoteChannel = class {
     this.onEvent = null;
     this.onStatusChange = null;
     this.onVaultDeleted = null;
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
     this.apiKey = apiKey;
     this.userId = userId;
     this.vaultId = vaultId;
   }
   updateConfig(baseUrl, apiKey, userId, vaultId = null) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
     this.apiKey = apiKey;
     this.userId = userId;
     this.vaultId = vaultId;
