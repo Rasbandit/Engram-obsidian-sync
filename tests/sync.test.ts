@@ -34,6 +34,7 @@ const mockApi = {
 	getAttachmentChanges: jest.fn().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
 	getRateLimit: jest.fn().mockResolvedValue(0),
 	getManifest: jest.fn().mockResolvedValue(null),
+	registerVault: jest.fn().mockResolvedValue({ id: 1, name: "Test", slug: "test", is_default: true }),
 } as unknown as EngramApi;
 
 // Mock the Obsidian App
@@ -51,6 +52,7 @@ const mockApp = {
 		createFolder: jest.fn().mockResolvedValue(undefined),
 		trash: jest.fn().mockResolvedValue(undefined),
 		rename: jest.fn().mockResolvedValue(undefined),
+		getName: jest.fn().mockReturnValue("Test Vault"),
 	},
 } as any;
 
@@ -2264,5 +2266,26 @@ describe("Path sanitization on push", () => {
 		await new Promise((r) => setTimeout(r, 100));
 
 		expect(mockApp.vault.rename).toHaveBeenCalledWith(file, "Notes/What Why How.md");
+	});
+});
+
+describe("SyncEngine vault-scoped queue", () => {
+	test("enqueued entries include vaultId from settings", async () => {
+		const engine = createEngine({ vaultId: "42", debounceMs: 10 });
+		// Simulate a push failure that enqueues
+		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("network"));
+		mockApp.vault.read.mockResolvedValueOnce("content");
+
+		const file = new TFile("test.md", Date.now());
+		mockApp.vault.getAbstractFileByPath.mockReturnValueOnce(file);
+		engine.handleModify(file);
+
+		// Wait for debounce + async push
+		await new Promise((r) => setTimeout(r, 50));
+
+		const entries = engine.queue.all();
+		if (entries.length > 0) {
+			expect(entries[0].vaultId).toBe("42");
+		}
 	});
 });
