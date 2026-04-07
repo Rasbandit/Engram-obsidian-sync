@@ -28,14 +28,14 @@ export class NoteChannel {
 	onVaultDeleted: (() => void) | null = null;
 
 	constructor(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null) {
-		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
 		this.apiKey = apiKey;
 		this.userId = userId;
 		this.vaultId = vaultId;
 	}
 
 	updateConfig(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null): void {
-		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
 		this.apiKey = apiKey;
 		this.userId = userId;
 		this.vaultId = vaultId;
