@@ -6,6 +6,7 @@
  */
 import { Notice, Platform, Plugin } from "obsidian";
 import { EngramApi } from "./api";
+import { ApiKeyAuth, OAuthAuth, type AuthProvider, type RefreshFn } from "./auth";
 import { EngramSyncSettings, DEFAULT_SETTINGS, FileSyncState, SyncStatus } from "./types";
 import { SyncEngine } from "./sync";
 import { EngramSyncSettingTab } from "./settings";
@@ -45,6 +46,7 @@ interface PluginData {
 export default class EngramSyncPlugin extends Plugin {
 	settings: EngramSyncSettings = DEFAULT_SETTINGS;
 	api: EngramApi = new EngramApi("", "");
+	authProvider: AuthProvider | null = null;
 	syncEngine: SyncEngine = null!;
 	private syncInterval: ReturnType<typeof setInterval> | null = null;
 	noteStream: NoteChannel | null = null;
@@ -66,6 +68,11 @@ export default class EngramSyncPlugin extends Plugin {
 		this.api = new EngramApi(this.settings.apiUrl, this.settings.apiKey);
 		if (this.settings.vaultId) {
 			this.api.setVaultId(this.settings.vaultId);
+		}
+
+		this.authProvider = this.createAuthProvider();
+		if (this.authProvider) {
+			this.api.setAuthProvider(this.authProvider);
 		}
 
 		// Remote logging for mobile debugging
@@ -395,6 +402,56 @@ export default class EngramSyncPlugin extends Plugin {
 		} as PluginData);
 	}
 
+	private createAuthProvider(): AuthProvider | null {
+		if (this.settings.refreshToken) {
+			const refreshFn: RefreshFn = async (token) => {
+				const resp = await fetch(`${this.settings.apiUrl}/auth/token/refresh`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ refresh_token: token }),
+				});
+				if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
+				return resp.json();
+			};
+			return new OAuthAuth(this.settings.refreshToken, this.settings.vaultId, this.settings.userEmail ?? null, refreshFn);
+		}
+
+		if (this.settings.apiKey) {
+			return new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId);
+		}
+
+		return null;
+	}
+
+	async saveOAuthTokens(refreshToken: string, vaultId: string, userEmail: string): Promise<void> {
+		this.settings.refreshToken = refreshToken;
+		this.settings.userEmail = userEmail;
+		this.settings.authMethod = "oauth";
+		this.settings.vaultId = vaultId;
+		await this.saveSettings();
+
+		this.authProvider = this.createAuthProvider();
+		if (this.authProvider) {
+			this.api.setAuthProvider(this.authProvider);
+			if (this.noteStream) {
+				this.noteStream.setAuthProvider(this.authProvider);
+			}
+		}
+	}
+
+	async clearOAuthTokens(): Promise<void> {
+		delete this.settings.refreshToken;
+		delete this.settings.userEmail;
+		this.settings.authMethod = null;
+		await this.saveSettings();
+		this.authProvider = this.settings.apiKey
+			? new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId)
+			: null;
+		if (this.authProvider) {
+			this.api.setAuthProvider(this.authProvider);
+		}
+	}
+
 	setupNoteStream(): void {
 		// Disconnect existing channel
 		this.noteStream?.disconnect();
@@ -450,6 +507,9 @@ export default class EngramSyncPlugin extends Plugin {
 			};
 
 			this.noteStream = channel;
+			if (this.authProvider) {
+				this.noteStream.setAuthProvider(this.authProvider);
+			}
 			channel.connect();
 		}).catch((e) => {
 			console.error("Engram Sync: failed to fetch user id for channel", e);
