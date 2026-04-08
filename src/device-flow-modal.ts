@@ -58,8 +58,9 @@ export class DeviceFlowModal extends Modal {
     verification_url: string;
     expires_in: number;
   }> {
-    const baseUrl = this.plugin.settings.apiUrl;
-    const resp = await fetch(`${baseUrl}/auth/device`, {
+    const baseUrl = this.plugin.settings.apiUrl.replace(/\/+$/, "");
+    const apiUrl = baseUrl.endsWith("/api") ? baseUrl : `${baseUrl}/api`;
+    const resp = await fetch(`${apiUrl}/auth/device`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: this.plugin.settings.clientId }),
@@ -107,7 +108,8 @@ export class DeviceFlowModal extends Modal {
   }
 
   private startPolling(deviceCode: string): void {
-    const baseUrl = this.plugin.settings.apiUrl;
+    const base = this.plugin.settings.apiUrl.replace(/\/+$/, "");
+    const apiUrl = base.endsWith("/api") ? base : `${base}/api`;
     let elapsed = 0;
     const maxSeconds = 300;
 
@@ -122,7 +124,7 @@ export class DeviceFlowModal extends Modal {
       }
 
       try {
-        const resp = await fetch(`${baseUrl}/auth/device/token`, {
+        const resp = await fetch(`${apiUrl}/auth/device/token`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ device_code: deviceCode }),
