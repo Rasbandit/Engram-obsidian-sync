@@ -971,7 +971,7 @@ export class SyncEngine {
 						if (change.version != null) {
 							this.baseStore?.set(normalized, resolution.mergedContent, change.version);
 						}
-						await this.pushFile(existing);
+						await this.pushFile(existing, true);
 						rlog().info("conflict",
 							`Resolved: ${change.path} → merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`,
 						);
