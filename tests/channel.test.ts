@@ -52,9 +52,9 @@ beforeEach(() => {
 });
 
 describe("NoteChannel topic format", () => {
-    test("joins sync:{userId}:{vaultId} when vaultId is provided", () => {
+    test("joins sync:{userId}:{vaultId} when vaultId is provided", async () => {
         const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
-        channel.connect();
+        await channel.connect();
         simulateOpen(lastWsInstance);
 
         const joinMsg = getLastSentMessage(lastWsInstance);
@@ -65,9 +65,9 @@ describe("NoteChannel topic format", () => {
         channel.disconnect();
     });
 
-    test("joins sync:{userId} when vaultId is null (backwards compat)", () => {
+    test("joins sync:{userId} when vaultId is null (backwards compat)", async () => {
         const channel = new NoteChannel("http://localhost:4000", "key", "42", null);
-        channel.connect();
+        await channel.connect();
         simulateOpen(lastWsInstance);
 
         const joinMsg = getLastSentMessage(lastWsInstance);
@@ -79,11 +79,11 @@ describe("NoteChannel topic format", () => {
 });
 
 describe("NoteChannel vault_deleted event", () => {
-    test("fires onVaultDeleted callback when vault_deleted event received", () => {
+    test("fires onVaultDeleted callback when vault_deleted event received", async () => {
         const onVaultDeleted = jest.fn();
         const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
         channel.onVaultDeleted = onVaultDeleted;
-        channel.connect();
+        await channel.connect();
         simulateOpen(lastWsInstance);
 
         // Simulate server sending vault_deleted
@@ -93,11 +93,11 @@ describe("NoteChannel vault_deleted event", () => {
         channel.disconnect();
     });
 
-    test("does not fire onEvent for vault_deleted (separate callback)", () => {
+    test("does not fire onEvent for vault_deleted (separate callback)", async () => {
         const onEvent = jest.fn();
         const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
         channel.onEvent = onEvent;
-        channel.connect();
+        await channel.connect();
         simulateOpen(lastWsInstance);
 
         simulateMessage(lastWsInstance, [null, null, "sync:42:7", "vault_deleted", {}]);
@@ -108,10 +108,10 @@ describe("NoteChannel vault_deleted event", () => {
 });
 
 describe("NoteChannel updateConfig with vaultId", () => {
-    test("updateConfig accepts vaultId parameter", () => {
+    test("updateConfig accepts vaultId parameter", async () => {
         const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
         channel.updateConfig("http://localhost:4001", "key2", "42", "99");
-        channel.connect();
+        await channel.connect();
         simulateOpen(lastWsInstance);
 
         const joinMsg = getLastSentMessage(lastWsInstance);

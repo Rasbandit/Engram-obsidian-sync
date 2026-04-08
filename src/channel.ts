@@ -7,6 +7,7 @@
  * Protocol: messages are JSON arrays [join_ref, ref, topic, event, payload]
  */
 import { NoteStreamEvent } from "./types";
+import type { AuthProvider } from "./auth";
 import { rlog } from "./remote-log";
 
 export class NoteChannel {
@@ -22,6 +23,7 @@ export class NoteChannel {
 	private apiKey: string;
 	private userId: string;
 	private vaultId: string | null;
+	private authProvider: AuthProvider | null = null;
 
 	onEvent: ((event: NoteStreamEvent) => void) | null = null;
 	onStatusChange: ((connected: boolean) => void) | null = null;
@@ -32,6 +34,17 @@ export class NoteChannel {
 		this.apiKey = apiKey;
 		this.userId = userId;
 		this.vaultId = vaultId;
+	}
+
+	setAuthProvider(provider: AuthProvider): void {
+		this.authProvider = provider;
+	}
+
+	private async getAuthToken(): Promise<string> {
+		if (this.authProvider) {
+			return this.authProvider.getToken();
+		}
+		return this.apiKey;
 	}
 
 	updateConfig(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null): void {
@@ -45,10 +58,10 @@ export class NoteChannel {
 		return this.vaultId ? `sync:${this.userId}:${this.vaultId}` : `sync:${this.userId}`;
 	}
 
-	connect(): void {
+	async connect(): Promise<void> {
 		if (this.ws) return;
 		this.reconnectMs = 1000;
-		this.openSocket();
+		await this.openSocket();
 	}
 
 	disconnect(): void {
@@ -70,9 +83,10 @@ export class NoteChannel {
 	// Private
 	// ---------------------------------------------------------------------------
 
-	private openSocket(): void {
+	private async openSocket(): Promise<void> {
+		const token = await this.getAuthToken();
 		const wsBase = this.baseUrl.replace(/^http/, "ws").replace(/^https/, "wss");
-		const url = `${wsBase}/socket/websocket?token=${encodeURIComponent(this.apiKey)}&vsn=2.0.0`;
+		const url = `${wsBase}/socket/websocket?token=${encodeURIComponent(token)}&vsn=2.0.0`;
 
 		try {
 			this.ws = new WebSocket(url);
@@ -191,9 +205,9 @@ export class NoteChannel {
 
 	private scheduleReconnect(): void {
 		const jitter = Math.random() * this.reconnectMs * 0.5;
-		this.reconnectTimer = setTimeout(() => {
+		this.reconnectTimer = setTimeout(async () => {
 			this.reconnectMs = Math.min(this.reconnectMs * 2, this.maxReconnectMs);
-			this.openSocket();
+			await this.openSocket();
 		}, this.reconnectMs + jitter);
 	}
 }
