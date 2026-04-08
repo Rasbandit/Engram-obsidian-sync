@@ -223,7 +223,7 @@ export class EngramApi {
 
 	/** Push batched log entries to the server for remote debugging. */
 	async pushLogs(entries: { ts: string; level: string; category: string; message: string; stack?: string; plugin_version: string; platform: string }[]): Promise<void> {
-		await this.request("POST", "/logs", { entries });
+		await this.request("POST", "/logs", { logs: entries });
 	}
 
 	/** Get attachment changes since a timestamp. */
