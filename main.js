@@ -1490,7 +1490,7 @@ __export(main_exports, {
   default: () => EngramSyncPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/api.ts
 var import_obsidian = require("obsidian");
@@ -1499,10 +1499,26 @@ var EngramApi = class _EngramApi {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
     this.vaultId = null;
+    this.authProvider = null;
     this.baseUrl = _EngramApi.normalizeBaseUrl(baseUrl);
   }
   setVaultId(id) {
     this.vaultId = id;
+  }
+  setAuthProvider(provider) {
+    this.authProvider = provider;
+  }
+  getActiveVaultId() {
+    if (this.authProvider) {
+      return this.authProvider.getVaultId();
+    }
+    return this.vaultId;
+  }
+  async getAuthToken() {
+    if (this.authProvider) {
+      return this.authProvider.getToken();
+    }
+    return this.apiKey;
   }
   /** Strip trailing slashes and append /api if not already present. */
   static normalizeBaseUrl(url) {
@@ -1514,8 +1530,9 @@ var EngramApi = class _EngramApi {
     this.apiKey = apiKey;
   }
   async request(method, path, body) {
+    const token = await this.getAuthToken();
     const headers = {
-      Authorization: `Bearer ${this.apiKey}`
+      Authorization: `Bearer ${token}`
     };
     if (this.vaultId) {
       headers["X-Vault-ID"] = this.vaultId;
@@ -1662,7 +1679,7 @@ var EngramApi = class _EngramApi {
   }
   /** Push batched log entries to the server for remote debugging. */
   async pushLogs(entries) {
-    await this.request("POST", "/logs", { entries });
+    await this.request("POST", "/logs", { logs: entries });
   }
   /** Get attachment changes since a timestamp. */
   async getAttachmentChanges(since) {
@@ -1690,6 +1707,79 @@ function base64ToArrayBuffer(base64) {
   }
   return bytes.buffer;
 }
+
+// src/auth.ts
+var ApiKeyAuth = class {
+  constructor(apiKey, vaultId) {
+    this.apiKey = apiKey;
+    this.vaultId = vaultId;
+  }
+  async getToken() {
+    return this.apiKey;
+  }
+  getVaultId() {
+    return this.vaultId;
+  }
+  isAuthenticated() {
+    return this.apiKey.length > 0;
+  }
+  signOut() {
+    this.apiKey = "";
+    this.vaultId = null;
+  }
+};
+var _OAuthAuth = class _OAuthAuth {
+  constructor(refreshToken, vaultId, userEmail, refreshFn) {
+    this.accessToken = null;
+    this.expiresAt = 0;
+    this.authenticated = true;
+    this.refreshToken = refreshToken;
+    this.vaultId = vaultId;
+    this.userEmail = userEmail;
+    this.refreshFn = refreshFn;
+  }
+  async getToken() {
+    if (this.accessToken && this.expiresAt > Date.now() + _OAuthAuth.EXPIRY_BUFFER_MS) {
+      return this.accessToken;
+    }
+    try {
+      const result = await this.refreshFn(this.refreshToken);
+      this.accessToken = result.access_token;
+      this.refreshToken = result.refresh_token;
+      this.expiresAt = Date.now() + result.expires_in * 1e3;
+      this.authenticated = true;
+      return this.accessToken;
+    } catch (err) {
+      this.authenticated = false;
+      this.accessToken = null;
+      this.expiresAt = 0;
+      throw err;
+    }
+  }
+  getVaultId() {
+    return this.vaultId;
+  }
+  getUserEmail() {
+    return this.userEmail;
+  }
+  getRefreshToken() {
+    return this.refreshToken;
+  }
+  isAuthenticated() {
+    return this.authenticated;
+  }
+  signOut() {
+    this.accessToken = null;
+    this.refreshToken = "";
+    this.expiresAt = 0;
+    this.authenticated = false;
+    this.vaultId = null;
+    this.userEmail = null;
+  }
+};
+/** Buffer in ms — refresh if token expires within this window. */
+_OAuthAuth.EXPIRY_BUFFER_MS = 6e4;
+var OAuthAuth = _OAuthAuth;
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
@@ -2842,7 +2932,7 @@ var SyncEngine = class {
             if (change.version != null) {
               (_e = this.baseStore) == null ? void 0 : _e.set(normalized, resolution.mergedContent, change.version);
             }
-            await this.pushFile(existing);
+            await this.pushFile(existing, true);
             rlog().info(
               "conflict",
               `Resolved: ${change.path} \u2192 merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`
@@ -3274,7 +3364,142 @@ var SyncEngine = class {
 };
 
 // src/settings.ts
+var import_obsidian4 = require("obsidian");
+
+// src/device-flow-modal.ts
 var import_obsidian3 = require("obsidian");
+var DeviceFlowModal = class extends import_obsidian3.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.resolve = () => {
+    };
+    this.pollInterval = null;
+    this.aborted = false;
+    this.plugin = plugin;
+  }
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
+    const statusEl = contentEl.createEl("p", { text: "Starting..." });
+    try {
+      const resp = await this.startDeviceFlow();
+      this.renderCodeScreen(contentEl, resp);
+      this.startPolling(resp.device_code);
+    } catch (e) {
+      statusEl.setText("Failed to start device flow. Check your Engram URL and try again.");
+    }
+  }
+  onClose() {
+    this.aborted = true;
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    this.contentEl.empty();
+    this.resolve(null);
+  }
+  waitForResult() {
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.open();
+    });
+  }
+  async startDeviceFlow() {
+    const baseUrl = this.plugin.settings.apiUrl;
+    const resp = await fetch(`${baseUrl}/auth/device`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: this.plugin.settings.clientId })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  }
+  renderCodeScreen(contentEl, resp) {
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
+    contentEl.createEl("p", { text: "Your code:" });
+    const codeEl = contentEl.createEl("code", { text: resp.user_code });
+    codeEl.style.display = "block";
+    codeEl.style.fontSize = "2rem";
+    codeEl.style.fontFamily = "monospace";
+    codeEl.style.textAlign = "center";
+    codeEl.style.padding = "1rem";
+    codeEl.style.margin = "1rem 0";
+    codeEl.style.letterSpacing = "0.15em";
+    codeEl.style.cursor = "pointer";
+    codeEl.title = "Click to copy";
+    codeEl.addEventListener("click", () => {
+      navigator.clipboard.writeText(resp.user_code);
+      new import_obsidian3.Notice("Code copied!");
+    });
+    contentEl.createEl("p", {
+      text: "A browser window has opened. Sign in and enter this code to link your vault."
+    });
+    const waitEl = contentEl.createEl("p", { text: "Waiting for authorization..." });
+    waitEl.style.fontStyle = "italic";
+    const btnContainer = contentEl.createDiv();
+    btnContainer.style.marginTop = "1rem";
+    const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => this.close());
+    window.open(resp.verification_url);
+  }
+  startPolling(deviceCode) {
+    const baseUrl = this.plugin.settings.apiUrl;
+    let elapsed = 0;
+    const maxSeconds = 300;
+    this.pollInterval = setInterval(async () => {
+      if (this.aborted) return;
+      elapsed += 5;
+      if (elapsed >= maxSeconds) {
+        if (this.pollInterval) clearInterval(this.pollInterval);
+        this.renderExpired();
+        return;
+      }
+      try {
+        const resp = await fetch(`${baseUrl}/auth/device/token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device_code: deviceCode })
+        });
+        if (resp.status === 428) return;
+        if (resp.ok) {
+          if (this.pollInterval) clearInterval(this.pollInterval);
+          const result = await resp.json();
+          this.resolve(result);
+          this.resolve = () => {
+          };
+          this.close();
+          return;
+        }
+        if (resp.status === 410) {
+          if (this.pollInterval) clearInterval(this.pollInterval);
+          this.renderExpired();
+          return;
+        }
+      } catch (e) {
+      }
+    }, 5e3);
+  }
+  renderExpired() {
+    const contentEl = this.contentEl;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
+    contentEl.createEl("p", { text: "Code expired. Please try again." });
+    const btnContainer = contentEl.createDiv();
+    btnContainer.style.marginTop = "1rem";
+    const retryBtn = btnContainer.createEl("button", { text: "Try Again", cls: "mod-cta" });
+    retryBtn.addEventListener("click", () => {
+      this.aborted = false;
+      this.onOpen();
+    });
+    const closeBtn = btnContainer.createEl("button", { text: "Close" });
+    closeBtn.style.marginLeft = "8px";
+    closeBtn.addEventListener("click", () => this.close());
+  }
+};
+
+// src/settings.ts
 var PROBLEMATIC_DIRS = [
   { pattern: "node_modules/", label: "node_modules", desc: "Node.js dependencies" },
   { pattern: ".venv/", label: ".venv", desc: "Python virtual environment" },
@@ -3291,24 +3516,60 @@ var PROBLEMATIC_DIRS = [
   { pattern: ".dart_tool/", label: ".dart_tool", desc: "Dart tool cache" },
   { pattern: ".cache/", label: ".cache", desc: "Generic cache directory" }
 ];
-var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
+var EngramSyncSettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
   display() {
+    var _a;
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Engram Sync Settings" });
     this.renderStatus(containerEl);
     containerEl.createEl("h3", { text: "Connection" });
-    new import_obsidian3.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
+    new import_obsidian4.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
       (text) => text.setPlaceholder("http://localhost:8000").setValue(this.plugin.settings.apiUrl).onChange(async (value) => {
         this.plugin.settings.apiUrl = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
+    const isOAuth = !!this.plugin.settings.refreshToken;
+    if (isOAuth) {
+      const statusDiv = containerEl.createDiv();
+      statusDiv.style.padding = "12px";
+      statusDiv.style.marginBottom = "16px";
+      statusDiv.style.borderRadius = "8px";
+      statusDiv.createEl("strong", {
+        text: `Connected as ${(_a = this.plugin.settings.userEmail) != null ? _a : "unknown"}`
+      });
+      const signOutBtn = statusDiv.createEl("button", { text: "Sign Out" });
+      signOutBtn.style.marginLeft = "12px";
+      signOutBtn.addEventListener("click", async () => {
+        await this.plugin.clearOAuthTokens();
+        this.display();
+      });
+    }
+    if (!isOAuth) {
+      containerEl.createEl("h3", { text: "Sign In" });
+      new import_obsidian4.Setting(containerEl).setName("Sign in with Engram").setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.").addButton(
+        (btn) => btn.setButtonText("Sign In").setCta().onClick(async () => {
+          const modal = new DeviceFlowModal(this.app, this.plugin);
+          const result = await modal.waitForResult();
+          if (result) {
+            await this.plugin.saveOAuthTokens(
+              result.refresh_token,
+              String(result.vault_id),
+              result.user_email
+            );
+            new import_obsidian4.Notice(`Connected as ${result.user_email}`);
+            this.display();
+          }
+        })
+      );
+    }
+    containerEl.createEl("h3", { text: "Advanced: API Key" });
+    new import_obsidian4.Setting(containerEl).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
       text.setPlaceholder("engram_abc123...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value;
         await this.plugin.saveSettings();
@@ -3332,21 +3593,25 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
+    if (isOAuth) {
+      const apiKeyInput = containerEl.querySelector('input[type="password"]');
+      if (apiKeyInput) apiKeyInput.disabled = true;
+    }
+    new import_obsidian4.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
         this.plugin.settings.remoteLoggingEnabled = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
+    new import_obsidian4.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
       (btn) => btn.setButtonText("Test").onClick(async () => {
         const { ok, error } = await this.plugin.api.ping();
-        new import_obsidian3.Notice(ok ? "Engram: connected!" : `Engram: ${error}`);
+        new import_obsidian4.Notice(ok ? "Engram: connected!" : `Engram: ${error}`);
       })
     );
     containerEl.createEl("h3", { text: "Ignore Patterns" });
     this.renderIgnoreWarnings(containerEl);
-    const ignoreSetting = new import_obsidian3.Setting(containerEl).setName("Custom patterns").setDesc("Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/").addTextArea((text) => {
+    const ignoreSetting = new import_obsidian4.Setting(containerEl).setName("Custom patterns").setDesc("Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/").addTextArea((text) => {
       text.setPlaceholder("drafts/\nsecret.md").setValue(this.plugin.settings.ignorePatterns).onChange(async (value) => {
         this.plugin.settings.ignorePatterns = value;
         await this.plugin.saveSettings();
@@ -3358,13 +3623,13 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
     ignoreSetting.settingEl.style.alignItems = "flex-start";
     ignoreSetting.settingEl.style.gap = "8px";
     containerEl.createEl("h3", { text: "Sync Behavior" });
-    new import_obsidian3.Setting(containerEl).setName("Conflict resolution").setDesc("How to handle conflicts. Automatic creates a conflict copy. Interactive shows a diff dialog.").addDropdown(
+    new import_obsidian4.Setting(containerEl).setName("Conflict resolution").setDesc("How to handle conflicts. Automatic creates a conflict copy. Interactive shows a diff dialog.").addDropdown(
       (dropdown) => dropdown.addOption("auto", "Automatic (conflict files)").addOption("modal", "Interactive (diff modal)").setValue(this.plugin.settings.conflictResolution).onChange(async (value) => {
         this.plugin.settings.conflictResolution = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Debounce (ms)").setDesc("Delay after editing before pushing. Prevents flooding during typing.").addText(
+    new import_obsidian4.Setting(containerEl).setName("Debounce (ms)").setDesc("Delay after editing before pushing. Prevents flooding during typing.").addText(
       (text) => text.setPlaceholder("2000").setValue(String(this.plugin.settings.debounceMs)).onChange(async (value) => {
         const num = parseInt(value, 10);
         if (!isNaN(num) && num >= 100) {
@@ -3374,44 +3639,44 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
       })
     );
     containerEl.createEl("h3", { text: "Actions" });
-    new import_obsidian3.Setting(containerEl).setName("Sync now").setDesc("Pull remote changes and push local changes").addButton(
+    new import_obsidian4.Setting(containerEl).setName("Sync now").setDesc("Pull remote changes and push local changes").addButton(
       (btn) => btn.setButtonText("Sync").onClick(async () => {
-        new import_obsidian3.Notice("Engram Sync: syncing...");
+        new import_obsidian4.Notice("Engram Sync: syncing...");
         try {
           const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
-          new import_obsidian3.Notice(
+          new import_obsidian4.Notice(
             `Engram Sync: pulled ${pulled}, pushed ${pushed}`
           );
         } catch (e) {
-          new import_obsidian3.Notice(
+          new import_obsidian4.Notice(
             `Engram Sync: ${e instanceof Error ? e.message : "sync failed"}`
           );
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Push entire vault").setDesc("Push all syncable files to Engram. Only needed for initial import.").addButton(
+    new import_obsidian4.Setting(containerEl).setName("Push entire vault").setDesc("Push all syncable files to Engram. Only needed for initial import.").addButton(
       (btn) => btn.setButtonText("Push All").setWarning().onClick(async () => {
         const count = this.plugin.syncEngine.countSyncableFiles();
         if (!confirm(`Push ${count} files to Engram? This may overwrite server content.`)) return;
         try {
           const pushed = await this.plugin.syncEngine.pushAll();
-          new import_obsidian3.Notice(`Engram Sync: pushed ${pushed} files`);
+          new import_obsidian4.Notice(`Engram Sync: pushed ${pushed} files`);
         } catch (e) {
-          new import_obsidian3.Notice(
+          new import_obsidian4.Notice(
             `Engram Sync: ${e instanceof Error ? e.message : "push failed"}`
           );
         }
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Pull all from server").setDesc("Force-pull every note and attachment, overwriting local copies.").addButton(
+    new import_obsidian4.Setting(containerEl).setName("Pull all from server").setDesc("Force-pull every note and attachment, overwriting local copies.").addButton(
       (btn) => btn.setButtonText("Pull All").setWarning().onClick(async () => {
         if (!confirm("Pull all files from server? Local changes will be overwritten.")) return;
         try {
-          new import_obsidian3.Notice("Engram Sync: pulling all from server...");
+          new import_obsidian4.Notice("Engram Sync: pulling all from server...");
           const count = await this.plugin.syncEngine.pullAll();
-          new import_obsidian3.Notice(`Engram Sync: pulled ${count} files from server`);
+          new import_obsidian4.Notice(`Engram Sync: pulled ${count} files from server`);
         } catch (e) {
-          new import_obsidian3.Notice(
+          new import_obsidian4.Notice(
             `Engram Sync: ${e instanceof Error ? e.message : "pull failed"}`
           );
         }
@@ -3469,11 +3734,11 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
     for (const dir of PROBLEMATIC_DIRS) {
       if (currentIgnores.includes(dir.pattern)) continue;
       const folder = this.app.vault.getAbstractFileByPath(dir.label);
-      if (folder && folder instanceof import_obsidian3.TFolder) {
+      if (folder && folder instanceof import_obsidian4.TFolder) {
         let count = 0;
         const walk = (f) => {
           for (const child of f.children) {
-            if (child instanceof import_obsidian3.TFolder) walk(child);
+            if (child instanceof import_obsidian4.TFolder) walk(child);
             else count++;
           }
         };
@@ -3483,13 +3748,13 @@ var EngramSyncSettingTab = class extends import_obsidian3.PluginSettingTab {
     }
     if (detected.length === 0) return;
     for (const item of detected) {
-      const warning = new import_obsidian3.Setting(containerEl).setName(`\u26A0 Detected: ${item.label}/ (${item.count.toLocaleString()} files)`).setDesc(`${item.desc} \u2014 should not be synced`).addButton(
+      const warning = new import_obsidian4.Setting(containerEl).setName(`\u26A0 Detected: ${item.label}/ (${item.count.toLocaleString()} files)`).setDesc(`${item.desc} \u2014 should not be synced`).addButton(
         (btn) => btn.setButtonText("Add to ignores").setCta().onClick(async () => {
           const current = this.plugin.settings.ignorePatterns.trim();
           this.plugin.settings.ignorePatterns = current ? `${current}
 ${item.pattern}` : item.pattern;
           await this.plugin.saveSettings();
-          new import_obsidian3.Notice(`Added ${item.pattern} to ignore patterns`);
+          new import_obsidian4.Notice(`Added ${item.pattern} to ignore patterns`);
           this.display();
         })
       );
@@ -3511,6 +3776,7 @@ var NoteChannel = class {
     this.reconnectMs = 1e3;
     this.maxReconnectMs = 6e4;
     this.connected = false;
+    this.authProvider = null;
     this.onEvent = null;
     this.onStatusChange = null;
     this.onVaultDeleted = null;
@@ -3518,6 +3784,15 @@ var NoteChannel = class {
     this.apiKey = apiKey;
     this.userId = userId;
     this.vaultId = vaultId;
+  }
+  setAuthProvider(provider) {
+    this.authProvider = provider;
+  }
+  async getAuthToken() {
+    if (this.authProvider) {
+      return this.authProvider.getToken();
+    }
+    return this.apiKey;
   }
   updateConfig(baseUrl, apiKey, userId, vaultId = null) {
     this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
@@ -3528,10 +3803,10 @@ var NoteChannel = class {
   get topic() {
     return this.vaultId ? `sync:${this.userId}:${this.vaultId}` : `sync:${this.userId}`;
   }
-  connect() {
+  async connect() {
     if (this.ws) return;
     this.reconnectMs = 1e3;
-    this.openSocket();
+    await this.openSocket();
   }
   disconnect() {
     this.clearTimers();
@@ -3549,9 +3824,10 @@ var NoteChannel = class {
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
-  openSocket() {
+  async openSocket() {
+    const token = await this.getAuthToken();
     const wsBase = this.baseUrl.replace(/^http/, "ws").replace(/^https/, "wss");
-    const url = `${wsBase}/socket/websocket?token=${encodeURIComponent(this.apiKey)}&vsn=2.0.0`;
+    const url = `${wsBase}/socket/websocket?token=${encodeURIComponent(token)}&vsn=2.0.0`;
     try {
       this.ws = new WebSocket(url);
     } catch (e) {
@@ -3652,16 +3928,16 @@ var NoteChannel = class {
   }
   scheduleReconnect() {
     const jitter = Math.random() * this.reconnectMs * 0.5;
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = setTimeout(async () => {
       this.reconnectMs = Math.min(this.reconnectMs * 2, this.maxReconnectMs);
-      this.openSocket();
+      await this.openSocket();
     }, this.reconnectMs + jitter);
   }
 };
 
 // src/first-sync-modal.ts
-var import_obsidian4 = require("obsidian");
-var FirstSyncModal = class extends import_obsidian4.Modal {
+var import_obsidian5 = require("obsidian");
+var FirstSyncModal = class extends import_obsidian5.Modal {
   constructor(app, localCount) {
     super(app);
     this.resolve = () => {
@@ -3708,7 +3984,7 @@ var FirstSyncModal = class extends import_obsidian4.Modal {
 };
 
 // src/conflict-modal.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/diff.ts
 function computeDiff(oldText, newText) {
@@ -3875,7 +4151,7 @@ function buildMergedContent(allDiffLines, hunks) {
 }
 
 // src/conflict-modal.ts
-var ConflictModal = class extends import_obsidian5.Modal {
+var ConflictModal = class extends import_obsidian6.Modal {
   constructor(app, info, settings, onViewModeChange) {
     super(app);
     this.resolvePromise = () => {
@@ -4165,8 +4441,8 @@ var ConflictModal = class extends import_obsidian5.Modal {
 };
 
 // src/search-modal.ts
-var import_obsidian6 = require("obsidian");
-var SearchModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var SearchModal = class extends import_obsidian7.Modal {
   constructor(app, api) {
     super(app);
     this.debounceTimer = null;
@@ -4262,12 +4538,12 @@ var SearchModal = class extends import_obsidian6.Modal {
   }
   openResult(result) {
     if (!result.source_path) {
-      new import_obsidian6.Notice("No source path for this result");
+      new import_obsidian7.Notice("No source path for this result");
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(result.source_path);
     if (!file) {
-      new import_obsidian6.Notice("Note not synced locally");
+      new import_obsidian7.Notice("Note not synced locally");
       return;
     }
     this.app.workspace.openLinkText(result.source_path, "");
@@ -4299,9 +4575,9 @@ var SearchModal = class extends import_obsidian6.Modal {
 };
 
 // src/search-view.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var SEARCH_VIEW_TYPE = "engram-search-view";
-var SearchView = class extends import_obsidian7.ItemView {
+var SearchView = class extends import_obsidian8.ItemView {
   constructor(leaf, api) {
     super(leaf);
     this.debounceTimer = null;
@@ -4438,12 +4714,12 @@ var SearchView = class extends import_obsidian7.ItemView {
   }
   openResult(result) {
     if (!result.source_path) {
-      new import_obsidian7.Notice("No source path for this result");
+      new import_obsidian8.Notice("No source path for this result");
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(result.source_path);
     if (!file) {
-      new import_obsidian7.Notice("Note not synced locally");
+      new import_obsidian8.Notice("Note not synced locally");
       return;
     }
     this.app.workspace.openLinkText(result.source_path, "");
@@ -4561,11 +4837,12 @@ async function generateClientId(app) {
   const hashArray = new Uint8Array(hashBuffer);
   return Array.from(hashArray).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin {
+var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.api = new EngramApi("", "");
+    this.authProvider = null;
     this.syncEngine = null;
     this.syncInterval = null;
     this.noteStream = null;
@@ -4586,14 +4863,18 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
     if (this.settings.vaultId) {
       this.api.setVaultId(this.settings.vaultId);
     }
+    this.authProvider = this.createAuthProvider();
+    if (this.authProvider) {
+      this.api.setAuthProvider(this.authProvider);
+    }
     const remoteLogger = initRemoteLog();
     remoteLogger.configure(
       (entries) => this.api.pushLogs(entries),
       this.manifest.version,
-      import_obsidian8.Platform.isMobile ? "mobile" : "desktop"
+      import_obsidian9.Platform.isMobile ? "mobile" : "desktop"
     );
     remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
-    rlog().info("lifecycle", `Plugin loading | v${this.manifest.version} | ${import_obsidian8.Platform.isMobile ? "mobile" : "desktop"}`);
+    rlog().info("lifecycle", `Plugin loading | v${this.manifest.version} | ${import_obsidian9.Platform.isMobile ? "mobile" : "desktop"}`);
     this.syncEngine = new SyncEngine(
       this.app,
       this.api,
@@ -4664,9 +4945,9 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       id: "engram-sync-now",
       name: "Sync now",
       callback: async () => {
-        new import_obsidian8.Notice("Engram Sync: syncing...");
+        new import_obsidian9.Notice("Engram Sync: syncing...");
         const { pulled, pushed } = await this.syncEngine.fullSync();
-        new import_obsidian8.Notice(
+        new import_obsidian9.Notice(
           `Engram Sync: pulled ${pulled}, pushed ${pushed}`
         );
       }
@@ -4676,28 +4957,28 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       name: "Push entire vault",
       callback: async () => {
         const count = await this.syncEngine.pushAll();
-        new import_obsidian8.Notice(`Engram Sync: pushed ${count} files`);
+        new import_obsidian9.Notice(`Engram Sync: pushed ${count} files`);
       }
     });
     this.addCommand({
       id: "engram-check-sync",
       name: "Check sync status",
       callback: async () => {
-        new import_obsidian8.Notice("Engram Sync: checking...");
+        new import_obsidian9.Notice("Engram Sync: checking...");
         const result = await this.syncEngine.reconcile();
         if (!result) {
-          new import_obsidian8.Notice("Engram Sync: server does not support reconciliation (update backend)");
+          new import_obsidian9.Notice("Engram Sync: server does not support reconciliation (update backend)");
           return;
         }
         const { missing, diverged, extraOnServer } = result;
         if (missing.length === 0 && diverged.length === 0 && extraOnServer.length === 0) {
-          new import_obsidian8.Notice("Engram Sync: everything in sync");
+          new import_obsidian9.Notice("Engram Sync: everything in sync");
         } else {
           const parts = [];
           if (missing.length > 0) parts.push(`${missing.length} missing on server`);
           if (diverged.length > 0) parts.push(`${diverged.length} diverged`);
           if (extraOnServer.length > 0) parts.push(`${extraOnServer.length} only on server`);
-          new import_obsidian8.Notice(`Engram Sync: ${parts.join(", ")}`);
+          new import_obsidian9.Notice(`Engram Sync: ${parts.join(", ")}`);
         }
       }
     });
@@ -4705,9 +4986,9 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       id: "engram-pull-all",
       name: "Pull all from server (force overwrite)",
       callback: async () => {
-        new import_obsidian8.Notice("Engram Sync: pulling all from server...");
+        new import_obsidian9.Notice("Engram Sync: pulling all from server...");
         const count = await this.syncEngine.pullAll();
-        new import_obsidian8.Notice(`Engram Sync: pulled ${count} files from server`);
+        new import_obsidian9.Notice(`Engram Sync: pulled ${count} files from server`);
       }
     });
     this.registerView(SEARCH_VIEW_TYPE, (leaf) => new SearchView(leaf, this.api));
@@ -4753,13 +5034,13 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
     this.statusBarEl.style.cursor = "pointer";
     this.statusBarEl.addEventListener("click", () => {
       if (this.settings.apiUrl && this.settings.apiKey) {
-        new import_obsidian8.Notice("Engram Sync: syncing...");
+        new import_obsidian9.Notice("Engram Sync: syncing...");
         this.syncEngine.fullSync().then(({ pulled, pushed }) => {
-          new import_obsidian8.Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
+          new import_obsidian9.Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
         }).catch((e) => {
           console.error("Engram Sync: manual sync failed", e);
           rlog().error("lifecycle", `Manual sync failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : void 0);
-          new import_obsidian8.Notice("Engram Sync: sync failed");
+          new import_obsidian9.Notice("Engram Sync: sync failed");
         });
       }
     });
@@ -4849,7 +5130,7 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       return true;
     } catch (e) {
       if (typeof e === "object" && e !== null && e.status === 402) {
-        new import_obsidian8.Notice("Engram: Upgrade to Pro for multi-vault sync.");
+        new import_obsidian9.Notice("Engram: Upgrade to Pro for multi-vault sync.");
         rlog().info("lifecycle", "Vault registration blocked \u2014 vault limit reached (402)");
         return false;
       }
@@ -4867,6 +5148,49 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       // Dual-write legacy format for rollback safety (remove after one release cycle)
       syncedHashes: this.syncEngine.exportHashes()
     });
+  }
+  createAuthProvider() {
+    var _a;
+    if (this.settings.refreshToken) {
+      const refreshFn = async (token) => {
+        const resp = await fetch(`${this.settings.apiUrl}/auth/token/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: token })
+        });
+        if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
+        return resp.json();
+      };
+      return new OAuthAuth(this.settings.refreshToken, this.settings.vaultId, (_a = this.settings.userEmail) != null ? _a : null, refreshFn);
+    }
+    if (this.settings.apiKey) {
+      return new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId);
+    }
+    return null;
+  }
+  async saveOAuthTokens(refreshToken, vaultId, userEmail) {
+    this.settings.refreshToken = refreshToken;
+    this.settings.userEmail = userEmail;
+    this.settings.authMethod = "oauth";
+    this.settings.vaultId = vaultId;
+    await this.saveSettings();
+    this.authProvider = this.createAuthProvider();
+    if (this.authProvider) {
+      this.api.setAuthProvider(this.authProvider);
+      if (this.noteStream) {
+        this.noteStream.setAuthProvider(this.authProvider);
+      }
+    }
+  }
+  async clearOAuthTokens() {
+    delete this.settings.refreshToken;
+    delete this.settings.userEmail;
+    this.settings.authMethod = null;
+    await this.saveSettings();
+    this.authProvider = this.settings.apiKey ? new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId) : null;
+    if (this.authProvider) {
+      this.api.setAuthProvider(this.authProvider);
+    }
   }
   setupNoteStream() {
     var _a;
@@ -4906,7 +5230,7 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       };
       channel.onVaultDeleted = () => {
         var _a;
-        new import_obsidian8.Notice("Engram: This vault has been deleted on the server.");
+        new import_obsidian9.Notice("Engram: This vault has been deleted on the server.");
         rlog().info("lifecycle", "Vault deleted on server \u2014 clearing vaultId");
         this.settings.vaultId = null;
         this.api.setVaultId(null);
@@ -4914,6 +5238,9 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
         (_a = this.noteStream) == null ? void 0 : _a.disconnect();
       };
       this.noteStream = channel;
+      if (this.authProvider) {
+        this.noteStream.setAuthProvider(this.authProvider);
+      }
       channel.connect();
     }).catch((e) => {
       console.error("Engram Sync: failed to fetch user id for channel", e);
@@ -4935,23 +5262,23 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian8.Plugin 
       }
       const pulled = await this.syncEngine.pull();
       if (pulled > 0) {
-        new import_obsidian8.Notice(`Engram Sync: pulled ${pulled} notes from server`);
+        new import_obsidian9.Notice(`Engram Sync: pulled ${pulled} notes from server`);
       }
       if (choice === "push-all") {
         const pushed = await this.syncEngine.pushAll();
-        new import_obsidian8.Notice(`Engram Sync: pushed ${pushed} files`);
+        new import_obsidian9.Notice(`Engram Sync: pushed ${pushed} files`);
       } else {
-        new import_obsidian8.Notice("Engram Sync: pull complete. Local notes were not pushed.");
+        new import_obsidian9.Notice("Engram Sync: pull complete. Local notes were not pushed.");
       }
     } else {
       try {
         const { pulled, pushed } = await this.syncEngine.fullSync();
         if (pulled > 0 || pushed > 0) {
-          new import_obsidian8.Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
+          new import_obsidian9.Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
         }
       } catch (e) {
         console.error("Engram Sync: sync failed", e);
-        new import_obsidian8.Notice("Engram Sync: sync failed \u2014 check connection");
+        new import_obsidian9.Notice("Engram Sync: sync failed \u2014 check connection");
       }
     }
   }
@@ -4998,7 +5325,7 @@ Last sync: ${date.toLocaleString()}`;
         try {
           const pulled = await this.syncEngine.pull();
           if (pulled > 0) {
-            new import_obsidian8.Notice(`Engram Sync: pulled ${pulled} changes`);
+            new import_obsidian9.Notice(`Engram Sync: pulled ${pulled} changes`);
           }
         } catch (e) {
           console.error("Engram Sync: periodic pull failed", e);
