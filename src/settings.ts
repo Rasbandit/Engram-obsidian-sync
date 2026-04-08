@@ -56,91 +56,67 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		// ── Sign In ──
+		// ── Authentication ──
 		const isOAuth = !!this.plugin.settings.refreshToken;
+		const hasApiKey = !!this.plugin.settings.apiKey;
+
+		containerEl.createEl("h3", { text: "Authentication" });
 
 		if (isOAuth) {
-			const statusDiv = containerEl.createDiv();
-			statusDiv.style.padding = "12px";
-			statusDiv.style.marginBottom = "16px";
-			statusDiv.style.borderRadius = "8px";
-
-			statusDiv.createEl("strong", {
-				text: `Connected as ${this.plugin.settings.userEmail ?? "unknown"}`,
-			});
-
-			const signOutBtn = statusDiv.createEl("button", { text: "Sign Out" });
-			signOutBtn.style.marginLeft = "12px";
-			signOutBtn.addEventListener("click", async () => {
-				await this.plugin.clearOAuthTokens();
-				this.display();
-			});
-		}
-
-		if (!isOAuth) {
-			containerEl.createEl("h3", { text: "Sign In" });
-
+			new Setting(containerEl)
+				.setName(`Signed in as ${this.plugin.settings.userEmail ?? "unknown"}`)
+				.setDesc("Authenticated via Engram account (OAuth)")
+				.addButton((btn) =>
+					btn.setButtonText("Sign Out").onClick(async () => {
+						await this.plugin.clearOAuthTokens();
+						this.display();
+					}),
+				);
+		} else if (hasApiKey) {
+			new Setting(containerEl)
+				.setName("Using API key")
+				.setDesc("Authenticated via manual API key")
+				.addButton((btn) =>
+					btn.setButtonText("Clear Key").setWarning().onClick(async () => {
+						this.plugin.settings.apiKey = "";
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+				)
+				.addButton((btn) =>
+					btn.setButtonText("Switch to Sign In").setCta().onClick(async () => {
+						this.plugin.settings.apiKey = "";
+						await this.plugin.saveSettings();
+						this.startDeviceFlow();
+					}),
+				);
+		} else {
 			new Setting(containerEl)
 				.setName("Sign in with Engram")
 				.setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.")
 				.addButton((btn) =>
-					btn.setButtonText("Sign In").setCta().onClick(async () => {
-						const modal = new DeviceFlowModal(this.app, this.plugin);
-						const result = await modal.waitForResult();
-						if (result) {
-							await this.plugin.saveOAuthTokens(
-								result.refresh_token,
-								String(result.vault_id),
-								result.user_email,
-							);
-							new Notice(`Connected as ${result.user_email}`);
-							this.display();
-						}
-					}),
+					btn.setButtonText("Sign In").setCta().onClick(() => this.startDeviceFlow()),
 				);
-		}
 
-		// ── Advanced: API Key ──
-		containerEl.createEl("h3", { text: "Advanced: API Key" });
+			// Show API key option as collapsible advanced section
+			const details = containerEl.createEl("details");
+			details.style.marginTop = "8px";
+			details.createEl("summary", { text: "Use API key instead" }).style.cursor = "pointer";
 
-		new Setting(containerEl)
-			.setName("API Key")
-			.setDesc("Bearer token from Engram (starts with engram_)")
-			.addText((text) => {
-				text
-					.setPlaceholder("engram_abc123...")
-					.setValue(this.plugin.settings.apiKey)
-					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
-						await this.plugin.saveSettings();
-					});
-				text.inputEl.type = "password";
-				text.inputEl.style.fontFamily = "monospace";
-			})
-			.addExtraButton((btn) =>
-				btn
-					.setIcon("eye")
-					.setTooltip("Show/hide API key")
-					.onClick(() => {
-						const input = containerEl.querySelector(
-							'input[type="password"], input[data-revealed="true"]',
-						) as HTMLInputElement | null;
-						if (!input) return;
-						if (input.type === "password") {
-							input.type = "text";
-							input.dataset.revealed = "true";
-							btn.setIcon("eye-off");
-						} else {
-							input.type = "password";
-							delete input.dataset.revealed;
-							btn.setIcon("eye");
-						}
-					}),
-			);
-
-		if (isOAuth) {
-			const apiKeyInput = containerEl.querySelector('input[type="password"]') as HTMLInputElement | null;
-			if (apiKeyInput) apiKeyInput.disabled = true;
+			new Setting(details)
+				.setName("API Key")
+				.setDesc("Bearer token from Engram (starts with engram_)")
+				.addText((text) => {
+					text
+						.setPlaceholder("engram_abc123...")
+						.setValue(this.plugin.settings.apiKey)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKey = value;
+							await this.plugin.saveSettings();
+						});
+					text.inputEl.type = "password";
+					text.inputEl.style.fontFamily = "monospace";
+				});
 		}
 
 		new Setting(containerEl)
@@ -287,6 +263,20 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			);
 	}
 
+	private async startDeviceFlow(): Promise<void> {
+		const modal = new DeviceFlowModal(this.app, this.plugin);
+		const result = await modal.waitForResult();
+		if (result) {
+			await this.plugin.saveOAuthTokens(
+				result.refresh_token,
+				String(result.vault_id),
+				result.user_email,
+			);
+			new Notice(`Connected as ${result.user_email}`);
+			this.display();
+		}
+	}
+
 	/** Render connection status indicator at the top of settings. */
 	private renderStatus(containerEl: HTMLElement): void {
 		const statusEl = containerEl.createDiv({ cls: "engram-status-bar" });
@@ -306,7 +296,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		} else if (live) {
 			dotColor = "#28a745";
 			label = "Connected — live sync active";
-		} else if (this.plugin.settings.apiUrl && this.plugin.settings.apiKey) {
+		} else if (this.plugin.settings.apiUrl && (this.plugin.settings.apiKey || this.plugin.settings.refreshToken)) {
 			dotColor = "#e5a100";
 			label = "Connected — polling";
 		} else {

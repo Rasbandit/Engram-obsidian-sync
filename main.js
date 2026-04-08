@@ -3537,67 +3537,44 @@ var EngramSyncSettingTab = class extends import_obsidian4.PluginSettingTab {
       })
     );
     const isOAuth = !!this.plugin.settings.refreshToken;
+    const hasApiKey = !!this.plugin.settings.apiKey;
+    containerEl.createEl("h3", { text: "Authentication" });
     if (isOAuth) {
-      const statusDiv = containerEl.createDiv();
-      statusDiv.style.padding = "12px";
-      statusDiv.style.marginBottom = "16px";
-      statusDiv.style.borderRadius = "8px";
-      statusDiv.createEl("strong", {
-        text: `Connected as ${(_a = this.plugin.settings.userEmail) != null ? _a : "unknown"}`
-      });
-      const signOutBtn = statusDiv.createEl("button", { text: "Sign Out" });
-      signOutBtn.style.marginLeft = "12px";
-      signOutBtn.addEventListener("click", async () => {
-        await this.plugin.clearOAuthTokens();
-        this.display();
-      });
-    }
-    if (!isOAuth) {
-      containerEl.createEl("h3", { text: "Sign In" });
-      new import_obsidian4.Setting(containerEl).setName("Sign in with Engram").setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.").addButton(
-        (btn) => btn.setButtonText("Sign In").setCta().onClick(async () => {
-          const modal = new DeviceFlowModal(this.app, this.plugin);
-          const result = await modal.waitForResult();
-          if (result) {
-            await this.plugin.saveOAuthTokens(
-              result.refresh_token,
-              String(result.vault_id),
-              result.user_email
-            );
-            new import_obsidian4.Notice(`Connected as ${result.user_email}`);
-            this.display();
-          }
+      new import_obsidian4.Setting(containerEl).setName(`Signed in as ${(_a = this.plugin.settings.userEmail) != null ? _a : "unknown"}`).setDesc("Authenticated via Engram account (OAuth)").addButton(
+        (btn) => btn.setButtonText("Sign Out").onClick(async () => {
+          await this.plugin.clearOAuthTokens();
+          this.display();
         })
       );
-    }
-    containerEl.createEl("h3", { text: "Advanced: API Key" });
-    new import_obsidian4.Setting(containerEl).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
-      text.setPlaceholder("engram_abc123...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-        this.plugin.settings.apiKey = value;
-        await this.plugin.saveSettings();
+    } else if (hasApiKey) {
+      new import_obsidian4.Setting(containerEl).setName("Using API key").setDesc("Authenticated via manual API key").addButton(
+        (btn) => btn.setButtonText("Clear Key").setWarning().onClick(async () => {
+          this.plugin.settings.apiKey = "";
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      ).addButton(
+        (btn) => btn.setButtonText("Switch to Sign In").setCta().onClick(async () => {
+          this.plugin.settings.apiKey = "";
+          await this.plugin.saveSettings();
+          this.startDeviceFlow();
+        })
+      );
+    } else {
+      new import_obsidian4.Setting(containerEl).setName("Sign in with Engram").setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.").addButton(
+        (btn) => btn.setButtonText("Sign In").setCta().onClick(() => this.startDeviceFlow())
+      );
+      const details = containerEl.createEl("details");
+      details.style.marginTop = "8px";
+      details.createEl("summary", { text: "Use API key instead" }).style.cursor = "pointer";
+      new import_obsidian4.Setting(details).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
+        text.setPlaceholder("engram_abc123...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+          this.plugin.settings.apiKey = value;
+          await this.plugin.saveSettings();
+        });
+        text.inputEl.type = "password";
+        text.inputEl.style.fontFamily = "monospace";
       });
-      text.inputEl.type = "password";
-      text.inputEl.style.fontFamily = "monospace";
-    }).addExtraButton(
-      (btn) => btn.setIcon("eye").setTooltip("Show/hide API key").onClick(() => {
-        const input = containerEl.querySelector(
-          'input[type="password"], input[data-revealed="true"]'
-        );
-        if (!input) return;
-        if (input.type === "password") {
-          input.type = "text";
-          input.dataset.revealed = "true";
-          btn.setIcon("eye-off");
-        } else {
-          input.type = "password";
-          delete input.dataset.revealed;
-          btn.setIcon("eye");
-        }
-      })
-    );
-    if (isOAuth) {
-      const apiKeyInput = containerEl.querySelector('input[type="password"]');
-      if (apiKeyInput) apiKeyInput.disabled = true;
     }
     new import_obsidian4.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
@@ -3685,6 +3662,19 @@ var EngramSyncSettingTab = class extends import_obsidian4.PluginSettingTab {
       })
     );
   }
+  async startDeviceFlow() {
+    const modal = new DeviceFlowModal(this.app, this.plugin);
+    const result = await modal.waitForResult();
+    if (result) {
+      await this.plugin.saveOAuthTokens(
+        result.refresh_token,
+        String(result.vault_id),
+        result.user_email
+      );
+      new import_obsidian4.Notice(`Connected as ${result.user_email}`);
+      this.display();
+    }
+  }
   /** Render connection status indicator at the top of settings. */
   renderStatus(containerEl) {
     const statusEl = containerEl.createDiv({ cls: "engram-status-bar" });
@@ -3701,7 +3691,7 @@ var EngramSyncSettingTab = class extends import_obsidian4.PluginSettingTab {
     } else if (live) {
       dotColor = "#28a745";
       label = "Connected \u2014 live sync active";
-    } else if (this.plugin.settings.apiUrl && this.plugin.settings.apiKey) {
+    } else if (this.plugin.settings.apiUrl && (this.plugin.settings.apiKey || this.plugin.settings.refreshToken)) {
       dotColor = "#e5a100";
       label = "Connected \u2014 polling";
     } else {
