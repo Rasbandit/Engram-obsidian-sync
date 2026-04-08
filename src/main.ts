@@ -405,7 +405,9 @@ export default class EngramSyncPlugin extends Plugin {
 	private createAuthProvider(): AuthProvider | null {
 		if (this.settings.refreshToken) {
 			const refreshFn: RefreshFn = async (token) => {
-				const resp = await fetch(`${this.settings.apiUrl}/auth/token/refresh`, {
+				const base = this.settings.apiUrl.replace(/\/+$/, "");
+				const apiUrl = base.endsWith("/api") ? base : `${base}/api`;
+				const resp = await fetch(`${apiUrl}/auth/token/refresh`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ refresh_token: token }),
