@@ -3,6 +3,7 @@
  */
 import { App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import type EngramSyncPlugin from "./main";
+import { DeviceFlowModal } from "./device-flow-modal";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
 const PROBLEMATIC_DIRS = [
@@ -55,6 +56,53 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		// ── Sign In ──
+		const isOAuth = !!this.plugin.settings.refreshToken;
+
+		if (isOAuth) {
+			const statusDiv = containerEl.createDiv();
+			statusDiv.style.padding = "12px";
+			statusDiv.style.marginBottom = "16px";
+			statusDiv.style.borderRadius = "8px";
+
+			statusDiv.createEl("strong", {
+				text: `Connected as ${this.plugin.settings.userEmail ?? "unknown"}`,
+			});
+
+			const signOutBtn = statusDiv.createEl("button", { text: "Sign Out" });
+			signOutBtn.style.marginLeft = "12px";
+			signOutBtn.addEventListener("click", async () => {
+				await this.plugin.clearOAuthTokens();
+				this.display();
+			});
+		}
+
+		if (!isOAuth) {
+			containerEl.createEl("h3", { text: "Sign In" });
+
+			new Setting(containerEl)
+				.setName("Sign in with Engram")
+				.setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.")
+				.addButton((btn) =>
+					btn.setButtonText("Sign In").setCta().onClick(async () => {
+						const modal = new DeviceFlowModal(this.app, this.plugin);
+						const result = await modal.waitForResult();
+						if (result) {
+							await this.plugin.saveOAuthTokens(
+								result.refresh_token,
+								String(result.vault_id),
+								result.user_email,
+							);
+							new Notice(`Connected as ${result.user_email}`);
+							this.display();
+						}
+					}),
+				);
+		}
+
+		// ── Advanced: API Key ──
+		containerEl.createEl("h3", { text: "Advanced: API Key" });
+
 		new Setting(containerEl)
 			.setName("API Key")
 			.setDesc("Bearer token from Engram (starts with engram_)")
@@ -89,6 +137,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						}
 					}),
 			);
+
+		if (isOAuth) {
+			const apiKeyInput = containerEl.querySelector('input[type="password"]') as HTMLInputElement | null;
+			if (apiKeyInput) apiKeyInput.disabled = true;
+		}
 
 		new Setting(containerEl)
 			.setName("Remote logging")
