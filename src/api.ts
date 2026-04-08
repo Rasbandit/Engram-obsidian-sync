@@ -4,6 +4,7 @@
  * Uses Obsidian's requestUrl() which bypasses CORS and works on mobile.
  */
 import { requestUrl, RequestUrlResponse } from "obsidian";
+import type { AuthProvider } from "./auth";
 import {
 	AttachmentChangesResponse,
 	AttachmentDetail,
@@ -20,6 +21,7 @@ import {
 
 export class EngramApi {
 	private vaultId: string | null = null;
+	private authProvider: AuthProvider | null = null;
 
 	constructor(
 		private baseUrl: string,
@@ -30,6 +32,24 @@ export class EngramApi {
 
 	setVaultId(id: string | null): void {
 		this.vaultId = id;
+	}
+
+	setAuthProvider(provider: AuthProvider): void {
+		this.authProvider = provider;
+	}
+
+	getActiveVaultId(): string | null {
+		if (this.authProvider) {
+			return this.authProvider.getVaultId();
+		}
+		return this.vaultId;
+	}
+
+	private async getAuthToken(): Promise<string> {
+		if (this.authProvider) {
+			return this.authProvider.getToken();
+		}
+		return this.apiKey;
 	}
 
 	/** Strip trailing slashes and append /api if not already present. */
@@ -48,8 +68,9 @@ export class EngramApi {
 		path: string,
 		body?: unknown,
 	): Promise<RequestUrlResponse> {
+		const token = await this.getAuthToken();
 		const headers: Record<string, string> = {
-			Authorization: `Bearer ${this.apiKey}`,
+			Authorization: `Bearer ${token}`,
 		};
 		if (this.vaultId) {
 			headers["X-Vault-ID"] = this.vaultId;

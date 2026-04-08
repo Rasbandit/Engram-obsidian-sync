@@ -21,6 +21,12 @@ export interface EngramSyncSettings {
 	/** Stable client-generated vault identifier (SHA-256 of vault absolute path).
 	 *  Generated once on first load, persisted forever. Used for idempotent registration. */
 	clientId: string;
+	/** OAuth refresh token (device flow). When set, OAuth takes precedence over apiKey. */
+	refreshToken?: string;
+	/** Email of the OAuth-authenticated user (for display). */
+	userEmail?: string;
+	/** Active auth method. */
+	authMethod?: 'oauth' | 'api_key' | null;
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {
