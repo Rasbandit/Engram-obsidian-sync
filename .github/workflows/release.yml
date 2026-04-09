@@ -20,6 +20,9 @@ jobs:
       - name: Security audit
         run: bun audit
 
+      - name: Lint
+        run: bunx biome check src tests
+
       - name: Build
         run: bun run build
 
