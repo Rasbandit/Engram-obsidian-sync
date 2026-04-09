@@ -24,7 +24,7 @@ jobs:
         run: bun run build
 
       - name: Run tests
-        run: bun run jest
+        run: bun test
 
   # Trigger backend E2E after plugin passes — tests full Obsidian ↔ backend sync
   trigger-e2e:

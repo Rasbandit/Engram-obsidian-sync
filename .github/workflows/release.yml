@@ -24,7 +24,7 @@ jobs:
         run: bun run build
 
       - name: Test
-        run: bun run jest
+        run: bun test
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
