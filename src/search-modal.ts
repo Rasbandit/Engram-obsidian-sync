@@ -1,9 +1,9 @@
 /**
  * Quick search modal — Mod+Shift+S opens this for semantic vault search.
  */
-import { App, Modal, Notice } from "obsidian";
-import { EngramApi } from "./api";
-import { SearchResult } from "./types";
+import { type App, Modal, Notice } from "obsidian";
+import type { EngramApi } from "./api";
+import type { SearchResult } from "./types";
 
 export class SearchModal extends Modal {
 	private api: EngramApi;

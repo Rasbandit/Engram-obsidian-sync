@@ -15,9 +15,9 @@
 declare const DEV_MODE: boolean;
 
 interface LogEntry {
-	t: string;    // ISO timestamp
-	ms: number;   // epoch ms (for duration math)
-	cat: string;  // category: pull, push, queue, ws, error, lifecycle
+	t: string; // ISO timestamp
+	ms: number; // epoch ms (for duration math)
+	cat: string; // category: pull, push, queue, ws, error, lifecycle
 	msg: string;
 }
 
@@ -48,11 +48,12 @@ class DevLogBuffer {
 	filter(substring: string): LogEntry[] {
 		const lower = substring.toLowerCase();
 		return this.entries.filter(
-			e => e.cat.includes(lower) || e.msg.toLowerCase().includes(lower)
+			(e) => e.cat.includes(lower) || e.msg.toLowerCase().includes(lower),
 		);
 	}
 
 	stats(): Record<string, unknown> {
+		// biome-ignore lint/suspicious/noExplicitAny: performance.memory is non-standard
 		const mem = (performance as any).memory;
 		return {
 			heapMB: mem ? Math.round(mem.usedJSHeapSize / 1024 / 1024) : "N/A",
@@ -70,9 +71,15 @@ class DevLogBuffer {
 /** No-op logger for production — all methods are empty, tree-shaken away. */
 const noopLog = {
 	log(_cat: string, _msg: string): void {},
-	dump(_n?: number): LogEntry[] { return []; },
-	filter(_s: string): LogEntry[] { return []; },
-	stats(): Record<string, unknown> { return {}; },
+	dump(_n?: number): LogEntry[] {
+		return [];
+	},
+	filter(_s: string): LogEntry[] {
+		return [];
+	},
+	stats(): Record<string, unknown> {
+		return {};
+	},
 	clear(): void {},
 };
 
@@ -83,6 +90,7 @@ let instance: DevLog = noopLog;
 export function initDevLog(): DevLog {
 	if (DEV_MODE) {
 		instance = new DevLogBuffer();
+		// biome-ignore lint/suspicious/noExplicitAny: globalThis extension for CDP debug access
 		(globalThis as any).__engramLog = instance;
 	}
 	return instance;
@@ -94,6 +102,8 @@ export function devLog(): DevLog {
 
 export function destroyDevLog(): void {
 	if (DEV_MODE) {
+		// biome-ignore lint/suspicious/noExplicitAny: globalThis extension for CDP debug access
+		// biome-ignore lint/performance/noDelete: intentional cleanup of debug global
 		delete (globalThis as any).__engramLog;
 	}
 	instance = noopLog;

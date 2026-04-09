@@ -1,9 +1,4 @@
-import {
-	computeDiff,
-	groupIntoHunks,
-	buildMergedContent,
-	DiffLine,
-} from "../src/diff";
+import { type DiffLine, buildMergedContent, computeDiff, groupIntoHunks } from "../src/diff";
 
 describe("computeDiff", () => {
 	it("returns empty array for identical texts", () => {
@@ -53,15 +48,7 @@ describe("computeDiff", () => {
 		const nw = "line1\nchanged2\nchanged3\nline4\nline5";
 		const result = computeDiff(old, nw);
 		const types = result.map((l) => l.type);
-		expect(types).toEqual([
-			"equal",
-			"remove",
-			"remove",
-			"add",
-			"add",
-			"equal",
-			"equal",
-		]);
+		expect(types).toEqual(["equal", "remove", "remove", "add", "add", "equal", "equal"]);
 	});
 
 	it("assigns correct line numbers", () => {
@@ -94,10 +81,7 @@ describe("groupIntoHunks", () => {
 	});
 
 	it("creates a single hunk with context", () => {
-		const lines = computeDiff(
-			"1\n2\n3\n4\n5\n6\n7\n8\n9",
-			"1\n2\n3\n4\nX\n6\n7\n8\n9",
-		);
+		const lines = computeDiff("1\n2\n3\n4\n5\n6\n7\n8\n9", "1\n2\n3\n4\nX\n6\n7\n8\n9");
 		const hunks = groupIntoHunks(lines, 2);
 		expect(hunks).toHaveLength(1);
 		// Should include 2 context lines before and after the change
@@ -107,19 +91,14 @@ describe("groupIntoHunks", () => {
 
 	it("merges overlapping hunks", () => {
 		// Changes at line 3 and line 5 with context=2 should merge
-		const lines = computeDiff(
-			"1\n2\n3\n4\n5\n6\n7",
-			"1\n2\nA\n4\nB\n6\n7",
-		);
+		const lines = computeDiff("1\n2\n3\n4\n5\n6\n7", "1\n2\nA\n4\nB\n6\n7");
 		const hunks = groupIntoHunks(lines, 2);
 		expect(hunks).toHaveLength(1); // should merge since they're close
 	});
 
 	it("keeps separate hunks for distant changes", () => {
 		// Changes far apart should produce 2 hunks
-		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join(
-			"\n",
-		);
+		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n");
 		const lines = old.split("\n");
 		lines[1] = "CHANGED2";
 		lines[18] = "CHANGED19";
@@ -129,9 +108,7 @@ describe("groupIntoHunks", () => {
 	});
 
 	it("assigns sequential IDs", () => {
-		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join(
-			"\n",
-		);
+		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n");
 		const lines = old.split("\n");
 		lines[1] = "A";
 		lines[18] = "B";
@@ -157,16 +134,16 @@ describe("buildMergedContent", () => {
 		const newText = "a\nnew\nc";
 		const diff = computeDiff(oldText, newText);
 		const hunks = groupIntoHunks(diff);
-		hunks.forEach((h) => (h.choice = "local"));
+		for (const h of hunks) {
+			h.choice = "local";
+		}
 		const merged = buildMergedContent(diff, hunks);
 		expect(merged).toBe(oldText);
 	});
 
 	it("merges per-hunk choices correctly", () => {
 		// Two separate hunks, choose differently
-		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join(
-			"\n",
-		);
+		const old = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n");
 		const newLines = old.split("\n");
 		newLines[1] = "REMOTE2";
 		newLines[18] = "REMOTE19";

@@ -13,7 +13,7 @@
  * - One side unchanged, other edited
  */
 
-import { threeWayMerge, MergeResult } from "../src/three-way-merge";
+import { MergeResult, threeWayMerge } from "../src/three-way-merge";
 
 describe("threeWayMerge", () => {
 	describe("short-circuits", () => {
@@ -52,7 +52,9 @@ describe("threeWayMerge", () => {
 			const remote = "paragraph one\n\nparagraph two\n\nparagraph three EDITED";
 			const result = threeWayMerge(base, local, remote);
 			expect(result.clean).toBe(true);
-			expect(result.merged).toBe("paragraph one EDITED\n\nparagraph two\n\nparagraph three EDITED");
+			expect(result.merged).toBe(
+				"paragraph one EDITED\n\nparagraph two\n\nparagraph three EDITED",
+			);
 		});
 
 		it("should merge insertions at different positions", () => {

@@ -3,9 +3,9 @@
  *
  * Uses Obsidian's requestUrl() which bypasses CORS and works on mobile.
  */
-import { requestUrl, RequestUrlResponse } from "obsidian";
+import { type RequestUrlResponse, requestUrl } from "obsidian";
 import type { AuthProvider } from "./auth";
-import {
+import type {
 	AttachmentChangesResponse,
 	AttachmentDetail,
 	AttachmentResponse,
@@ -154,10 +154,7 @@ export class EngramApi {
 	/** Get changes since a timestamp. */
 	async getChanges(since: string): Promise<ChangesResponse> {
 		const encoded = encodeURIComponent(since);
-		const resp = await this.request(
-			"GET",
-			`/notes/changes?since=${encoded}`,
-		);
+		const resp = await this.request("GET", `/notes/changes?since=${encoded}`);
 		return resp.json as ChangesResponse;
 	}
 
@@ -208,7 +205,12 @@ export class EngramApi {
 	}
 
 	/** Semantic search across indexed notes. */
-	async search(query: string, limit?: number, tags?: string[], folder?: string): Promise<SearchResponse> {
+	async search(
+		query: string,
+		limit?: number,
+		tags?: string[],
+		folder?: string,
+	): Promise<SearchResponse> {
 		const body: { query: string; limit?: number; tags?: string[]; folder?: string } = { query };
 		if (limit !== undefined) body.limit = limit;
 		if (tags?.length) body.tags = tags;
@@ -243,17 +245,24 @@ export class EngramApi {
 	}
 
 	/** Push batched log entries to the server for remote debugging. */
-	async pushLogs(entries: { ts: string; level: string; category: string; message: string; stack?: string; plugin_version: string; platform: string }[]): Promise<void> {
+	async pushLogs(
+		entries: {
+			ts: string;
+			level: string;
+			category: string;
+			message: string;
+			stack?: string;
+			plugin_version: string;
+			platform: string;
+		}[],
+	): Promise<void> {
 		await this.request("POST", "/logs", { logs: entries });
 	}
 
 	/** Get attachment changes since a timestamp. */
 	async getAttachmentChanges(since: string): Promise<AttachmentChangesResponse> {
 		const encoded = encodeURIComponent(since);
-		const resp = await this.request(
-			"GET",
-			`/attachments/changes?since=${encoded}`,
-		);
+		const resp = await this.request("GET", `/attachments/changes?since=${encoded}`);
 		return resp.json as AttachmentChangesResponse;
 	}
 }

@@ -2,9 +2,15 @@
  * Conflict resolution modal — git-like diff view with hunk-level picking,
  * unified/side-by-side toggle, and an editable merge result pane.
  */
-import { App, Modal } from "obsidian";
-import { ConflictInfo, ConflictResolution, EngramSyncSettings } from "./types";
-import { computeDiff, groupIntoHunks, buildMergedContent, DiffHunk, DiffLine } from "./diff";
+import { type App, Modal } from "obsidian";
+import {
+	type DiffHunk,
+	type DiffLine,
+	buildMergedContent,
+	computeDiff,
+	groupIntoHunks,
+} from "./diff";
+import type { ConflictInfo, ConflictResolution, EngramSyncSettings } from "./types";
 
 export class ConflictModal extends Modal {
 	private resolvePromise: (result: ConflictResolution) => void = () => {};
@@ -120,16 +126,23 @@ export class ConflictModal extends Modal {
 
 		if (this.hunks.length > 0) {
 			const bulkGroup = bar.createEl("span", { cls: "engram-conflict-bulk" });
-			const allLocalBtn = bulkGroup.createEl("button", { text: "All Local", cls: "mod-warning" });
+			const allLocalBtn = bulkGroup.createEl("button", {
+				text: "All Local",
+				cls: "mod-warning",
+			});
 			const allRemoteBtn = bulkGroup.createEl("button", { text: "All Remote" });
 
 			allLocalBtn.addEventListener("click", () => {
-				this.hunks.forEach((h) => (h.choice = "local"));
+				for (const h of this.hunks) {
+					h.choice = "local";
+				}
 				this.renderDiff();
 				this.updateMergeEditor();
 			});
 			allRemoteBtn.addEventListener("click", () => {
-				this.hunks.forEach((h) => (h.choice = "remote"));
+				for (const h of this.hunks) {
+					h.choice = "remote";
+				}
 				this.renderDiff();
 				this.updateMergeEditor();
 			});
@@ -139,6 +152,7 @@ export class ConflictModal extends Modal {
 	// ── Diff view ───────────────────────────────────────────────────
 
 	private renderDiff(): void {
+		// biome-ignore lint/style/noNonNullAssertion: diffContainer always set before renderDiff is called
 		const container = this.diffContainer!;
 		container.empty();
 
@@ -162,11 +176,15 @@ export class ConflictModal extends Modal {
 			const hunkEl = container.createEl("article", { cls: "engram-conflict-hunk" });
 			this.renderHunkControls(hunkEl, hunk);
 
-			const table = hunkEl.createEl("table", { cls: "engram-diff-table engram-diff-unified" });
+			const table = hunkEl.createEl("table", {
+				cls: "engram-diff-table engram-diff-unified",
+			});
 			const tbody = table.createEl("tbody");
 
 			for (const line of hunk.lines) {
-				const tr = tbody.createEl("tr", { cls: `engram-diff-line engram-diff-${line.type}` });
+				const tr = tbody.createEl("tr", {
+					cls: `engram-diff-line engram-diff-${line.type}`,
+				});
 				tr.createEl("td", {
 					text: line.oldLineNo?.toString() ?? "",
 					cls: "engram-diff-linenum",
@@ -191,8 +209,12 @@ export class ConflictModal extends Modal {
 			this.renderHunkControls(hunkEl, hunk);
 
 			const wrapper = hunkEl.createEl("section", { cls: "engram-diff-sbs-wrapper" });
-			const leftTable = wrapper.createEl("table", { cls: "engram-diff-table engram-diff-sbs" });
-			const rightTable = wrapper.createEl("table", { cls: "engram-diff-table engram-diff-sbs" });
+			const leftTable = wrapper.createEl("table", {
+				cls: "engram-diff-table engram-diff-sbs",
+			});
+			const rightTable = wrapper.createEl("table", {
+				cls: "engram-diff-table engram-diff-sbs",
+			});
 			const leftBody = leftTable.createEl("tbody");
 			const rightBody = rightTable.createEl("tbody");
 

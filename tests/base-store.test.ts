@@ -126,10 +126,7 @@ describe("BaseStore", () => {
 			store.set("note.md", "# Hello", 3);
 			await store.save();
 
-			expect(adapter.write).toHaveBeenCalledWith(
-				storagePath,
-				expect.any(String),
-			);
+			expect(adapter.write).toHaveBeenCalledWith(storagePath, expect.any(String));
 
 			// Create a new store and load from the same adapter
 			const store2 = new BaseStore(adapter as any, storagePath);

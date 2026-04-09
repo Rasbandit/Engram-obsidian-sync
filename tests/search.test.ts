@@ -1,4 +1,4 @@
-import { type Mock } from "bun:test";
+import type { Mock } from "bun:test";
 import { requestUrl } from "obsidian";
 import { EngramApi } from "../src/api";
 

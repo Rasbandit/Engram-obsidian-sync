@@ -6,16 +6,20 @@ export class TFile {
 	stat: { mtime: number; ctime: number; size: number };
 	basename: string;
 
-	constructor(path: string, mtime: number = Date.now(), size: number = 100) {
+	constructor(path: string, mtime: number = Date.now(), size = 100) {
 		this.path = path;
 		this.extension = path.split(".").pop() || "";
-		this.basename = path.split("/").pop()?.replace(/\.[^.]+$/, "") || "";
+		this.basename =
+			path
+				.split("/")
+				.pop()
+				?.replace(/\.[^.]+$/, "") || "";
 		this.stat = { mtime, ctime: mtime, size };
 	}
 }
 
 export class TAbstractFile {
-	path: string = "";
+	path = "";
 }
 
 export class TFolder {
@@ -56,11 +60,21 @@ export class PluginSettingTab {
 
 export class Setting {
 	constructor(_containerEl: any) {}
-	setName(_name: string): this { return this; }
-	setDesc(_desc: string): this { return this; }
-	addText(_cb: any): this { return this; }
-	addTextArea(_cb: any): this { return this; }
-	addButton(_cb: any): this { return this; }
+	setName(_name: string): this {
+		return this;
+	}
+	setDesc(_desc: string): this {
+		return this;
+	}
+	addText(_cb: any): this {
+		return this;
+	}
+	addTextArea(_cb: any): this {
+		return this;
+	}
+	addButton(_cb: any): this {
+		return this;
+	}
 }
 
 export function normalizePath(path: string): string {
@@ -88,7 +102,9 @@ export class Modal {
 			style: {},
 		}),
 	};
-	constructor(app: any) { this.app = app; }
+	constructor(app: any) {
+		this.app = app;
+	}
 	open(): void {}
 	close(): void {}
 }
@@ -125,14 +141,22 @@ export class ItemView {
 		this.leaf = leaf;
 		this.app = leaf?.app || {};
 	}
-	getViewType(): string { return ""; }
-	getDisplayText(): string { return ""; }
-	getIcon(): string { return ""; }
+	getViewType(): string {
+		return "";
+	}
+	getDisplayText(): string {
+		return "";
+	}
+	getIcon(): string {
+		return "";
+	}
 }
 
 export class WorkspaceLeaf {
 	app: any;
-	constructor(app?: any) { this.app = app || {}; }
+	constructor(app?: any) {
+		this.app = app || {};
+	}
 }
 
 export class App {}

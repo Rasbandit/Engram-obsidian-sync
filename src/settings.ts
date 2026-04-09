@@ -1,9 +1,9 @@
 /**
  * Settings tab for Engram Sync plugin.
  */
-import { App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
-import type EngramSyncPlugin from "./main";
+import { type App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { DeviceFlowModal } from "./device-flow-modal";
+import type EngramSyncPlugin from "./main";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
 const PROBLEMATIC_DIRS = [
@@ -77,25 +77,36 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 				.setName("Using API key")
 				.setDesc("Authenticated via manual API key")
 				.addButton((btn) =>
-					btn.setButtonText("Clear Key").setWarning().onClick(async () => {
-						this.plugin.settings.apiKey = "";
-						await this.plugin.saveSettings();
-						this.display();
-					}),
+					btn
+						.setButtonText("Clear Key")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.apiKey = "";
+							await this.plugin.saveSettings();
+							this.display();
+						}),
 				)
 				.addButton((btn) =>
-					btn.setButtonText("Switch to Sign In").setCta().onClick(async () => {
-						this.plugin.settings.apiKey = "";
-						await this.plugin.saveSettings();
-						this.startDeviceFlow();
-					}),
+					btn
+						.setButtonText("Switch to Sign In")
+						.setCta()
+						.onClick(async () => {
+							this.plugin.settings.apiKey = "";
+							await this.plugin.saveSettings();
+							this.startDeviceFlow();
+						}),
 				);
 		} else {
 			new Setting(containerEl)
 				.setName("Sign in with Engram")
-				.setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.")
+				.setDesc(
+					"Links your Obsidian vault to your Engram account. Opens a browser window.",
+				)
 				.addButton((btn) =>
-					btn.setButtonText("Sign In").setCta().onClick(() => this.startDeviceFlow()),
+					btn
+						.setButtonText("Sign In")
+						.setCta()
+						.onClick(() => this.startDeviceFlow()),
 				);
 
 			// Show API key option as collapsible advanced section
@@ -107,8 +118,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 				.setName("API Key")
 				.setDesc("Bearer token from Engram (starts with engram_)")
 				.addText((text) => {
-					text
-						.setPlaceholder("engram_abc123...")
+					text.setPlaceholder("engram_abc123...")
 						.setValue(this.plugin.settings.apiKey)
 						.onChange(async (value) => {
 							this.plugin.settings.apiKey = value;
@@ -148,10 +158,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 
 		const ignoreSetting = new Setting(containerEl)
 			.setName("Custom patterns")
-			.setDesc("Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/")
+			.setDesc(
+				"Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/",
+			)
 			.addTextArea((text) => {
-				text
-					.setPlaceholder("drafts/\nsecret.md")
+				text.setPlaceholder("drafts/\nsecret.md")
 					.setValue(this.plugin.settings.ignorePatterns)
 					.onChange(async (value) => {
 						this.plugin.settings.ignorePatterns = value;
@@ -169,7 +180,9 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Conflict resolution")
-			.setDesc("How to handle conflicts. Automatic creates a conflict copy. Interactive shows a diff dialog.")
+			.setDesc(
+				"How to handle conflicts. Automatic creates a conflict copy. Interactive shows a diff dialog.",
+			)
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOption("auto", "Automatic (conflict files)")
@@ -189,8 +202,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					.setPlaceholder("2000")
 					.setValue(String(this.plugin.settings.debounceMs))
 					.onChange(async (value) => {
-						const num = parseInt(value, 10);
-						if (!isNaN(num) && num >= 100) {
+						const num = Number.parseInt(value, 10);
+						if (!Number.isNaN(num) && num >= 100) {
 							this.plugin.settings.debounceMs = num;
 							await this.plugin.saveSettings();
 						}
@@ -207,11 +220,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 				btn.setButtonText("Sync").onClick(async () => {
 					new Notice("Engram Sync: syncing...");
 					try {
-						const { pulled, pushed } =
-							await this.plugin.syncEngine.fullSync();
-						new Notice(
-							`Engram Sync: pulled ${pulled}, pushed ${pushed}`,
-						);
+						const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
+						new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
 					} catch (e) {
 						new Notice(
 							`Engram Sync: ${e instanceof Error ? e.message : "sync failed"}`,
@@ -229,7 +239,12 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					.setWarning()
 					.onClick(async () => {
 						const count = this.plugin.syncEngine.countSyncableFiles();
-						if (!confirm(`Push ${count} files to Engram? This may overwrite server content.`)) return;
+						if (
+							!confirm(
+								`Push ${count} files to Engram? This may overwrite server content.`,
+							)
+						)
+							return;
 						try {
 							const pushed = await this.plugin.syncEngine.pushAll();
 							new Notice(`Engram Sync: pushed ${pushed} files`);
@@ -249,7 +264,12 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					.setButtonText("Pull All")
 					.setWarning()
 					.onClick(async () => {
-						if (!confirm("Pull all files from server? Local changes will be overwritten.")) return;
+						if (
+							!confirm(
+								"Pull all files from server? Local changes will be overwritten.",
+							)
+						)
+							return;
 						try {
 							new Notice("Engram Sync: pulling all from server...");
 							const count = await this.plugin.syncEngine.pullAll();
@@ -296,7 +316,10 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		} else if (live) {
 			dotColor = "#28a745";
 			label = "Connected — live sync active";
-		} else if (this.plugin.settings.apiUrl && (this.plugin.settings.apiKey || this.plugin.settings.refreshToken)) {
+		} else if (
+			this.plugin.settings.apiUrl &&
+			(this.plugin.settings.apiKey || this.plugin.settings.refreshToken)
+		) {
 			dotColor = "#e5a100";
 			label = "Connected — polling";
 		} else {
@@ -374,7 +397,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 							this.display(); // Re-render to remove the warning
 						}),
 				);
-			warning.settingEl.style.backgroundColor = "var(--background-modifier-error-rgb, rgba(255,0,0,0.05))";
+			warning.settingEl.style.backgroundColor =
+				"var(--background-modifier-error-rgb, rgba(255,0,0,0.05))";
 			warning.settingEl.style.borderRadius = "6px";
 			warning.settingEl.style.padding = "8px";
 		}

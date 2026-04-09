@@ -6,31 +6,39 @@
  */
 import { Notice, Platform, Plugin } from "obsidian";
 import { EngramApi } from "./api";
-import { ApiKeyAuth, OAuthAuth, type AuthProvider, type RefreshFn } from "./auth";
-import { EngramSyncSettings, DEFAULT_SETTINGS, FileSyncState, SyncStatus } from "./types";
-import { SyncEngine } from "./sync";
-import { EngramSyncSettingTab } from "./settings";
+import { ApiKeyAuth, type AuthProvider, OAuthAuth, type RefreshFn } from "./auth";
 import { NoteChannel } from "./channel";
-import { FirstSyncModal } from "./first-sync-modal";
 import { ConflictModal } from "./conflict-modal";
+import { FirstSyncModal } from "./first-sync-modal";
 import { SearchModal } from "./search-modal";
-import { SearchView, SEARCH_VIEW_TYPE } from "./search-view";
+import { SEARCH_VIEW_TYPE, SearchView } from "./search-view";
+import { EngramSyncSettingTab } from "./settings";
+import { SyncEngine } from "./sync";
+import {
+	DEFAULT_SETTINGS,
+	type EngramSyncSettings,
+	type FileSyncState,
+	type SyncStatus,
+} from "./types";
 
-import { QueueEntry } from "./types";
 import { BaseStore } from "./base-store";
-import { initDevLog, destroyDevLog, devLog } from "./dev-log";
-import { initRemoteLog, destroyRemoteLog, rlog } from "./remote-log";
+import { destroyDevLog, devLog, initDevLog } from "./dev-log";
+import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
+import type { QueueEntry } from "./types";
 
 /** Generate a stable client ID for vault registration.
  *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
 async function generateClientId(app: import("obsidian").App): Promise<string> {
+	// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal API not in type definitions
 	const basePath = (app.vault.adapter as any).getBasePath?.() as string | undefined;
 	const input = basePath || app.vault.getName();
 	const encoder = new TextEncoder();
 	const data = encoder.encode(input);
 	const hashBuffer = await crypto.subtle.digest("SHA-256", data);
 	const hashArray = new Uint8Array(hashBuffer);
-	return Array.from(hashArray).map((b) => b.toString(16).padStart(2, "0")).join("");
+	return Array.from(hashArray)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
 }
 
 interface PluginData {
@@ -47,11 +55,12 @@ export default class EngramSyncPlugin extends Plugin {
 	settings: EngramSyncSettings = DEFAULT_SETTINGS;
 	api: EngramApi = new EngramApi("", "");
 	authProvider: AuthProvider | null = null;
+	// biome-ignore lint/style/noNonNullAssertion: assigned in onload before any usage
 	syncEngine: SyncEngine = null!;
 	private syncInterval: ReturnType<typeof setInterval> | null = null;
 	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
-	private liveConnected: boolean = false;
+	private liveConnected = false;
 
 	/** Whether the WebSocket channel is currently connected (for settings UI). */
 	isLiveConnected(): boolean {
@@ -83,16 +92,14 @@ export default class EngramSyncPlugin extends Plugin {
 			Platform.isMobile ? "mobile" : "desktop",
 		);
 		remoteLogger.setEnabled(this.settings.remoteLoggingEnabled);
-		rlog().info("lifecycle", `Plugin loading | v${this.manifest.version} | ${Platform.isMobile ? "mobile" : "desktop"}`);
-
-		this.syncEngine = new SyncEngine(
-			this.app,
-			this.api,
-			this.settings,
-			async (data) => {
-				await this.savePluginData(data.lastSync);
-			},
+		rlog().info(
+			"lifecycle",
+			`Plugin loading | v${this.manifest.version} | ${Platform.isMobile ? "mobile" : "desktop"}`,
 		);
+
+		this.syncEngine = new SyncEngine(this.app, this.api, this.settings, async (data) => {
+			await this.savePluginData(data.lastSync);
+		});
 
 		// Base content store for 3-way merge (lazy-loaded after layout ready)
 		const basesPath = `${this.manifest.dir}/sync-bases.json`;
@@ -173,11 +180,8 @@ export default class EngramSyncPlugin extends Plugin {
 			name: "Sync now",
 			callback: async () => {
 				new Notice("Engram Sync: syncing...");
-				const { pulled, pushed } =
-					await this.syncEngine.fullSync();
-				new Notice(
-					`Engram Sync: pulled ${pulled}, pushed ${pushed}`,
-				);
+				const { pulled, pushed } = await this.syncEngine.fullSync();
+				new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
 			},
 		});
 
@@ -197,7 +201,9 @@ export default class EngramSyncPlugin extends Plugin {
 				new Notice("Engram Sync: checking...");
 				const result = await this.syncEngine.reconcile();
 				if (!result) {
-					new Notice("Engram Sync: server does not support reconciliation (update backend)");
+					new Notice(
+						"Engram Sync: server does not support reconciliation (update backend)",
+					);
 					return;
 				}
 				const { missing, diverged, extraOnServer } = result;
@@ -207,7 +213,8 @@ export default class EngramSyncPlugin extends Plugin {
 					const parts: string[] = [];
 					if (missing.length > 0) parts.push(`${missing.length} missing on server`);
 					if (diverged.length > 0) parts.push(`${diverged.length} diverged`);
-					if (extraOnServer.length > 0) parts.push(`${extraOnServer.length} only on server`);
+					if (extraOnServer.length > 0)
+						parts.push(`${extraOnServer.length} only on server`);
 					new Notice(`Engram Sync: ${parts.join(", ")}`);
 				}
 			},
@@ -275,13 +282,20 @@ export default class EngramSyncPlugin extends Plugin {
 		this.statusBarEl.addEventListener("click", () => {
 			if (this.settings.apiUrl && this.settings.apiKey) {
 				new Notice("Engram Sync: syncing...");
-				this.syncEngine.fullSync().then(({ pulled, pushed }) => {
-					new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
-				}).catch((e) => {
-					console.error("Engram Sync: manual sync failed", e);
-					rlog().error("lifecycle", `Manual sync failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
-					new Notice("Engram Sync: sync failed");
-				});
+				this.syncEngine
+					.fullSync()
+					.then(({ pulled, pushed }) => {
+						new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
+					})
+					.catch((e) => {
+						console.error("Engram Sync: manual sync failed", e);
+						rlog().error(
+							"lifecycle",
+							`Manual sync failed: ${e instanceof Error ? e.message : e}`,
+							e instanceof Error ? e.stack : undefined,
+						);
+						new Notice("Engram Sync: sync failed");
+					});
 			}
 		});
 
@@ -327,11 +341,7 @@ export default class EngramSyncPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const data = await this.loadData();
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			data?.settings,
-		);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings);
 		// Generate stable client ID on first load (persisted forever)
 		if (!this.settings.clientId) {
 			this.settings.clientId = await generateClientId(this.app);
@@ -350,13 +360,18 @@ export default class EngramSyncPlugin extends Plugin {
 
 		// Trigger sync when settings are configured (shows modal on first sync)
 		if (this.settings.apiUrl && this.settings.apiKey) {
-			this.registerVault().then((registered) => {
-				if (!registered) return;
-				return this.doSyncWithFirstSyncCheck();
-			}).catch((e) => {
-				console.error("Engram Sync: sync after settings change failed", e);
-				rlog().error("lifecycle", `Sync after settings change failed: ${e instanceof Error ? e.message : e}`);
-			});
+			this.registerVault()
+				.then((registered) => {
+					if (!registered) return;
+					return this.doSyncWithFirstSyncCheck();
+				})
+				.catch((e) => {
+					console.error("Engram Sync: sync after settings change failed", e);
+					rlog().error(
+						"lifecycle",
+						`Sync after settings change failed: ${e instanceof Error ? e.message : e}`,
+					);
+				});
 		}
 	}
 
@@ -386,7 +401,10 @@ export default class EngramSyncPlugin extends Plugin {
 				return false;
 			}
 			console.error("Engram Sync: vault registration failed", e);
-			rlog().error("lifecycle", `Vault registration failed: ${e instanceof Error ? e.message : e}`);
+			rlog().error(
+				"lifecycle",
+				`Vault registration failed: ${e instanceof Error ? e.message : e}`,
+			);
 			return false;
 		}
 	}
@@ -415,7 +433,12 @@ export default class EngramSyncPlugin extends Plugin {
 				if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
 				return resp.json();
 			};
-			return new OAuthAuth(this.settings.refreshToken, this.settings.vaultId, this.settings.userEmail ?? null, refreshFn);
+			return new OAuthAuth(
+				this.settings.refreshToken,
+				this.settings.vaultId,
+				this.settings.userEmail ?? null,
+				refreshFn,
+			);
 		}
 
 		if (this.settings.apiKey) {
@@ -442,8 +465,8 @@ export default class EngramSyncPlugin extends Plugin {
 	}
 
 	async clearOAuthTokens(): Promise<void> {
-		delete this.settings.refreshToken;
-		delete this.settings.userEmail;
+		this.settings.refreshToken = undefined;
+		this.settings.userEmail = undefined;
 		this.settings.authMethod = null;
 		await this.saveSettings();
 		this.authProvider = this.settings.apiKey
@@ -474,54 +497,63 @@ export default class EngramSyncPlugin extends Plugin {
 		const maxAttempts = 5;
 		const baseDelay = 2000;
 
-		this.api.getMe().then((user) => {
-			const channel = new NoteChannel(
-				this.settings.apiUrl,
-				this.settings.apiKey,
-				String(user.id),
-				this.settings.vaultId,
-			);
+		this.api
+			.getMe()
+			.then((user) => {
+				const channel = new NoteChannel(
+					this.settings.apiUrl,
+					this.settings.apiKey,
+					String(user.id),
+					this.settings.vaultId,
+				);
 
-			channel.onEvent = (event) => {
-				this.syncEngine.handleStreamEvent(event);
-			};
+				channel.onEvent = (event) => {
+					this.syncEngine.handleStreamEvent(event);
+				};
 
-			channel.onStatusChange = (connected) => {
-				this.liveConnected = connected;
-				this.updateStatusBar(this.syncEngine.getStatus());
-				// Catch-up pull on reconnect to cover missed events during disconnect
-				if (connected) {
-					this.syncEngine.pull().catch((e) => {
-						console.error("Engram Sync: catch-up pull failed", e);
-						rlog().error("channel", `Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`);
-					});
+				channel.onStatusChange = (connected) => {
+					this.liveConnected = connected;
+					this.updateStatusBar(this.syncEngine.getStatus());
+					// Catch-up pull on reconnect to cover missed events during disconnect
+					if (connected) {
+						this.syncEngine.pull().catch((e) => {
+							console.error("Engram Sync: catch-up pull failed", e);
+							rlog().error(
+								"channel",
+								`Catch-up pull on reconnect failed: ${e instanceof Error ? e.message : e}`,
+							);
+						});
+					}
+				};
+
+				channel.onVaultDeleted = () => {
+					new Notice("Engram: This vault has been deleted on the server.");
+					rlog().info("lifecycle", "Vault deleted on server — clearing vaultId");
+					this.settings.vaultId = null;
+					this.api.setVaultId(null);
+					// Use savePluginData instead of saveSettings to avoid triggering re-registration
+					this.savePluginData(this.syncEngine.getLastSync());
+					this.noteStream?.disconnect();
+				};
+
+				this.noteStream = channel;
+				if (this.authProvider) {
+					this.noteStream.setAuthProvider(this.authProvider);
 				}
-			};
+				channel.connect();
+			})
+			.catch((e) => {
+				console.error("Engram Sync: failed to fetch user id for channel", e);
+				rlog().error(
+					"channel",
+					`getMe() failed (attempt ${attempt + 1}/${maxAttempts}): ${e instanceof Error ? e.message : e}`,
+				);
 
-			channel.onVaultDeleted = () => {
-				new Notice("Engram: This vault has been deleted on the server.");
-				rlog().info("lifecycle", "Vault deleted on server — clearing vaultId");
-				this.settings.vaultId = null;
-				this.api.setVaultId(null);
-				// Use savePluginData instead of saveSettings to avoid triggering re-registration
-				this.savePluginData(this.syncEngine.getLastSync());
-				this.noteStream?.disconnect();
-			};
-
-			this.noteStream = channel;
-			if (this.authProvider) {
-				this.noteStream.setAuthProvider(this.authProvider);
-			}
-			channel.connect();
-		}).catch((e) => {
-			console.error("Engram Sync: failed to fetch user id for channel", e);
-			rlog().error("channel", `getMe() failed (attempt ${attempt + 1}/${maxAttempts}): ${e instanceof Error ? e.message : e}`);
-
-			if (attempt < maxAttempts - 1) {
-				const delay = baseDelay * Math.pow(2, attempt);
-				setTimeout(() => this.connectChannel(attempt + 1), delay);
-			}
-		});
+				if (attempt < maxAttempts - 1) {
+					const delay = baseDelay * 2 ** attempt;
+					setTimeout(() => this.connectChannel(attempt + 1), delay);
+				}
+			});
 	}
 
 	/** Run sync, showing first-sync modal if no prior sync state exists. */
@@ -568,9 +600,8 @@ export default class EngramSyncPlugin extends Plugin {
 		let tooltip: string;
 
 		if (status.state === "offline") {
-			text = status.queued > 0
-				? `Engram: offline (${status.queued} queued)`
-				: "Engram: offline";
+			text =
+				status.queued > 0 ? `Engram: offline (${status.queued} queued)` : "Engram: offline";
 			tooltip = "Server unreachable — changes will sync when connected";
 		} else if (status.state === "error") {
 			text = "Engram: error";
@@ -608,18 +639,15 @@ export default class EngramSyncPlugin extends Plugin {
 
 		if (!this.settings.apiUrl || !this.settings.apiKey) return;
 
-		this.syncInterval = setInterval(
-			async () => {
-				try {
-					const pulled = await this.syncEngine.pull();
-					if (pulled > 0) {
-						new Notice(`Engram Sync: pulled ${pulled} changes`);
-					}
-				} catch (e) {
-					console.error("Engram Sync: periodic pull failed", e);
+		this.syncInterval = setInterval(async () => {
+			try {
+				const pulled = await this.syncEngine.pull();
+				if (pulled > 0) {
+					new Notice(`Engram Sync: pulled ${pulled} changes`);
 				}
-			},
-			EngramSyncPlugin.FALLBACK_POLL_MS,
-		);
+			} catch (e) {
+				console.error("Engram Sync: periodic pull failed", e);
+			}
+		}, EngramSyncPlugin.FALLBACK_POLL_MS);
 	}
 }

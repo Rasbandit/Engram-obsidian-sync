@@ -1,14 +1,26 @@
 /**
  * Sync engine — handles push/pull logic, debouncing, and ignore patterns.
  */
-import { App, TFile, TFolder, TAbstractFile, Notice, normalizePath } from "obsidian";
-import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
-import { AttachmentChange, EngramSyncSettings, ConflictInfo, ConflictResolution, FileSyncState, NoteChange, NoteStreamEvent, QueueEntry, ReconcileResult, SyncStatus, VersionConflictResponse } from "./types";
-import { OfflineQueue } from "./offline-queue";
-import { BaseStore } from "./base-store";
-import { threeWayMerge } from "./three-way-merge";
+import { type App, Notice, type TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
+import { type EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
+import type { BaseStore } from "./base-store";
 import { devLog } from "./dev-log";
+import { OfflineQueue } from "./offline-queue";
 import { rlog } from "./remote-log";
+import { threeWayMerge } from "./three-way-merge";
+import type {
+	AttachmentChange,
+	ConflictInfo,
+	ConflictResolution,
+	EngramSyncSettings,
+	FileSyncState,
+	NoteChange,
+	NoteStreamEvent,
+	QueueEntry,
+	ReconcileResult,
+	SyncStatus,
+	VersionConflictResponse,
+} from "./types";
 
 /** Check if an error is an HTTP response with the given status code.
  *  Obsidian's requestUrl() throws objects with a `status` property on non-2xx. */
@@ -44,10 +56,22 @@ function fnv1a(s: string): number {
 
 /** Binary file extensions that sync as attachments. */
 const BINARY_EXTENSIONS = new Set([
-	"png", "jpg", "jpeg", "gif", "bmp", "svg", "webp",
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"bmp",
+	"svg",
+	"webp",
 	"pdf",
-	"mp3", "wav", "ogg", "m4a", "webm", "flac",
-	"mp4", "mov",
+	"mp3",
+	"wav",
+	"ogg",
+	"m4a",
+	"webm",
+	"flac",
+	"mp4",
+	"mov",
 	"zip",
 ]);
 
@@ -56,33 +80,41 @@ const TEXT_EXTENSIONS = new Set(["md", "canvas"]);
 
 /** MIME types by extension. */
 const MIME_TYPES: Record<string, string> = {
-	png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-	gif: "image/gif", bmp: "image/bmp", svg: "image/svg+xml", webp: "image/webp",
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	bmp: "image/bmp",
+	svg: "image/svg+xml",
+	webp: "image/webp",
 	pdf: "application/pdf",
-	mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
-	m4a: "audio/mp4", flac: "audio/flac",
-	mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+	mp3: "audio/mpeg",
+	wav: "audio/wav",
+	ogg: "audio/ogg",
+	m4a: "audio/mp4",
+	flac: "audio/flac",
+	mp4: "video/mp4",
+	mov: "video/quicktime",
+	webm: "video/webm",
 	zip: "application/zip",
 	canvas: "application/json",
 };
 
 export class SyncEngine {
-	private debounceTimers: Map<string, ReturnType<typeof setTimeout>> =
-		new Map();
+	private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 	private ignorePatterns: string[] = [];
 	private pushing: Set<string> = new Set();
-	private recentlyPushed: Map<string, ReturnType<typeof setTimeout>> =
-		new Map();
-	private pulling: boolean = false;
-	private lastSync: string = "";
-	private lastError: string = "";
-	private offline: boolean = false;
+	private recentlyPushed: Map<string, ReturnType<typeof setTimeout>> = new Map();
+	private pulling = false;
+	private lastSync = "";
+	private lastError = "";
+	private offline = false;
 	private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
-	private ready: boolean = false;
-	private activePushCount: number = 0;
-	private maxConcurrentPushes: number = 5;
+	private ready = false;
+	private activePushCount = 0;
+	private maxConcurrentPushes = 5;
 	private pushWaiters: (() => void)[] = [];
-	private rateLimitRPM: number = 0; // 0 = unlimited
+	private rateLimitRPM = 0; // 0 = unlimited
 	private requestTimestamps: number[] = [];
 	readonly queue: OfflineQueue = new OfflineQueue();
 
@@ -204,15 +236,15 @@ export class SyncEngine {
 	shouldIgnore(path: string): boolean {
 		// Hardcoded ignores — always enforced, cannot be overridden
 		for (const pattern of ALWAYS_IGNORED) {
-			if (path.startsWith(pattern) || path.includes("/" + pattern)) {
+			if (path.startsWith(pattern) || path.includes(`/${pattern}`)) {
 				return true;
 			}
 		}
 		return this.ignorePatterns.some((pattern) => {
 			if (pattern.endsWith("/")) {
-				return path.startsWith(pattern) || path.includes("/" + pattern);
+				return path.startsWith(pattern) || path.includes(`/${pattern}`);
 			}
-			return path === pattern || path.endsWith("/" + pattern);
+			return path === pattern || path.endsWith(`/${pattern}`);
 		});
 	}
 
@@ -304,10 +336,7 @@ export class SyncEngine {
 	}
 
 	/** Handle a vault rename event. */
-	async handleRename(
-		file: TAbstractFile,
-		oldPath: string,
-	): Promise<void> {
+	async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
 		if (!this.ready) return;
 		if (!this.isSyncable(file)) return;
 
@@ -327,10 +356,7 @@ export class SyncEngine {
 				if (isHttpStatus(e, 404)) {
 					this.goOnline();
 				} else {
-					console.error(
-						`Engram Sync: failed to delete old path ${oldPath}`,
-						e,
-					);
+					console.error(`Engram Sync: failed to delete old path ${oldPath}`, e);
 					await this.enqueueChange({
 						path: oldPath,
 						action: "delete",
@@ -379,8 +405,14 @@ export class SyncEngine {
 			const serverRPM = await this.api.getRateLimit();
 			if (serverRPM > 0) {
 				this.rateLimitRPM = Math.floor(serverRPM * 0.9);
-				devLog().log("pacer", `server limit=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`);
-				rlog().info("pacer", `Rate limit: server=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`);
+				devLog().log(
+					"pacer",
+					`server limit=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`,
+				);
+				rlog().info(
+					"pacer",
+					`Rate limit: server=${serverRPM} RPM, effective=${this.rateLimitRPM} RPM`,
+				);
 			} else {
 				this.rateLimitRPM = 0;
 				devLog().log("pacer", "server reports unlimited — pacer disabled");
@@ -412,8 +444,14 @@ export class SyncEngine {
 		// At capacity — wait until the oldest request exits the window
 		const oldest = this.requestTimestamps[0];
 		const waitMs = oldest + windowMs - now + 50; // +50ms buffer
-		devLog().log("pacer", `at capacity (${this.requestTimestamps.length}/${this.rateLimitRPM}), waiting ${waitMs}ms`);
-		rlog().info("pacer", `Throttled: ${this.requestTimestamps.length}/${this.rateLimitRPM} RPM, waiting ${waitMs}ms`);
+		devLog().log(
+			"pacer",
+			`at capacity (${this.requestTimestamps.length}/${this.rateLimitRPM}), waiting ${waitMs}ms`,
+		);
+		rlog().info(
+			"pacer",
+			`Throttled: ${this.requestTimestamps.length}/${this.rateLimitRPM} RPM, waiting ${waitMs}ms`,
+		);
 		await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
 
 		// Prune again and record
@@ -435,8 +473,14 @@ export class SyncEngine {
 
 		const isBinary = this.isBinaryFile(file);
 		let success = false;
-		devLog().log("push", `start ${isBinary ? "attachment" : "note"}: ${file.path} (active=${this.activePushCount})`);
-		rlog().info("push", `Push start: ${file.path} | type=${isBinary ? "attachment" : "note"} | active=${this.activePushCount}`);
+		devLog().log(
+			"push",
+			`start ${isBinary ? "attachment" : "note"}: ${file.path} (active=${this.activePushCount})`,
+		);
+		rlog().info(
+			"push",
+			`Push start: ${file.path} | type=${isBinary ? "attachment" : "note"} | active=${this.activePushCount}`,
+		);
 
 		try {
 			await this.paceRequest();
@@ -463,37 +507,54 @@ export class SyncEngine {
 				// 409 = version conflict — server has a newer version
 				if ("conflict" in resp) {
 					const serverNote = (resp as VersionConflictResponse).server_note;
-					devLog().log("push", `version conflict: ${file.path} (local=${existing?.version} server=${serverNote.version})`);
-					rlog().warn("conflict", `Version conflict on push: ${file.path} | localVer=${existing?.version} | serverVer=${serverNote.version}`);
+					devLog().log(
+						"push",
+						`version conflict: ${file.path} (local=${existing?.version} server=${serverNote.version})`,
+					);
+					rlog().warn(
+						"conflict",
+						`Version conflict on push: ${file.path} | localVer=${existing?.version} | serverVer=${serverNote.version}`,
+					);
 
 					// Attempt 3-way auto-merge if we have a base
 					const pushBase = this.baseStore?.get(normalizePath(file.path));
 					if (pushBase) {
 						const merge = threeWayMerge(pushBase.content, content, serverNote.content);
 						if (merge.clean) {
-							const mergeResp = await this.api.pushNote(file.path, merge.merged, mtime);
+							const mergeResp = await this.api.pushNote(
+								file.path,
+								merge.merged,
+								mtime,
+							);
 							const localFile = this.app.vault.getAbstractFileByPath(file.path);
 							if (localFile && localFile instanceof TFile) {
 								await this.app.vault.modify(localFile, merge.merged);
 							}
 							if (!("conflict" in mergeResp)) {
 								const np = normalizePath(file.path);
-								this.syncState.set(np, { hash: fnv1a(merge.merged), version: mergeResp.note.version });
+								this.syncState.set(np, {
+									hash: fnv1a(merge.merged),
+									version: mergeResp.note.version,
+								});
 								if (mergeResp.note.version != null) {
 									this.baseStore?.set(np, merge.merged, mergeResp.note.version);
 								}
 							}
-							rlog().info("conflict",
+							rlog().info(
+								"conflict",
 								`Auto-merged (push): ${file.path}` +
-								` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
-								` | remoteLen=${serverNote.content.length} | mergedLen=${merge.merged.length}`);
+									` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
+									` | remoteLen=${serverNote.content.length} | mergedLen=${merge.merged.length}`,
+							);
 							return false;
 						}
-						rlog().info("conflict",
+						rlog().info(
+							"conflict",
 							`Auto-merge failed (push): ${file.path}` +
-							` | conflicts=${merge.conflicts.length}` +
-							` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
-							` | remoteLen=${serverNote.content.length}`);
+								` | conflicts=${merge.conflicts.length}` +
+								` | baseLen=${pushBase.content.length} | localLen=${content.length}` +
+								` | remoteLen=${serverNote.content.length}`,
+						);
 					}
 
 					// Fall back to interactive conflict resolution
@@ -521,20 +582,34 @@ export class SyncEngine {
 						if (localFile && localFile instanceof TFile) {
 							await this.app.vault.modify(localFile, serverNote.content);
 							const np = normalizePath(file.path);
-							this.syncState.set(np, { hash: fnv1a(serverNote.content), version: serverNote.version });
+							this.syncState.set(np, {
+								hash: fnv1a(serverNote.content),
+								version: serverNote.version,
+							});
 							this.baseStore?.set(np, serverNote.content, serverNote.version);
 						}
 					} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
-						const mergeResp = await this.api.pushNote(file.path, resolution.mergedContent, mtime);
+						const mergeResp = await this.api.pushNote(
+							file.path,
+							resolution.mergedContent,
+							mtime,
+						);
 						const localFile = this.app.vault.getAbstractFileByPath(file.path);
 						if (localFile && localFile instanceof TFile) {
 							await this.app.vault.modify(localFile, resolution.mergedContent);
 						}
 						if (!("conflict" in mergeResp)) {
 							const np = normalizePath(file.path);
-							this.syncState.set(np, { hash: fnv1a(resolution.mergedContent), version: mergeResp.note.version });
+							this.syncState.set(np, {
+								hash: fnv1a(resolution.mergedContent),
+								version: mergeResp.note.version,
+							});
 							if (mergeResp.note.version != null) {
-								this.baseStore?.set(np, resolution.mergedContent, mergeResp.note.version);
+								this.baseStore?.set(
+									np,
+									resolution.mergedContent,
+									mergeResp.note.version,
+								);
 							}
 						}
 					}
@@ -550,9 +625,17 @@ export class SyncEngine {
 					const localFile = this.app.vault.getAbstractFileByPath(file.path);
 					if (localFile) {
 						await this.app.vault.rename(localFile, serverPath);
-						devLog().log("push", `renamed: ${file.path} → ${serverPath} (server sanitized)`);
-						rlog().info("push", `Renamed: ${file.path} → ${serverPath} (server sanitized)`);
-						new Notice(`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`);
+						devLog().log(
+							"push",
+							`renamed: ${file.path} → ${serverPath} (server sanitized)`,
+						);
+						rlog().info(
+							"push",
+							`Renamed: ${file.path} → ${serverPath} (server sanitized)`,
+						);
+						new Notice(
+							`Engram Sync: renamed "${file.path.split("/").pop()}" (unsupported characters)`,
+						);
 					}
 					this.syncState.delete(normalizePath(file.path));
 					this.syncState.set(normalizePath(serverPath), { hash, version: serverVersion });
@@ -573,8 +656,15 @@ export class SyncEngine {
 			this.goOnline();
 		} catch (e) {
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
-			devLog().log("error", `push failed: ${file.path} — ${e instanceof Error ? e.message : e}`);
-			rlog().error("push", `Push failed: ${file.path} — ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
+			devLog().log(
+				"error",
+				`push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
+			);
+			rlog().error(
+				"push",
+				`Push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
+				e instanceof Error ? e.stack : undefined,
+			);
 			// Queue for retry — content-free to avoid O(n²) serialization.
 			// Content will be re-read from vault when flushing.
 			await this.enqueueChange({
@@ -633,8 +723,14 @@ export class SyncEngine {
 				this.api.getChanges(this.lastSync),
 				this.api.getAttachmentChanges(this.lastSync),
 			]);
-			devLog().log("pull", `fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
-			rlog().info("pull", `Fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+			devLog().log(
+				"pull",
+				`fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
+			rlog().info(
+				"pull",
+				`Fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
 			let applied = 0;
 			let skipped = 0;
 
@@ -646,7 +742,11 @@ export class SyncEngine {
 					const msg = e instanceof Error ? e.message : String(e);
 					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
 					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
-					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`, e instanceof Error ? e.stack : undefined);
+					rlog().error(
+						"pull",
+						`Skipped note: ${change.path} — ${msg}`,
+						e instanceof Error ? e.stack : undefined,
+					);
 				}
 			}
 
@@ -658,23 +758,36 @@ export class SyncEngine {
 					const msg = e instanceof Error ? e.message : String(e);
 					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
 					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
-					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`, e instanceof Error ? e.stack : undefined);
+					rlog().error(
+						"pull",
+						`Skipped attachment: ${change.path} — ${msg}`,
+						e instanceof Error ? e.stack : undefined,
+					);
 				}
 			}
 
 			// Use the later server_time
-			const serverTime = noteResp.server_time > attachResp.server_time
-				? noteResp.server_time : attachResp.server_time;
+			const serverTime =
+				noteResp.server_time > attachResp.server_time
+					? noteResp.server_time
+					: attachResp.server_time;
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
-			devLog().log("pull", `done — applied ${applied}, skipped ${skipped}, lastSync=${this.lastSync}`);
+			devLog().log(
+				"pull",
+				`done — applied ${applied}, skipped ${skipped}, lastSync=${this.lastSync}`,
+			);
 			rlog().info("pull", `Pull done — applied ${applied}, skipped ${skipped}`);
 			return applied;
 		} catch (e) {
 			console.error("Engram Sync: pull failed", e);
 			devLog().log("error", `pull failed: ${e instanceof Error ? e.message : e}`);
-			rlog().error("pull", `Pull failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
+			rlog().error(
+				"pull",
+				`Pull failed: ${e instanceof Error ? e.message : e}`,
+				e instanceof Error ? e.stack : undefined,
+			);
 			this.lastError = e instanceof Error ? `Pull failed: ${e.message}` : "Pull failed";
 			return 0;
 		} finally {
@@ -716,8 +829,14 @@ export class SyncEngine {
 				this.api.getChanges(epoch),
 				this.api.getAttachmentChanges(epoch),
 			]);
-			devLog().log("pull", `pullAll: fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
-			rlog().info("pull", `PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+			devLog().log(
+				"pull",
+				`pullAll: fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
+			rlog().info(
+				"pull",
+				`PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
 			let applied = 0;
 			let skipped = 0;
 
@@ -744,8 +863,10 @@ export class SyncEngine {
 			}
 
 			// Update lastSync to server time
-			const serverTime = noteResp.server_time > attachResp.server_time
-				? noteResp.server_time : attachResp.server_time;
+			const serverTime =
+				noteResp.server_time > attachResp.server_time
+					? noteResp.server_time
+					: attachResp.server_time;
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
@@ -755,8 +876,13 @@ export class SyncEngine {
 		} catch (e) {
 			console.error("Engram Sync: pullAll failed", e);
 			devLog().log("error", `pullAll failed: ${e instanceof Error ? e.message : e}`);
-			rlog().error("pull", `PullAll failed: ${e instanceof Error ? e.message : e}`, e instanceof Error ? e.stack : undefined);
-			this.lastError = e instanceof Error ? `Pull all failed: ${e.message}` : "Pull all failed";
+			rlog().error(
+				"pull",
+				`PullAll failed: ${e instanceof Error ? e.message : e}`,
+				e instanceof Error ? e.stack : undefined,
+			);
+			this.lastError =
+				e instanceof Error ? `Pull all failed: ${e.message}` : "Pull all failed";
 			return 0;
 		} finally {
 			this.pulling = false;
@@ -798,14 +924,17 @@ export class SyncEngine {
 			try {
 				if (isAttachment) {
 					const attachment = await this.api.getAttachment(event.path);
-					await this.applyAttachmentChange({
-						path: attachment.path,
-						mime_type: attachment.mime_type,
-						size_bytes: attachment.size_bytes,
-						mtime: attachment.mtime,
-						updated_at: attachment.updated_at,
-						deleted: false,
-					}, attachment.content_base64);
+					await this.applyAttachmentChange(
+						{
+							path: attachment.path,
+							mime_type: attachment.mime_type,
+							size_bytes: attachment.size_bytes,
+							mtime: attachment.mtime,
+							updated_at: attachment.updated_at,
+							deleted: false,
+						},
+						attachment.content_base64,
+					);
 				} else {
 					const note = await this.api.getNote(event.path);
 					await this.applyChange({
@@ -820,7 +949,10 @@ export class SyncEngine {
 					});
 				}
 			} catch (e) {
-				console.error(`Engram Sync: failed to fetch content for WebSocket event ${event.path}`, e);
+				console.error(
+					`Engram Sync: failed to fetch content for WebSocket event ${event.path}`,
+					e,
+				);
 			}
 		}
 	}
@@ -877,14 +1009,18 @@ export class SyncEngine {
 				// Both sides differ — real conflict
 				const localMtime = existing.stat.mtime / 1000;
 
-				devLog().log("pull", `conflict: ${change.path} (localHash=${localHash} syncedHash=${lastSyncedHash})`);
+				devLog().log(
+					"pull",
+					`conflict: ${change.path} (localHash=${localHash} syncedHash=${lastSyncedHash})`,
+				);
 				const firstSync = lastSyncedHash === undefined;
-				rlog().warn("conflict",
+				rlog().warn(
+					"conflict",
 					`Detected: ${change.path} | firstSync=${firstSync}` +
-					` | localHash=${localHash} | syncedHash=${lastSyncedHash ?? "none"}` +
-					` | localMtime=${new Date(localMtime * 1000).toISOString()}` +
-					` | remoteMtime=${new Date(change.mtime * 1000).toISOString()}` +
-					` | localLen=${localContent.length} | remoteLen=${change.content.length}`,
+						` | localHash=${localHash} | syncedHash=${lastSyncedHash ?? "none"}` +
+						` | localMtime=${new Date(localMtime * 1000).toISOString()}` +
+						` | remoteMtime=${new Date(change.mtime * 1000).toISOString()}` +
+						` | localLen=${localContent.length} | remoteLen=${change.content.length}`,
 				);
 
 				// Attempt 3-way auto-merge if we have a base
@@ -893,7 +1029,10 @@ export class SyncEngine {
 					const merge = threeWayMerge(pullBase.content, localContent, change.content);
 					if (merge.clean) {
 						await this.app.vault.modify(existing, merge.merged);
-						this.syncState.set(normalized, { hash: fnv1a(merge.merged), version: change.version });
+						this.syncState.set(normalized, {
+							hash: fnv1a(merge.merged),
+							version: change.version,
+						});
 						if (change.version != null) {
 							this.baseStore?.set(normalized, merge.merged, change.version);
 						}
@@ -902,19 +1041,26 @@ export class SyncEngine {
 						try {
 							await this.pushFile(existing, true);
 						} catch (e) {
-							rlog().error("conflict", `Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`);
+							rlog().error(
+								"conflict",
+								`Auto-merge push failed: ${change.path} | err=${e instanceof Error ? e.message : e}`,
+							);
 						}
-						rlog().info("conflict",
+						rlog().info(
+							"conflict",
 							`Auto-merged (pull): ${change.path}` +
-							` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
-							` | remoteLen=${change.content.length} | mergedLen=${merge.merged.length}`);
+								` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
+								` | remoteLen=${change.content.length} | mergedLen=${merge.merged.length}`,
+						);
 						return true;
 					}
-					rlog().info("conflict",
+					rlog().info(
+						"conflict",
 						`Auto-merge failed (pull): ${change.path}` +
-						` | conflicts=${merge.conflicts.length}` +
-						` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
-						` | remoteLen=${change.content.length}`);
+							` | conflicts=${merge.conflicts.length}` +
+							` | baseLen=${pullBase.content.length} | localLen=${localContent.length}` +
+							` | remoteLen=${change.content.length}`,
+					);
 				}
 
 				// Fall back to interactive conflict resolution
@@ -935,10 +1081,17 @@ export class SyncEngine {
 					// Push local version to server
 					try {
 						await this.pushFile(existing);
-						this.syncState.set(normalized, { hash: localHash, version: lastSynced?.version });
-						rlog().info("conflict", `Resolved: ${change.path} → keep-local | pushOk=true`);
+						this.syncState.set(normalized, {
+							hash: localHash,
+							version: lastSynced?.version,
+						});
+						rlog().info(
+							"conflict",
+							`Resolved: ${change.path} → keep-local | pushOk=true`,
+						);
 					} catch (e) {
-						rlog().error("conflict",
+						rlog().error(
+							"conflict",
 							`Resolved: ${change.path} → keep-local | pushOk=false | err=${e instanceof Error ? e.message : e}`,
 							e instanceof Error ? e.stack : undefined,
 						);
@@ -951,13 +1104,24 @@ export class SyncEngine {
 					const conflictPath = `${baseName} (conflict ${date}).md`;
 					try {
 						await this.createFileWithFolders(conflictPath, change.content);
-						this.syncState.set(normalizePath(conflictPath), { hash: fnv1a(change.content), version: change.version });
+						this.syncState.set(normalizePath(conflictPath), {
+							hash: fnv1a(change.content),
+							version: change.version,
+						});
 						if (change.version != null) {
-							this.baseStore?.set(normalizePath(conflictPath), change.content, change.version);
+							this.baseStore?.set(
+								normalizePath(conflictPath),
+								change.content,
+								change.version,
+							);
 						}
-						rlog().info("conflict", `Resolved: ${change.path} → keep-both | copyPath=${conflictPath}`);
+						rlog().info(
+							"conflict",
+							`Resolved: ${change.path} → keep-both | copyPath=${conflictPath}`,
+						);
 					} catch (e) {
-						rlog().error("conflict",
+						rlog().error(
+							"conflict",
 							`Resolved: ${change.path} → keep-both | copyFailed=true | err=${e instanceof Error ? e.message : e}`,
 							e instanceof Error ? e.stack : undefined,
 						);
@@ -967,16 +1131,25 @@ export class SyncEngine {
 					// Apply user-merged content locally and push to server
 					try {
 						await this.app.vault.modify(existing, resolution.mergedContent);
-						this.syncState.set(normalized, { hash: fnv1a(resolution.mergedContent), version: change.version });
+						this.syncState.set(normalized, {
+							hash: fnv1a(resolution.mergedContent),
+							version: change.version,
+						});
 						if (change.version != null) {
-							this.baseStore?.set(normalized, resolution.mergedContent, change.version);
+							this.baseStore?.set(
+								normalized,
+								resolution.mergedContent,
+								change.version,
+							);
 						}
 						await this.pushFile(existing, true);
-						rlog().info("conflict",
+						rlog().info(
+							"conflict",
 							`Resolved: ${change.path} → merge | mergedLen=${resolution.mergedContent.length} | pushOk=true`,
 						);
 					} catch (e) {
-						rlog().error("conflict",
+						rlog().error(
+							"conflict",
 							`Resolved: ${change.path} → merge | pushOk=false | err=${e instanceof Error ? e.message : e}`,
 							e instanceof Error ? e.stack : undefined,
 						);
@@ -997,16 +1170,25 @@ export class SyncEngine {
 
 			// Apply remote change (no conflict, or keep-remote chosen)
 			await this.app.vault.modify(existing, change.content);
-			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+			this.syncState.set(normalized, {
+				hash: fnv1a(change.content),
+				version: change.version,
+			});
 			if (change.version != null) {
 				this.baseStore?.set(normalized, change.content, change.version);
 			}
-			rlog().info("pull", `Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`);
+			rlog().info(
+				"pull",
+				`Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`,
+			);
 			return true;
 		} else {
 			// New file — create it
 			await this.createFileWithFolders(normalized, change.content);
-			this.syncState.set(normalized, { hash: fnv1a(change.content), version: change.version });
+			this.syncState.set(normalized, {
+				hash: fnv1a(change.content),
+				version: change.version,
+			});
 			if (change.version != null) {
 				this.baseStore?.set(normalized, change.content, change.version);
 			}
@@ -1018,7 +1200,10 @@ export class SyncEngine {
 	/** Apply a remote attachment change to the vault.
 	 *  If contentBase64 is provided (from WebSocket), use it directly. Otherwise fetch it.
 	 *  Returns true when a file was actually created, modified, or trashed. */
-	async applyAttachmentChange(change: AttachmentChange, contentBase64?: string): Promise<boolean> {
+	async applyAttachmentChange(
+		change: AttachmentChange,
+		contentBase64?: string,
+	): Promise<boolean> {
 		if (this.shouldIgnore(change.path)) return false;
 
 		const normalized = normalizePath(change.path);
@@ -1035,12 +1220,9 @@ export class SyncEngine {
 		}
 
 		// Fetch content if not provided
-		if (!contentBase64) {
-			const detail = await this.api.getAttachment(change.path);
-			contentBase64 = detail.content_base64;
-		}
-
-		const buffer = base64ToArrayBuffer(contentBase64);
+		const resolvedBase64 =
+			contentBase64 ?? (await this.api.getAttachment(change.path)).content_base64;
+		const buffer = base64ToArrayBuffer(resolvedBase64);
 		const existing = this.app.vault.getAbstractFileByPath(normalized);
 
 		if (existing && existing instanceof TFile) {
@@ -1048,7 +1230,10 @@ export class SyncEngine {
 			if (existing.stat.size === buffer.byteLength) {
 				const localBuffer = await this.app.vault.readBinary(existing);
 				if (this.arrayBuffersEqual(localBuffer, buffer)) {
-					rlog().info("pull", `Attachment unchanged: ${change.path} | bytes=${buffer.byteLength}`);
+					rlog().info(
+						"pull",
+						`Attachment unchanged: ${change.path} | bytes=${buffer.byteLength}`,
+					);
 					return false;
 				}
 			}
@@ -1076,13 +1261,21 @@ export class SyncEngine {
 					hash: fnv1a(info.remoteContent),
 					version: undefined,
 				});
-				rlog().info("conflict",
+				rlog().info(
+					"conflict",
 					`Auto-resolved: ${info.path} → conflict file ${conflictPath}` +
-					` | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}` +
-					` | hasBase=${info.baseContent != null}`);
-				new Notice(`Engram Sync: conflict — saved copy as "${conflictPath.split("/").pop()}"`, 8000);
+						` | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}` +
+						` | hasBase=${info.baseContent != null}`,
+				);
+				new Notice(
+					`Engram Sync: conflict — saved copy as "${conflictPath.split("/").pop()}"`,
+					8000,
+				);
 			} catch (e) {
-				rlog().error("conflict", `Failed to create conflict file: ${conflictPath} | err=${e instanceof Error ? e.message : e}`);
+				rlog().error(
+					"conflict",
+					`Failed to create conflict file: ${conflictPath} | err=${e instanceof Error ? e.message : e}`,
+				);
 			}
 			// Keep local as-is, remote saved as conflict copy
 			return { choice: "keep-local" };
@@ -1092,7 +1285,10 @@ export class SyncEngine {
 			return this.onConflict(info);
 		}
 		// No handler — default to keep-remote (legacy behavior)
-		rlog().warn("conflict", `Auto-resolved: ${info.path} → keep-remote (no handler) | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}`);
+		rlog().warn(
+			"conflict",
+			`Auto-resolved: ${info.path} → keep-remote (no handler) | localLen=${info.localContent.length} | remoteLen=${info.remoteContent.length}`,
+		);
 		return { choice: "keep-remote" };
 	}
 
@@ -1108,7 +1304,10 @@ export class SyncEngine {
 	}
 
 	/** Create a binary file, ensuring parent folders exist. */
-	private async createBinaryFileWithFolders(normalized: string, data: ArrayBuffer): Promise<void> {
+	private async createBinaryFileWithFolders(
+		normalized: string,
+		data: ArrayBuffer,
+	): Promise<void> {
 		const folder = normalized.includes("/")
 			? normalized.substring(0, normalized.lastIndexOf("/"))
 			: "";
@@ -1134,9 +1333,7 @@ export class SyncEngine {
 
 	/** Remove empty parent folders after a file deletion, walking up the tree. */
 	private async removeEmptyFolders(filePath: string): Promise<void> {
-		let folder = filePath.includes("/")
-			? filePath.substring(0, filePath.lastIndexOf("/"))
-			: "";
+		let folder = filePath.includes("/") ? filePath.substring(0, filePath.lastIndexOf("/")) : "";
 
 		while (folder) {
 			const existing = this.app.vault.getAbstractFileByPath(folder);
@@ -1146,9 +1343,7 @@ export class SyncEngine {
 			await this.app.vault.trash(existing, true);
 
 			// Walk up to parent
-			folder = folder.includes("/")
-				? folder.substring(0, folder.lastIndexOf("/"))
-				: "";
+			folder = folder.includes("/") ? folder.substring(0, folder.lastIndexOf("/")) : "";
 		}
 	}
 
@@ -1200,7 +1395,8 @@ export class SyncEngine {
 
 		// Batch in groups of 10
 		const toSync = files.filter(
-			(f: TFile) => this.isSyncable(f) && !this.shouldIgnore(f.path) && f.stat.mtime > sinceMs,
+			(f: TFile) =>
+				this.isSyncable(f) && !this.shouldIgnore(f.path) && f.stat.mtime > sinceMs,
 		);
 		devLog().log("push", `pushModifiedFiles: ${toSync.length} files modified since ${since}`);
 		rlog().info("push", `PushModified: ${toSync.length} files modified since ${since}`);
@@ -1247,9 +1443,7 @@ export class SyncEngine {
 			pushed += results.filter(Boolean).length;
 
 			if (pushed % 100 === 0) {
-				new Notice(
-					`Engram Sync: pushed ${pushed}/${toSync.length} files...`,
-				);
+				new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files...`);
 			}
 		}
 
@@ -1272,7 +1466,10 @@ export class SyncEngine {
 			const toFix = [...missing, ...diverged];
 			if (toFix.length > 0) {
 				devLog().log("reconcile", `fixing ${toFix.length} files after pushAll`);
-				rlog().warn("reconcile", `Fixing ${toFix.length} files after pushAll (${missing.length} missing, ${diverged.length} diverged)`);
+				rlog().warn(
+					"reconcile",
+					`Fixing ${toFix.length} files after pushAll (${missing.length} missing, ${diverged.length} diverged)`,
+				);
 				for (const path of toFix) {
 					const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
 					if (file instanceof TFile) {
@@ -1295,7 +1492,9 @@ export class SyncEngine {
 		const data = encoder.encode(content);
 		const hashBuffer = await crypto.subtle.digest("MD5", data);
 		const hashArray = new Uint8Array(hashBuffer);
-		return Array.from(hashArray).map(b => b.toString(16).padStart(2, "0")).join("");
+		return Array.from(hashArray)
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
 	}
 
 	/** Reconcile local vault against server manifest.
@@ -1310,14 +1509,14 @@ export class SyncEngine {
 			return null;
 		}
 
-		const serverNotes = new Map(manifest.notes.map(n => [n.path, n.content_hash]));
+		const serverNotes = new Map(manifest.notes.map((n) => [n.path, n.content_hash]));
 		const missing: string[] = [];
 		const diverged: string[] = [];
 
 		// Check local files against server manifest
 		const files = this.app.vault.getFiles();
-		const syncable = files.filter((f: TFile) =>
-			this.isSyncable(f) && !this.isBinaryFile(f) && !this.shouldIgnore(f.path),
+		const syncable = files.filter(
+			(f: TFile) => this.isSyncable(f) && !this.isBinaryFile(f) && !this.shouldIgnore(f.path),
 		);
 
 		for (const file of syncable) {
@@ -1337,8 +1536,14 @@ export class SyncEngine {
 		// Remaining server entries are files not in the local vault
 		const extraOnServer = [...serverNotes.keys()];
 
-		devLog().log("reconcile", `done — missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
-		rlog().info("reconcile", `Reconcile done — missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`);
+		devLog().log(
+			"reconcile",
+			`done — missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`,
+		);
+		rlog().info(
+			"reconcile",
+			`Reconcile done — missing=${missing.length} diverged=${diverged.length} extraOnServer=${extraOnServer.length}`,
+		);
 		return { missing, diverged, extraOnServer };
 	}
 
@@ -1429,7 +1634,10 @@ export class SyncEngine {
 					if (!base64) {
 						const file = this.app.vault.getAbstractFileByPath(entry.path);
 						if (!(file instanceof TFile)) {
-							await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
+							await this.queue.dequeue(
+								entry.path,
+								this.settings.vaultId ?? undefined,
+							);
 							flushed++;
 							continue;
 						}
@@ -1438,6 +1646,7 @@ export class SyncEngine {
 						mimeType = this.getMimeType(file);
 						mtime = file.stat.mtime / 1000;
 					}
+					// biome-ignore lint/style/noNonNullAssertion: mimeType and mtime are always set for attachments above
 					await this.api.pushAttachment(entry.path, base64, mimeType!, mtime!);
 				} else {
 					// Note upsert — legacy entries have content; new entries are content-free
@@ -1446,13 +1655,17 @@ export class SyncEngine {
 					if (content === undefined) {
 						const file = this.app.vault.getAbstractFileByPath(entry.path);
 						if (!(file instanceof TFile)) {
-							await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
+							await this.queue.dequeue(
+								entry.path,
+								this.settings.vaultId ?? undefined,
+							);
 							flushed++;
 							continue;
 						}
 						content = await this.app.vault.read(file);
 						mtime = file.stat.mtime / 1000;
 					}
+					// biome-ignore lint/style/noNonNullAssertion: mtime is always set for notes above
 					await this.api.pushNote(entry.path, content, mtime!);
 				}
 				await this.queue.dequeue(entry.path, this.settings.vaultId ?? undefined);
@@ -1464,8 +1677,14 @@ export class SyncEngine {
 			}
 		}
 
-		devLog().log("queue", `flush done — ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
-		rlog().info("queue", `Queue flush done — ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`);
+		devLog().log(
+			"queue",
+			`flush done — ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`,
+		);
+		rlog().info(
+			"queue",
+			`Queue flush done — ${flushed}/${entries.length} flushed, ${this.queue.size} remaining`,
+		);
 		this.emitStatus();
 		return flushed;
 	}
