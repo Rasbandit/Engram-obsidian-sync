@@ -1,17 +1,15 @@
 /**
  * Tests for api.ts — utility functions and EngramApi method behavior.
  */
+import { type Mock } from "bun:test";
+import { requestUrl } from "obsidian";
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "../src/api";
 
-// Replace the obsidian module's requestUrl with a proper jest.fn()
-const mockRequestUrl = jest.fn();
-jest.mock("obsidian", () => ({
-    ...jest.requireActual("obsidian"),
-    requestUrl: (...args: any[]) => mockRequestUrl(...args),
-}));
+// requestUrl is mocked via tests/preload.ts — it is already a mock() instance
+const mockRequestUrl = requestUrl as unknown as Mock<() => Promise<any>>;
 
 beforeEach(() => {
-    mockRequestUrl.mockReset();
+	mockRequestUrl.mockReset();
 });
 
 // ---------------------------------------------------------------------------

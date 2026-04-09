@@ -1,9 +1,9 @@
+import { type Mock } from "bun:test";
 import { requestUrl } from "obsidian";
 import { EngramApi } from "../src/api";
 
-jest.mock("obsidian");
-
-const mockRequestUrl = requestUrl as jest.MockedFunction<typeof requestUrl>;
+// obsidian is mocked via tests/preload.ts — requestUrl is already a mock()
+const mockRequestUrl = requestUrl as unknown as Mock<() => Promise<any>>;
 
 describe("EngramApi.search", () => {
 	let api: EngramApi;
