@@ -30,6 +30,7 @@ jobs:
   # Trigger backend E2E after plugin passes — tests full Obsidian ↔ backend sync
   trigger-e2e:
     needs: build-and-test
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger backend E2E
