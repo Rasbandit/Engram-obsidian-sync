@@ -37,6 +37,7 @@ class DevLogBuffer {
 		if (this.entries.length > MAX_ENTRIES) {
 			this.entries.splice(0, this.entries.length - MAX_ENTRIES);
 		}
+		// biome-ignore lint/suspicious/noConsole: CDP debug output, tree-shaken in production
 		console.debug(`[engram:${cat}]`, msg);
 	}
 

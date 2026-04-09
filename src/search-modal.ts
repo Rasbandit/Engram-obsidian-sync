@@ -154,6 +154,7 @@ export class SearchModal extends Modal {
 			this.selectedIndex = this.results.length > 0 ? 0 : -1;
 			this.renderResults();
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram search failed", e);
 			this.resultsEl.empty();
 			this.resultsEl.createEl("p", {

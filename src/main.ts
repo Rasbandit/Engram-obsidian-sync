@@ -288,6 +288,7 @@ export default class EngramSyncPlugin extends Plugin {
 						new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
 					})
 					.catch((e) => {
+						// biome-ignore lint/suspicious/noConsole: error boundary
 						console.error("Engram Sync: manual sync failed", e);
 						rlog().error(
 							"lifecycle",
@@ -366,6 +367,7 @@ export default class EngramSyncPlugin extends Plugin {
 					return this.doSyncWithFirstSyncCheck();
 				})
 				.catch((e) => {
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error("Engram Sync: sync after settings change failed", e);
 					rlog().error(
 						"lifecycle",
@@ -400,6 +402,7 @@ export default class EngramSyncPlugin extends Plugin {
 				rlog().info("lifecycle", "Vault registration blocked — vault limit reached (402)");
 				return false;
 			}
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram Sync: vault registration failed", e);
 			rlog().error(
 				"lifecycle",
@@ -517,6 +520,7 @@ export default class EngramSyncPlugin extends Plugin {
 					// Catch-up pull on reconnect to cover missed events during disconnect
 					if (connected) {
 						this.syncEngine.pull().catch((e) => {
+							// biome-ignore lint/suspicious/noConsole: error boundary
 							console.error("Engram Sync: catch-up pull failed", e);
 							rlog().error(
 								"channel",
@@ -543,6 +547,7 @@ export default class EngramSyncPlugin extends Plugin {
 				channel.connect();
 			})
 			.catch((e) => {
+				// biome-ignore lint/suspicious/noConsole: error boundary
 				console.error("Engram Sync: failed to fetch user id for channel", e);
 				rlog().error(
 					"channel",
@@ -586,6 +591,7 @@ export default class EngramSyncPlugin extends Plugin {
 					new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
 				}
 			} catch (e) {
+				// biome-ignore lint/suspicious/noConsole: error boundary
 				console.error("Engram Sync: sync failed", e);
 				new Notice("Engram Sync: sync failed — check connection");
 			}
@@ -646,6 +652,7 @@ export default class EngramSyncPlugin extends Plugin {
 					new Notice(`Engram Sync: pulled ${pulled} changes`);
 				}
 			} catch (e) {
+				// biome-ignore lint/suspicious/noConsole: error boundary
 				console.error("Engram Sync: periodic pull failed", e);
 			}
 		}, EngramSyncPlugin.FALLBACK_POLL_MS);

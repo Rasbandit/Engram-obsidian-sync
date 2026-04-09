@@ -6,10 +6,7 @@
 		"rules": {
 			"recommended": true,
 			"suspicious": {
-				"noConsole": "warn"
-			},
-			"style": {
-				"noUselessElse": "off"
+				"noConsole": "error"
 			}
 		}
 	},

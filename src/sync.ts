@@ -324,6 +324,7 @@ export class SyncEngine {
 				this.goOnline();
 				return;
 			}
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error(`Engram Sync: failed to delete ${file.path}`, e);
 			await this.enqueueChange({
 				path: file.path,
@@ -356,6 +357,7 @@ export class SyncEngine {
 				if (isHttpStatus(e, 404)) {
 					this.goOnline();
 				} else {
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: failed to delete old path ${oldPath}`, e);
 					await this.enqueueChange({
 						path: oldPath,
@@ -655,6 +657,7 @@ export class SyncEngine {
 			rlog().info("push", `Push ok: ${file.path} | type=${isBinary ? "attachment" : "note"}`);
 			this.goOnline();
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
 			devLog().log(
 				"error",
@@ -740,6 +743,7 @@ export class SyncEngine {
 				} catch (e) {
 					skipped++;
 					const msg = e instanceof Error ? e.message : String(e);
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
 					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
 					rlog().error(
@@ -756,6 +760,7 @@ export class SyncEngine {
 				} catch (e) {
 					skipped++;
 					const msg = e instanceof Error ? e.message : String(e);
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
 					devLog().log("error", `apply skipped: ${change.path} — ${msg}`);
 					rlog().error(
@@ -781,6 +786,7 @@ export class SyncEngine {
 			rlog().info("pull", `Pull done — applied ${applied}, skipped ${skipped}`);
 			return applied;
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram Sync: pull failed", e);
 			devLog().log("error", `pull failed: ${e instanceof Error ? e.message : e}`);
 			rlog().error(
@@ -846,6 +852,7 @@ export class SyncEngine {
 				} catch (e) {
 					skipped++;
 					const msg = e instanceof Error ? e.message : String(e);
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
 					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
 				}
@@ -857,6 +864,7 @@ export class SyncEngine {
 				} catch (e) {
 					skipped++;
 					const msg = e instanceof Error ? e.message : String(e);
+					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
 					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
 				}
@@ -874,6 +882,7 @@ export class SyncEngine {
 			rlog().info("pull", `PullAll done — applied ${applied}, skipped ${skipped}`);
 			return applied;
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram Sync: pullAll failed", e);
 			devLog().log("error", `pullAll failed: ${e instanceof Error ? e.message : e}`);
 			rlog().error(
@@ -949,6 +958,7 @@ export class SyncEngine {
 					});
 				}
 			} catch (e) {
+				// biome-ignore lint/suspicious/noConsole: error boundary
 				console.error(
 					`Engram Sync: failed to fetch content for WebSocket event ${event.path}`,
 					e,
@@ -1077,7 +1087,8 @@ export class SyncEngine {
 				if (resolution.choice === "skip") {
 					rlog().info("conflict", `Resolved: ${change.path} → skip`);
 					return false;
-				} else if (resolution.choice === "keep-local") {
+				}
+				if (resolution.choice === "keep-local") {
 					// Push local version to server
 					try {
 						await this.pushFile(existing);
@@ -1097,7 +1108,8 @@ export class SyncEngine {
 						);
 					}
 					return false;
-				} else if (resolution.choice === "keep-both") {
+				}
+				if (resolution.choice === "keep-both") {
 					// Save remote as a conflict copy, keep local as-is
 					const date = new Date().toISOString().slice(0, 10);
 					const baseName = normalized.replace(/\.md$/, "");
@@ -1127,7 +1139,8 @@ export class SyncEngine {
 						);
 					}
 					return true;
-				} else if (resolution.choice === "merge" && resolution.mergedContent != null) {
+				}
+				if (resolution.choice === "merge" && resolution.mergedContent != null) {
 					// Apply user-merged content locally and push to server
 					try {
 						await this.app.vault.modify(existing, resolution.mergedContent);
@@ -1182,19 +1195,18 @@ export class SyncEngine {
 				`Applied: ${change.path} | localLen=${localContent.length} | remoteLen=${change.content.length}`,
 			);
 			return true;
-		} else {
-			// New file — create it
-			await this.createFileWithFolders(normalized, change.content);
-			this.syncState.set(normalized, {
-				hash: fnv1a(change.content),
-				version: change.version,
-			});
-			if (change.version != null) {
-				this.baseStore?.set(normalized, change.content, change.version);
-			}
-			rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
-			return true;
 		}
+		// New file — create it
+		await this.createFileWithFolders(normalized, change.content);
+		this.syncState.set(normalized, {
+			hash: fnv1a(change.content),
+			version: change.version,
+		});
+		if (change.version != null) {
+			this.baseStore?.set(normalized, change.content, change.version);
+		}
+		rlog().info("pull", `Created: ${change.path} | len=${change.content.length}`);
+		return true;
 	}
 
 	/** Apply a remote attachment change to the vault.
@@ -1240,11 +1252,10 @@ export class SyncEngine {
 			await this.app.vault.modifyBinary(existing, buffer);
 			rlog().info("pull", `Attachment applied: ${change.path} | bytes=${buffer.byteLength}`);
 			return true;
-		} else {
-			await this.createBinaryFileWithFolders(normalized, buffer);
-			rlog().info("pull", `Attachment created: ${change.path} | bytes=${buffer.byteLength}`);
-			return true;
 		}
+		await this.createBinaryFileWithFolders(normalized, buffer);
+		rlog().info("pull", `Attachment created: ${change.path} | bytes=${buffer.byteLength}`);
+		return true;
 	}
 
 	/** Resolve a conflict via callback or auto-resolve as keep-remote. */
@@ -1577,6 +1588,7 @@ export class SyncEngine {
 		this.emitStatus();
 		// Flush the queue now that we're online
 		this.flushQueue().catch((e) => {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram Sync: queue flush failed", e);
 		});
 	}
