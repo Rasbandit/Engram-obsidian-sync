@@ -9,7 +9,7 @@ describe("EngramApi.search", () => {
 	let api: EngramApi;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		mockRequestUrl.mockReset();
 		api = new EngramApi("http://localhost:8000", "test-key");
 	});
 
