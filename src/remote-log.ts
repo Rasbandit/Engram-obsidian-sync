@@ -84,7 +84,12 @@ export class RemoteLogger {
 		this.pushFn = null;
 	}
 
-	private addEntry(level: "error" | "warn" | "info", category: string, message: string, stack?: string): void {
+	private addEntry(
+		level: "error" | "warn" | "info",
+		category: string,
+		message: string,
+		stack?: string,
+	): void {
 		if (!this.enabled || !this.pushFn) return;
 
 		const entry: RemoteLogEntry = {

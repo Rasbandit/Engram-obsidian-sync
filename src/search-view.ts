@@ -1,9 +1,9 @@
 /**
  * Sidebar search view — persistent search panel in the right sidebar.
  */
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
-import { EngramApi } from "./api";
-import { SearchResult } from "./types";
+import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
+import type { EngramApi } from "./api";
+import type { SearchResult } from "./types";
 
 export const SEARCH_VIEW_TYPE = "engram-search-view";
 
@@ -112,7 +112,7 @@ export class SearchView extends ItemView {
 			const title = result.title || result.source_path || "Untitled";
 			header.createEl("span", { text: title, cls: "engram-search-result-title" });
 
-			const scoreBadge = (result.score * 100).toFixed(0) + "%";
+			const scoreBadge = `${(result.score * 100).toFixed(0)}%`;
 			header.createEl("span", { text: scoreBadge, cls: "engram-search-result-score" });
 
 			if (result.source_path) {
@@ -207,6 +207,7 @@ export class SearchView extends ItemView {
 			this.selectedIndex = this.results.length > 0 ? 0 : -1;
 			this.renderResults();
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram search failed", e);
 			this.resultsEl.empty();
 			this.previewEl.empty();

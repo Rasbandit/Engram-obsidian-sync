@@ -1,7 +1,7 @@
 /**
  * Confirmation modal shown on first sync to prevent accidental bulk push.
  */
-import { App, Modal } from "obsidian";
+import { type App, Modal } from "obsidian";
 
 export type FirstSyncChoice = "push-all" | "pull-only" | "cancel";
 

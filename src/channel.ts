@@ -1,3 +1,5 @@
+import type { AuthProvider } from "./auth";
+import { rlog } from "./remote-log";
 /**
  * Phoenix Channel client for Engram real-time sync.
  *
@@ -6,9 +8,7 @@
  *
  * Protocol: messages are JSON arrays [join_ref, ref, topic, event, payload]
  */
-import { NoteStreamEvent } from "./types";
-import type { AuthProvider } from "./auth";
-import { rlog } from "./remote-log";
+import type { NoteStreamEvent } from "./types";
 
 export class NoteChannel {
 	private ws: WebSocket | null = null;
@@ -47,7 +47,12 @@ export class NoteChannel {
 		return this.apiKey;
 	}
 
-	updateConfig(baseUrl: string, apiKey: string, userId: string, vaultId: string | null = null): void {
+	updateConfig(
+		baseUrl: string,
+		apiKey: string,
+		userId: string,
+		vaultId: string | null = null,
+	): void {
 		this.baseUrl = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
 		this.apiKey = apiKey;
 		this.userId = userId;

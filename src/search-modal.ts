@@ -1,9 +1,9 @@
 /**
  * Quick search modal — Mod+Shift+S opens this for semantic vault search.
  */
-import { App, Modal, Notice } from "obsidian";
-import { EngramApi } from "./api";
-import { SearchResult } from "./types";
+import { type App, Modal, Notice } from "obsidian";
+import type { EngramApi } from "./api";
+import type { SearchResult } from "./types";
 
 export class SearchModal extends Modal {
 	private api: EngramApi;
@@ -154,6 +154,7 @@ export class SearchModal extends Modal {
 			this.selectedIndex = this.results.length > 0 ? 0 : -1;
 			this.renderResults();
 		} catch (e) {
+			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error("Engram search failed", e);
 			this.resultsEl.empty();
 			this.resultsEl.createEl("p", {

@@ -26,7 +26,7 @@ export interface EngramSyncSettings {
 	/** Email of the OAuth-authenticated user (for display). */
 	userEmail?: string;
 	/** Active auth method. */
-	authMethod?: 'oauth' | 'api_key' | null;
+	authMethod?: "oauth" | "api_key" | null;
 }
 
 export const DEFAULT_SETTINGS: EngramSyncSettings = {

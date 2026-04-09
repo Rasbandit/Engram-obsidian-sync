@@ -5,14 +5,16 @@
  * Entries are flushed oldest-first.
  * Persistence is debounced to avoid O(n²) serialization during rapid enqueues.
  */
-import { QueueEntry } from "./types";
+import type { QueueEntry } from "./types";
 
 /** Build the composite dedup key: "{vaultId}:{path}" or just "{path}" if no vaultId. */
 function dedupKey(entry: QueueEntry): string;
 function dedupKey(path: string, vaultId?: string): string;
 function dedupKey(pathOrEntry: string | QueueEntry, vaultId?: string): string {
 	if (typeof pathOrEntry === "object") {
-		return pathOrEntry.vaultId ? `${pathOrEntry.vaultId}:${pathOrEntry.path}` : pathOrEntry.path;
+		return pathOrEntry.vaultId
+			? `${pathOrEntry.vaultId}:${pathOrEntry.path}`
+			: pathOrEntry.path;
 	}
 	return vaultId ? `${vaultId}:${pathOrEntry}` : pathOrEntry;
 }
@@ -23,7 +25,7 @@ export class OfflineQueue {
 	private persistTimer: ReturnType<typeof setTimeout> | null = null;
 	private persistDelayMs: number;
 
-	constructor(persistDelayMs: number = 1000) {
+	constructor(persistDelayMs = 1000) {
 		this.persistDelayMs = persistDelayMs;
 	}
 
@@ -54,9 +56,7 @@ export class OfflineQueue {
 
 	/** Get all entries sorted by timestamp (oldest first). */
 	all(): QueueEntry[] {
-		return Array.from(this.entries.values()).sort(
-			(a, b) => a.timestamp - b.timestamp,
-		);
+		return Array.from(this.entries.values()).sort((a, b) => a.timestamp - b.timestamp);
 	}
 
 	/** Number of queued entries. */

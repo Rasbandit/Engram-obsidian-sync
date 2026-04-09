@@ -91,12 +91,7 @@ function myersDiff(a: string[], b: string[]): DiffLine[] {
 	return backtrack(trace, a, b, max);
 }
 
-function backtrack(
-	trace: Int32Array[],
-	a: string[],
-	b: string[],
-	max: number,
-): DiffLine[] {
+function backtrack(trace: Int32Array[], a: string[], b: string[], max: number): DiffLine[] {
 	let x = a.length;
 	let y = b.length;
 	const ops: DiffLine[] = [];
@@ -162,10 +157,7 @@ function backtrack(
  * @param diffLines - Output from computeDiff()
  * @param contextLines - Number of context lines around each change (default: 3)
  */
-export function groupIntoHunks(
-	diffLines: DiffLine[],
-	contextLines = 3,
-): DiffHunk[] {
+export function groupIntoHunks(diffLines: DiffLine[], contextLines = 3): DiffHunk[] {
 	if (diffLines.length === 0) return [];
 
 	// Find ranges of changed lines
@@ -181,17 +173,11 @@ export function groupIntoHunks(
 	// Build raw hunk ranges [start, end] inclusive
 	const ranges: Array<[number, number]> = [];
 	let rangeStart = Math.max(0, changeIndices[0] - contextLines);
-	let rangeEnd = Math.min(
-		diffLines.length - 1,
-		changeIndices[0] + contextLines,
-	);
+	let rangeEnd = Math.min(diffLines.length - 1, changeIndices[0] + contextLines);
 
 	for (let i = 1; i < changeIndices.length; i++) {
 		const newStart = Math.max(0, changeIndices[i] - contextLines);
-		const newEnd = Math.min(
-			diffLines.length - 1,
-			changeIndices[i] + contextLines,
-		);
+		const newEnd = Math.min(diffLines.length - 1, changeIndices[i] + contextLines);
 
 		if (newStart <= rangeEnd + 1) {
 			// Merge overlapping/adjacent ranges
@@ -224,10 +210,7 @@ export function groupIntoHunks(
  * @param allDiffLines - The complete flat diff (from computeDiff)
  * @param hunks - Hunks with choices set
  */
-export function buildMergedContent(
-	allDiffLines: DiffLine[],
-	hunks: DiffHunk[],
-): string {
+export function buildMergedContent(allDiffLines: DiffLine[], hunks: DiffHunk[]): string {
 	// Build a map of diff-line-index → hunk for changed lines
 	// We need to know which hunk each changed line belongs to.
 	// Since hunks contain slices of allDiffLines, we match by reference position.
@@ -276,10 +259,7 @@ export function buildMergedContent(
 				: null;
 
 		// Advance hunk pointer
-		if (
-			hunkIdx < hunkRanges.length &&
-			i > hunkRanges[hunkIdx].end
-		) {
+		if (hunkIdx < hunkRanges.length && i > hunkRanges[hunkIdx].end) {
 			hunkIdx++;
 		}
 
