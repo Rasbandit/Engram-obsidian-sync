@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Trigger backend E2E
         run: |
-          curl -X POST \
+          curl --fail -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.CROSS_REPO_PAT }}" \
             https://api.github.com/repos/Rasbandit/Engram/dispatches \
