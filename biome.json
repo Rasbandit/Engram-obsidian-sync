@@ -30,7 +30,7 @@
 	},
 	"overrides": [
 		{
-			"include": ["tests/__mocks__/**"],
+			"include": ["tests/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {
@@ -38,16 +38,6 @@
 					},
 					"complexity": {
 						"noUselessConstructor": "off"
-					}
-				}
-			}
-		},
-		{
-			"include": ["tests/**"],
-			"linter": {
-				"rules": {
-					"suspicious": {
-						"noExplicitAny": "off"
 					},
 					"style": {
 						"noNonNullAssertion": "off"
