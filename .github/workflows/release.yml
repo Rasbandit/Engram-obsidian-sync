@@ -13,18 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
+
+      - name: Security audit
+        run: bun audit
 
       - name: Build
-        run: npm run build
+        run: bun run build
 
       - name: Test
-        run: npm test
+        run: bun run jest
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

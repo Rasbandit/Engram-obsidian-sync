@@ -13,18 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
+
+      - name: Security audit
+        run: bun audit
 
       - name: Type-check and build
-        run: npm run build
+        run: bun run build
 
       - name: Run tests
-        run: npm test
+        run: bun run jest
 
   # Trigger backend E2E after plugin passes — tests full Obsidian ↔ backend sync
   trigger-e2e:
