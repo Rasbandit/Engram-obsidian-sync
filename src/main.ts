@@ -236,7 +236,6 @@ export default class EngramSyncPlugin extends Plugin {
 		this.addCommand({
 			id: "engram-search",
 			name: "Semantic search",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "s" }],
 			callback: () => {
 				new SearchModal(this.app, this.api).open();
 			},

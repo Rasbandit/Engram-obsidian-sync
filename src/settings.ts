@@ -35,13 +35,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Engram Sync Settings" });
-
 		// ── Status indicator ──
 		this.renderStatus(containerEl);
 
 		// ── Connection ──
-		containerEl.createEl("h3", { text: "Connection" });
+		new Setting(containerEl).setName("Connection").setHeading();
 
 		new Setting(containerEl)
 			.setName("Engram URL")
@@ -60,7 +58,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		const isOAuth = !!this.plugin.settings.refreshToken;
 		const hasApiKey = !!this.plugin.settings.apiKey;
 
-		containerEl.createEl("h3", { text: "Authentication" });
+		new Setting(containerEl).setName("Authentication").setHeading();
 
 		if (isOAuth) {
 			new Setting(containerEl)
@@ -152,7 +150,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			);
 
 		// ── Ignore Patterns ──
-		containerEl.createEl("h3", { text: "Ignore Patterns" });
+		new Setting(containerEl).setName("Ignore patterns").setHeading();
 
 		this.renderIgnoreWarnings(containerEl);
 
@@ -176,7 +174,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		ignoreSetting.settingEl.style.gap = "8px";
 
 		// ── Sync Behavior ──
-		containerEl.createEl("h3", { text: "Sync Behavior" });
+		new Setting(containerEl).setName("Sync behavior").setHeading();
 
 		new Setting(containerEl)
 			.setName("Conflict resolution")
@@ -211,7 +209,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			);
 
 		// ── Actions ──
-		containerEl.createEl("h3", { text: "Actions" });
+		new Setting(containerEl).setName("Actions").setHeading();
 
 		new Setting(containerEl)
 			.setName("Sync now")
@@ -327,29 +325,18 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			label = "Not configured";
 		}
 
+		statusEl.addClasses(["engram-status-container"]);
+
 		const dot = statusEl.createSpan({ cls: "engram-status-dot" });
-		dot.style.display = "inline-block";
-		dot.style.width = "8px";
-		dot.style.height = "8px";
-		dot.style.borderRadius = "50%";
 		dot.style.backgroundColor = dotColor;
-		dot.style.marginRight = "8px";
 
 		statusEl.createSpan({ text: label });
 
 		if (status.lastSync) {
 			const date = new Date(status.lastSync);
 			const timeEl = statusEl.createDiv({ cls: "engram-status-time" });
-			timeEl.style.fontSize = "0.85em";
-			timeEl.style.color = "var(--text-muted)";
-			timeEl.style.marginTop = "2px";
 			timeEl.setText(`Last sync: ${date.toLocaleString()}`);
 		}
-
-		statusEl.style.marginBottom = "16px";
-		statusEl.style.padding = "8px 12px";
-		statusEl.style.borderRadius = "6px";
-		statusEl.style.backgroundColor = "var(--background-secondary)";
 	}
 
 	/** Scan vault for problematic directories and render warnings with add-to-ignore buttons. */
@@ -397,10 +384,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 							this.display(); // Re-render to remove the warning
 						}),
 				);
-			warning.settingEl.style.backgroundColor =
-				"var(--background-modifier-error-rgb, rgba(255,0,0,0.05))";
-			warning.settingEl.style.borderRadius = "6px";
-			warning.settingEl.style.padding = "8px";
+			warning.settingEl.addClass("engram-status-warning");
 		}
 	}
 }
