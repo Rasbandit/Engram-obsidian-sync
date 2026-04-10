@@ -1,6 +1,6 @@
 {
   "name": "engram-obsidian-sync",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Bidirectional sync between Obsidian and Engram",
   "main": "main.js",
   "scripts": {
@@ -14,10 +14,19 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "src/**/*.ts": ["biome check --apply --no-errors-on-unmatched"],
-    "tests/**/*.ts": ["biome check --apply --no-errors-on-unmatched"]
+    "src/**/*.ts": [
+      "biome check --apply --no-errors-on-unmatched"
+    ],
+    "tests/**/*.ts": [
+      "biome check --apply --no-errors-on-unmatched"
+    ]
   },
-  "keywords": ["obsidian", "engram", "sync", "knowledge-base"],
+  "keywords": [
+    "obsidian",
+    "engram",
+    "sync",
+    "knowledge-base"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
