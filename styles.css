@@ -396,3 +396,32 @@
 .engram-conflict-actions button {
 	padding: 6px 16px;
 }
+
+/* ── Settings status indicator ────────────────────────────────── */
+
+.engram-status-container {
+	margin-bottom: 16px;
+	padding: 8px 12px;
+	border-radius: 6px;
+	background-color: var(--background-secondary);
+}
+
+.engram-status-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	margin-right: 8px;
+}
+
+.engram-status-time {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
+.engram-status-warning {
+	background-color: var(--background-modifier-error-rgb, rgba(255, 0, 0, 0.05));
+	border-radius: 6px;
+	padding: 8px;
+}
