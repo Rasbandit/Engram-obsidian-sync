@@ -234,18 +234,18 @@ Semaphore pattern limiting concurrent push requests to 5.
 
 Compile-time gated via `DEV_MODE` constant (set in `esbuild.config.mjs`).
 
-- **Dev builds** (`npm run dev`): ring buffer of 500 entries on `globalThis.__engramLog`
-- **Production builds** (`npm run build`): all methods are no-ops, zero overhead
+- **Dev builds** (`bun run dev`): ring buffer of 500 entries on `globalThis.__engramLog`
+- **Production builds** (`bun run build`): all methods are no-ops, zero overhead
 - Categories: `lifecycle`, `push`, `pull`, `error`, `sse` (legacy name, covers WebSocket), `queue`, `pacer`
 - CDP queryable: `globalThis.__engramLog.dump(50)`, `.filter("push")`, `.stats()`
 
 ### Build & Test Commands
 
 ```bash
-npm test                    # Jest unit tests
-npm run build               # tsc check + esbuild → main.js
-npm run dev                 # esbuild watch mode with sourcemaps
-node version-bump.mjs       # Bumps manifest.json + versions.json from package.json
+bun test                    # Unit tests (Bun test runner)
+bun run build               # tsc check + esbuild → main.js
+bun run dev                 # esbuild watch mode with sourcemaps
+npm version patch           # Bumps package.json + manifest.json + versions.json (requires npm)
 ```
 
 Build output: `main.js` (CommonJS, ES2018 target). Externals: obsidian, electron, @codemirror/*, @lezer/*.

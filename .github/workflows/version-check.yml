@@ -48,7 +48,7 @@ jobs:
               echo "::error::  - $err"
             done
             echo ""
-            echo "Run 'npm version patch|minor|major' to bump all version files."
+            echo "Run 'npm version patch|minor|major' to bump all version files (npm required for lifecycle hooks)."
             exit 1
           fi
 
