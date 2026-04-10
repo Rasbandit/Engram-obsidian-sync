@@ -1,0 +1,55 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check version bump and sync
+        run: |
+          set -euo pipefail
+
+          PR_PKG=$(jq -r '.version' package.json)
+          PR_MANIFEST=$(jq -r '.version' manifest.json)
+          PR_IN_VERSIONS=$(jq --arg v "$PR_MANIFEST" 'has($v)' versions.json)
+
+          MAIN_MANIFEST=$(git show origin/main:manifest.json | jq -r '.version')
+
+          echo "PR package.json:  $PR_PKG"
+          echo "PR manifest.json: $PR_MANIFEST"
+          echo "PR in versions:   $PR_IN_VERSIONS"
+          echo "Main manifest:    $MAIN_MANIFEST"
+
+          ERRORS=()
+
+          if [[ "$PR_PKG" != "$PR_MANIFEST" ]]; then
+            ERRORS+=("package.json ($PR_PKG) != manifest.json ($PR_MANIFEST)")
+          fi
+
+          if [[ "$PR_IN_VERSIONS" != "true" ]]; then
+            ERRORS+=("versions.json has no entry for $PR_MANIFEST")
+          fi
+
+          if [[ "$PR_MANIFEST" == "$MAIN_MANIFEST" ]]; then
+            ERRORS+=("Version $PR_MANIFEST has not been bumped (main is also $MAIN_MANIFEST)")
+          fi
+
+          if [[ ${#ERRORS[@]} -gt 0 ]]; then
+            echo ""
+            echo "::error::Version check failed:"
+            for err in "${ERRORS[@]}"; do
+              echo "::error::  - $err"
+            done
+            echo ""
+            echo "Run 'npm version patch|minor|major' to bump all version files."
+            exit 1
+          fi
+
+          echo "Version check passed: $PR_MANIFEST (bumped from $MAIN_MANIFEST)"

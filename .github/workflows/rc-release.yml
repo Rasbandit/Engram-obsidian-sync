@@ -1,0 +1,71 @@
+name: RC Pre-release
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  rc-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Test
+        run: bun test
+
+      - name: Determine RC version
+        id: rc
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r '.version' manifest.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          git fetch --tags
+          HIGHEST=$(git tag -l "${VERSION}-rc.*" \
+            | sed "s/${VERSION}-rc\.//" \
+            | sort -n \
+            | tail -1)
+
+          if [[ -z "$HIGHEST" ]]; then
+            RC_NUM=1
+          else
+            RC_NUM=$((HIGHEST + 1))
+          fi
+
+          RC_TAG="${VERSION}-rc.${RC_NUM}"
+          echo "rc_tag=$RC_TAG" >> "$GITHUB_OUTPUT"
+          echo "RC tag: $RC_TAG"
+
+      - name: Create RC tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.rc.outputs.rc_tag }}" "${{ github.event.pull_request.head.sha }}"
+          git push origin "${{ steps.rc.outputs.rc_tag }}"
+
+      - name: Create RC pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.rc.outputs.rc_tag }}" \
+            main.js manifest.json styles.css \
+            --prerelease \
+            --title "${{ steps.rc.outputs.rc_tag }}" \
+            --notes "RC build for v${{ steps.rc.outputs.version }} from PR #${{ github.event.pull_request.number }}
+
+          Commit: ${{ github.event.pull_request.head.sha }}
+          Branch: ${{ github.head_ref }}
+
+          Install via BRAT with frozen version: \`${{ steps.rc.outputs.rc_tag }}\`"

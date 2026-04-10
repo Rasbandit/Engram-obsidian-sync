@@ -83,35 +83,39 @@ npm run build
 
 ## Release Process
 
-No CI/CD — releases are manual. Full steps:
+Releases are automated via GitHub Actions. Tags use `x.y.z` format (no `v` prefix) for BRAT/Obsidian compatibility.
 
-### 1. Version Bump
+### CI Workflows
 
-Update version string in all three files:
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `ci.yml` | Push to any branch | Build, lint, test + trigger backend E2E |
+| `version-check.yml` | PR to main | Blocks merge if version not bumped or out of sync |
+| `rc-release.yml` | PR to main (each push) | Creates BRAT-compatible pre-release (`X.Y.Z-rc.N`) |
+| `release.yml` | PR merged to main | Cleans up RCs, creates final `X.Y.Z` release |
 
-- `package.json` → `"version": "X.Y.Z"`
-- `manifest.json` → `"version": "X.Y.Z"`
-- `versions.json` → add `"X.Y.Z": "1.0.0"` (value = minAppVersion)
-
-### 2. Commit, Merge, Tag
-
-```bash
-git switch main
-git merge <branch> --no-edit
-git tag -a vX.Y.Z -m "short description"
-git push origin main --tags
-```
-
-### 3. GitHub Release
+### 1. Version Bump (only manual step)
 
 ```bash
-gh release create vX.Y.Z \
-  main.js manifest.json styles.css \
-  --title "vX.Y.Z: Short title" \
-  --notes "Release notes in markdown"
+npm version patch   # or minor, major
 ```
 
-Required assets: `main.js`, `manifest.json`, `styles.css` — Obsidian reads these from the release.
+This updates `package.json`, runs `version-bump.mjs` to sync `manifest.json` + `versions.json`, and commits.
+
+### 2. Push to PR → RC Pre-releases
+
+Every push to a PR targeting main automatically:
+- Builds and tests the plugin
+- Creates an RC tag (`X.Y.Z-rc.1`, `rc.2`, ...) incrementing automatically
+- Publishes a GitHub pre-release with `main.js`, `manifest.json`, `styles.css`
+- Install via BRAT: add repo with frozen version `X.Y.Z-rc.N`
+
+### 3. Merge PR → Final Release
+
+Merging the PR to main automatically:
+- Deletes all RC tags and pre-releases for that version
+- Creates annotated tag `X.Y.Z` on the merge commit
+- Publishes final GitHub release with assets and auto-generated notes
 
 ### 4. Deploy to Local Vault
 
@@ -121,5 +125,9 @@ cp main.js manifest.json styles.css "/home/open-claw/Obsidian Vault/.obsidian/pl
 ```
 
 Restart Obsidian or disable/re-enable the plugin to pick up changes.
+
+### Branch Protection (GitHub Settings)
+
+Required status checks on `main`: `build-and-test`, `version-check / version-check`
 
 @/home/open-claw/documents/code-projects/ops-agent/docs/self-updating-docs.md
