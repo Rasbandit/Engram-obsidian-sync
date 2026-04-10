@@ -44,10 +44,10 @@ Doc-only changes (CLAUDE.md, docs/) can be committed and pushed directly to main
 **Tests are the spec. If a test fails, fix the app — not the test.**
 
 ```bash
-npm test              # Run all 223 unit tests
-npm test -- --verbose # Verbose output
-npm test -- --coverage # With coverage report
-npm run build         # Build the plugin (production)
+bun test              # Run all 223 unit tests
+bun test --verbose    # Verbose output
+bun test --coverage   # With coverage report
+bun run build         # Build the plugin (production)
 ```
 
 ### Test files (223 tests across 8 files)
@@ -65,8 +65,7 @@ npm run build         # Build the plugin (production)
 
 ### Test configuration
 
-- **Jest config:** `jest.config.js` — ts-jest preset, roots in `src/` and `tests/`
-- **Test tsconfig:** `tsconfig.test.json` — extends main tsconfig with `noImplicitAny: false` (tests use `as any` for mocks)
+- **Bun test config:** `bunfig.toml` — preloads `tests/preload.ts` for Obsidian module mocks
 - **Obsidian mock:** `tests/__mocks__/obsidian.ts` — minimal mocks for TFile, Plugin, Modal, requestUrl, etc.
 - **Coverage thresholds:** 40% minimum for branches, functions, lines, statements
 
@@ -74,11 +73,15 @@ npm run build         # Build the plugin (production)
 
 `settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`, `channel.ts`, `dev-log.ts`
 
+## Package Manager
+
+**Use `bun`, not `npm`.** The only exception is `npm version patch|minor|major` which requires npm's lifecycle hooks to run `version-bump.mjs`. All other commands (`install`, `test`, `build`, `run`, `lint`) must use `bun`.
+
 ## Build & Install
 
 ```bash
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## Release Process
@@ -120,7 +123,7 @@ Merging the PR to main automatically:
 ### 4. Deploy to Local Vault
 
 ```bash
-npm run build
+bun run build
 cp main.js manifest.json styles.css "/home/open-claw/Obsidian Vault/.obsidian/plugins/engram-sync/"
 ```
 
