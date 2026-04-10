@@ -75,7 +75,7 @@ bun run build         # Build the plugin (production)
 
 ## Package Manager
 
-**Use `bun`, not `npm`.** The only exception is `npm version patch|minor|major` which requires npm's lifecycle hooks to run `version-bump.mjs`. All other commands (`install`, `test`, `build`, `run`, `lint`) must use `bun`.
+**Use `bun`, not `npm`.** The only exception is `npm version patch|minor|major` which requires npm's lifecycle hooks to run `version-bump.mjs`. All other commands (`install`, `test`, `build`, `run`, `lint`, `audit`) must use `bun`.
 
 ## Build & Install
 
