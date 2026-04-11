@@ -145,7 +145,9 @@ export class EngramApi {
 			return resp.json as NoteResponse;
 		} catch (e) {
 			if (typeof e === "object" && e !== null && (e as { status?: number }).status === 409) {
-				return (e as { json: VersionConflictResponse }).json;
+				const err = e as { json?: VersionConflictResponse; text?: string };
+				if (err.json) return err.json;
+				if (err.text) return JSON.parse(err.text) as VersionConflictResponse;
 			}
 			throw e;
 		}

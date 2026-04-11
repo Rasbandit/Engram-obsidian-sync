@@ -1331,7 +1331,17 @@ export class SyncEngine {
 		// vault.modify() writes to disk but doesn't always update the live editor.
 		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
 		if (activeView?.file?.path === file.path) {
-			activeView.editor.setValue(content);
+			const editor = activeView.editor;
+			const cursor = editor.getCursor();
+			const scroll = editor.getScrollInfo();
+			editor.setValue(content);
+			// Restore cursor (clamped to new content bounds) and scroll position
+			const lastLine = editor.lastLine();
+			editor.setCursor({
+				line: Math.min(cursor.line, lastLine),
+				ch: cursor.ch,
+			});
+			editor.scrollTo(scroll.left, scroll.top);
 		}
 	}
 

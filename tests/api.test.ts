@@ -151,6 +151,31 @@ describe("EngramApi", () => {
 			);
 			expect(result).toEqual({ path: "Notes/Test.md", status: "created" });
 		});
+
+		test("returns conflict response on 409 with json body", async () => {
+			const conflictBody = {
+				conflict: true,
+				server_note: { path: "test.md", content: "server", version: 5, mtime: 100 },
+			};
+			mockRequestUrl.mockRejectedValueOnce({ status: 409, json: conflictBody });
+			const result = await api.pushNote("test.md", "local", 100, 3);
+			expect("conflict" in result).toBe(true);
+		});
+
+		test("returns conflict response on 409 without json (text body only)", async () => {
+			// Obsidian requestUrl may throw without .json on non-2xx
+			mockRequestUrl.mockRejectedValueOnce({
+				status: 409,
+				text: '{"conflict":true,"server_note":{"path":"test.md","content":"server","version":5,"mtime":100}}',
+			});
+			const result = await api.pushNote("test.md", "local", 100, 3);
+			expect("conflict" in result).toBe(true);
+		});
+
+		test("throws on non-409 errors", async () => {
+			mockRequestUrl.mockRejectedValueOnce({ status: 500 });
+			await expect(api.pushNote("test.md", "content", 100)).rejects.toEqual({ status: 500 });
+		});
 	});
 
 	describe("getChanges", () => {
