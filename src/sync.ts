@@ -944,7 +944,21 @@ export class SyncEngine {
 						},
 						attachment.content_base64,
 					);
+				} else if (event.content !== undefined) {
+					// Use inline content from the broadcast — no extra HTTP roundtrip
+					await this.applyChange({
+						path: event.path,
+						title: event.title ?? "",
+						content: event.content,
+						folder: event.folder ?? "",
+						tags: event.tags ?? [],
+						mtime: event.mtime ?? Date.now(),
+						updated_at: event.updated_at ?? new Date().toISOString(),
+						deleted: false,
+						version: event.version,
+					});
 				} else {
+					// Fallback: fetch content via GET (e.g., folder rename broadcasts)
 					const note = await this.api.getNote(event.path);
 					await this.applyChange({
 						path: note.path,
@@ -960,7 +974,7 @@ export class SyncEngine {
 			} catch (e) {
 				// biome-ignore lint/suspicious/noConsole: error boundary
 				console.error(
-					`Engram Sync: failed to fetch content for WebSocket event ${event.path}`,
+					`Engram Sync: failed to apply WebSocket event ${event.path}`,
 					e,
 				);
 			}

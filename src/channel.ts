@@ -172,12 +172,19 @@ export class NoteChannel {
 		}
 
 		if (event === "note_changed" && payload) {
-			const p = payload as { event_type: string; path: string; kind?: string };
+			const p = payload as Record<string, unknown>;
 			const streamEvent: NoteStreamEvent = {
 				event_type: p.event_type as "upsert" | "delete",
-				path: p.path,
+				path: p.path as string,
 				timestamp: Date.now(),
 				kind: (p.kind as "note" | "attachment") ?? "note",
+				content: p.content as string | undefined,
+				title: p.title as string | undefined,
+				folder: p.folder as string | undefined,
+				tags: p.tags as string[] | undefined,
+				mtime: p.mtime as number | undefined,
+				updated_at: p.updated_at as string | undefined,
+				version: p.version as number | undefined,
 			};
 			rlog().info("channel", `Event: ${streamEvent.event_type} ${streamEvent.path}`);
 			this.onEvent?.(streamEvent);
