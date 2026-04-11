@@ -67,6 +67,10 @@ const mockApp = {
 		getFiles: jest.fn().mockReturnValue([]),
 		getAbstractFileByPath: jest.fn().mockReturnValue(null),
 		modify: jest.fn().mockResolvedValue(undefined),
+		process: jest.fn().mockImplementation((_file: any, fn: (data: string) => string) => {
+			fn(""); // call the transform function
+			return Promise.resolve("");
+		}),
 		modifyBinary: jest.fn().mockResolvedValue(undefined),
 		create: jest.fn().mockResolvedValue(undefined),
 		createBinary: jest.fn().mockResolvedValue(undefined),
@@ -81,6 +85,21 @@ const mockApp = {
 } as any;
 
 const mockSaveData = jest.fn().mockResolvedValue(undefined);
+
+/** Helper: get the content that was written via vault.process or vault.modify */
+function getWrittenContent(): string | undefined {
+	if (mockApp.vault.process.mock.calls.length > 0) {
+		const lastCall =
+			mockApp.vault.process.mock.calls[mockApp.vault.process.mock.calls.length - 1];
+		return lastCall[1](""); // call transform fn
+	}
+	if (mockApp.vault.modify.mock.calls.length > 0) {
+		const lastCall =
+			mockApp.vault.modify.mock.calls[mockApp.vault.modify.mock.calls.length - 1];
+		return lastCall[1];
+	}
+	return undefined;
+}
 
 const activeEngines: SyncEngine[] = [];
 
@@ -937,7 +956,9 @@ describe("SyncEngine conflict resolution", () => {
 		);
 
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalled();
+		expect(
+			mockApp.vault.process.mock.calls.length + mockApp.vault.modify.mock.calls.length,
+		).toBeGreaterThan(0);
 	});
 
 	test("no conflict when content is identical", async () => {
@@ -999,7 +1020,7 @@ describe("SyncEngine conflict resolution", () => {
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Remote version");
+		expect(getWrittenContent()).toBe("# Remote version");
 	});
 
 	test("keep-both creates a conflict copy and keeps local", async () => {
@@ -1051,7 +1072,7 @@ describe("SyncEngine conflict resolution", () => {
 		// No onConflict handler — should default to keep-remote
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Remote version");
+		expect(getWrittenContent()).toBe("# Remote version");
 	});
 
 	test("deleted remote change does not trigger conflict", async () => {
@@ -1100,7 +1121,7 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Should NOT trigger conflict — local is stale, remote is newer
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remote version");
+		expect(getWrittenContent()).toBe("# Updated remote version");
 	});
 
 	test("still conflicts when firstSync but local file was recently modified", async () => {
@@ -1227,10 +1248,7 @@ describe("SyncEngine conflict resolution", () => {
 		// Should auto-merge without calling conflict handler
 		expect(conflictCalled).toBe(false);
 		// Vault should be modified with merged content
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(
-			localFile,
-			"# Title\nLocal A\n\nRemote B",
-		);
+		expect(getWrittenContent()).toBe("# Title\nLocal A\n\nRemote B");
 	});
 
 	test("no false conflict when remote appends to previously synced file", async () => {
@@ -1264,10 +1282,7 @@ describe("SyncEngine conflict resolution", () => {
 		);
 
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(
-			localFile,
-			"# Note\n\nOriginal\n\nAppended line",
-		);
+		expect(getWrittenContent()).toBe("# Note\n\nOriginal\n\nAppended line");
 	});
 });
 
@@ -1698,7 +1713,7 @@ describe("SyncEngine pull accuracy", () => {
 		});
 
 		expect(result).toBe(true);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remotely");
+		expect(getWrittenContent()).toBe("# Updated remotely");
 	});
 
 	test("pull returns accurate count when changes are skipped", async () => {
@@ -2512,21 +2527,21 @@ describe("modifyFile active editor refresh", () => {
 		mockApp.vault.read.mockResolvedValue("# Test\n\nContent");
 		mockApp.vault.modify.mockReset();
 		mockApp.vault.modify.mockResolvedValue(undefined);
+		mockApp.vault.process.mockReset();
+		mockApp.vault.process.mockImplementation((_file: any, fn: (data: string) => string) => {
+			fn("");
+			return Promise.resolve("");
+		});
 		(mockApi.pushNote as jest.Mock).mockReset();
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
 	});
 
-	test("saves scroll before vault.modify and restores after", async () => {
+	test("uses vault.process instead of vault.modify for scroll-safe updates", async () => {
 		const existingFile = new TFile("Notes/Open.md", Date.now() - 10000);
-		mockActiveView.file = existingFile;
-		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
 		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
 			p === "Notes/Open.md" ? existingFile : null,
 		);
 		mockApp.vault.read.mockResolvedValue("old content");
-		mockEditor.getScrollInfo.mockReturnValue({ left: 0, top: 200 });
-		mockEditor.getCursor.mockReturnValue({ line: 5, ch: 3 });
-		mockEditor.lastLine.mockReturnValue(10);
 
 		const engine = createEngine();
 		engine.syncState.set("Notes/Open.md", { hash: fnv1a("old content"), version: 1 });
@@ -2543,34 +2558,32 @@ describe("modifyFile active editor refresh", () => {
 			version: 2,
 		});
 
-		// Scroll/cursor captured before vault.modify
-		expect(mockEditor.getScrollInfo).toHaveBeenCalled();
-		expect(mockEditor.getCursor).toHaveBeenCalled();
+		// Should use vault.process (scroll-safe) not vault.modify
+		expect(mockApp.vault.process).toHaveBeenCalled();
+		expect(mockApp.vault.modify).not.toHaveBeenCalled();
 
-		// Scroll restoration happens after a setTimeout — advance timers
-		await new Promise((r) => setTimeout(r, 100));
-
-		expect(mockEditor.setCursor).toHaveBeenCalledWith({ line: 5, ch: 3 });
-		expect(mockEditor.scrollTo).toHaveBeenCalledWith(0, 200);
+		// The transform function should return the new content
+		const transformFn = mockApp.vault.process.mock.calls[0][1];
+		expect(transformFn("anything")).toBe("new content from server");
 	});
 
-	test("does not restore scroll when a different file is active", async () => {
-		const existingFile = new TFile("Notes/Target.md", Date.now() - 10000);
-		const differentFile = new TFile("Notes/Other.md", Date.now());
-		mockActiveView.file = differentFile;
-		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
+	test("falls back to vault.modify when vault.process is unavailable", async () => {
+		const existingFile = new TFile("Notes/Fallback.md", Date.now() - 10000);
 		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
-			p === "Notes/Target.md" ? existingFile : null,
+			p === "Notes/Fallback.md" ? existingFile : null,
 		);
 		mockApp.vault.read.mockResolvedValue("old content");
+		// Simulate older Obsidian without vault.process
+		const savedProcess = mockApp.vault.process;
+		mockApp.vault.process = undefined;
 
 		const engine = createEngine();
-		engine.syncState.set("Notes/Target.md", { hash: fnv1a("old content"), version: 1 });
+		engine.syncState.set("Notes/Fallback.md", { hash: fnv1a("old content"), version: 1 });
 
 		await engine.applyChange({
-			path: "Notes/Target.md",
-			title: "Target",
-			content: "updated content",
+			path: "Notes/Fallback.md",
+			title: "Fallback",
+			content: "new content",
 			folder: "Notes",
 			tags: [],
 			mtime: Date.now() / 1000,
@@ -2578,61 +2591,17 @@ describe("modifyFile active editor refresh", () => {
 			deleted: false,
 			version: 2,
 		});
-
-		await new Promise((r) => setTimeout(r, 100));
 
 		expect(mockApp.vault.modify).toHaveBeenCalled();
-		expect(mockEditor.scrollTo).not.toHaveBeenCalled();
+		mockApp.vault.process = savedProcess;
 	});
 
-	test("clamps cursor when content shrinks", async () => {
-		const existingFile = new TFile("Notes/Shrink.md", Date.now() - 10000);
-		mockActiveView.file = existingFile;
-		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
-		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
-			p === "Notes/Shrink.md" ? existingFile : null,
-		);
-		mockApp.vault.read.mockResolvedValue("line1\nline2\nline3\nline4\nline5");
-		mockEditor.getCursor.mockReturnValue({ line: 4, ch: 0 });
-		mockEditor.getScrollInfo.mockReturnValue({ left: 0, top: 0 });
-		// After vault.modify, new content only has 2 lines
-		mockEditor.lastLine.mockReturnValue(1);
-
-		const engine = createEngine();
-		engine.syncState.set("Notes/Shrink.md", {
-			hash: fnv1a("line1\nline2\nline3\nline4\nline5"),
-			version: 1,
-		});
-
-		await engine.applyChange({
-			path: "Notes/Shrink.md",
-			title: "Shrink",
-			content: "line1\nline2",
-			folder: "Notes",
-			tags: [],
-			mtime: Date.now() / 1000,
-			updated_at: new Date().toISOString(),
-			deleted: false,
-			version: 2,
-		});
-
-		await new Promise((r) => setTimeout(r, 100));
-
-		// Cursor clamped to last line
-		expect(mockEditor.setCursor).toHaveBeenCalledWith({ line: 1, ch: 0 });
-	});
-
-	test("restores scroll on WebSocket stream event", async () => {
+	test("uses vault.process on WebSocket stream event", async () => {
 		const existingFile = new TFile("Notes/WS.md", Date.now() - 10000);
-		mockActiveView.file = existingFile;
-		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
 		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
 			p === "Notes/WS.md" ? existingFile : null,
 		);
 		mockApp.vault.read.mockResolvedValue("original");
-		mockEditor.getScrollInfo.mockReturnValue({ left: 0, top: 300 });
-		mockEditor.getCursor.mockReturnValue({ line: 2, ch: 0 });
-		mockEditor.lastLine.mockReturnValue(5);
 
 		const engine = createEngine();
 		engine.syncState.set("Notes/WS.md", { hash: fnv1a("original"), version: 1 });
@@ -2650,9 +2619,7 @@ describe("modifyFile active editor refresh", () => {
 			version: 2,
 		});
 
-		await new Promise((r) => setTimeout(r, 100));
-
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(existingFile, "updated via websocket");
-		expect(mockEditor.scrollTo).toHaveBeenCalledWith(0, 300);
+		expect(mockApp.vault.process).toHaveBeenCalled();
+		expect(mockApp.vault.modify).not.toHaveBeenCalled();
 	});
 });

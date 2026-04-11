@@ -1323,26 +1323,15 @@ export class SyncEngine {
 	}
 
 	/** Create a text file, ensuring parent folders exist. */
-	/** Modify a file and restore scroll if it's currently open in the editor.
-	 *  vault.modify() can trigger a full re-render that resets scroll position. */
+	/** Modify a file using vault.process() when available (scroll-safe),
+	 *  falling back to vault.modify() for older Obsidian versions. */
 	private async modifyFile(file: TFile, content: string): Promise<void> {
-		// Capture scroll position before modify if the file is active
-		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
-		const isActive = activeView?.file?.path === file.path;
-		const scroll = isActive ? activeView.editor.getScrollInfo() : null;
-		const cursor = isActive ? activeView.editor.getCursor() : null;
-
-		await this.app.vault.modify(file, content);
-
-		// Restore scroll/cursor after vault.modify re-renders the editor
-		if (scroll && cursor && activeView) {
-			// Wait for Obsidian's re-render to complete before restoring
-			setTimeout(() => {
-				const editor = activeView.editor;
-				const lastLine = editor.lastLine();
-				editor.setCursor({ line: Math.min(cursor.line, lastLine), ch: cursor.ch });
-				editor.scrollTo(scroll.left, scroll.top);
-			}, 50);
+		if (this.app.vault.process) {
+			// vault.process() does an atomic read-modify-write that updates
+			// the editor in-place without resetting scroll position.
+			await this.app.vault.process(file, () => content);
+		} else {
+			await this.app.vault.modify(file, content);
 		}
 	}
 
