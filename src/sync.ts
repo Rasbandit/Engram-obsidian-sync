@@ -1,7 +1,15 @@
 /**
  * Sync engine — handles push/pull logic, debouncing, and ignore patterns.
  */
-import { type App, Notice, type TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
+import {
+	type App,
+	MarkdownView,
+	Notice,
+	type TAbstractFile,
+	TFile,
+	TFolder,
+	normalizePath,
+} from "obsidian";
 import { type EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "./api";
 import type { BaseStore } from "./base-store";
 import { devLog } from "./dev-log";
@@ -530,7 +538,7 @@ export class SyncEngine {
 							);
 							const localFile = this.app.vault.getAbstractFileByPath(file.path);
 							if (localFile && localFile instanceof TFile) {
-								await this.app.vault.modify(localFile, merge.merged);
+								await this.modifyFile(localFile, merge.merged);
 							}
 							if (!("conflict" in mergeResp)) {
 								const np = normalizePath(file.path);
@@ -582,7 +590,7 @@ export class SyncEngine {
 					} else if (resolution.choice === "keep-remote") {
 						const localFile = this.app.vault.getAbstractFileByPath(file.path);
 						if (localFile && localFile instanceof TFile) {
-							await this.app.vault.modify(localFile, serverNote.content);
+							await this.modifyFile(localFile, serverNote.content);
 							const np = normalizePath(file.path);
 							this.syncState.set(np, {
 								hash: fnv1a(serverNote.content),
@@ -598,7 +606,7 @@ export class SyncEngine {
 						);
 						const localFile = this.app.vault.getAbstractFileByPath(file.path);
 						if (localFile && localFile instanceof TFile) {
-							await this.app.vault.modify(localFile, resolution.mergedContent);
+							await this.modifyFile(localFile, resolution.mergedContent);
 						}
 						if (!("conflict" in mergeResp)) {
 							const np = normalizePath(file.path);
@@ -1049,7 +1057,7 @@ export class SyncEngine {
 				if (pullBase) {
 					const merge = threeWayMerge(pullBase.content, localContent, change.content);
 					if (merge.clean) {
-						await this.app.vault.modify(existing, merge.merged);
+						await this.modifyFile(existing, merge.merged);
 						this.syncState.set(normalized, {
 							hash: fnv1a(merge.merged),
 							version: change.version,
@@ -1154,7 +1162,7 @@ export class SyncEngine {
 				if (resolution.choice === "merge" && resolution.mergedContent != null) {
 					// Apply user-merged content locally and push to server
 					try {
-						await this.app.vault.modify(existing, resolution.mergedContent);
+						await this.modifyFile(existing, resolution.mergedContent);
 						this.syncState.set(normalized, {
 							hash: fnv1a(resolution.mergedContent),
 							version: change.version,
@@ -1193,7 +1201,7 @@ export class SyncEngine {
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
-			await this.app.vault.modify(existing, change.content);
+			await this.modifyFile(existing, change.content);
 			this.syncState.set(normalized, {
 				hash: fnv1a(change.content),
 				version: change.version,
@@ -1315,6 +1323,18 @@ export class SyncEngine {
 	}
 
 	/** Create a text file, ensuring parent folders exist. */
+	/** Modify a file and refresh the editor if it's currently open. */
+	private async modifyFile(file: TFile, content: string): Promise<void> {
+		await this.app.vault.modify(file, content);
+
+		// If the file is open in the active editor, refresh the codemirror buffer.
+		// vault.modify() writes to disk but doesn't always update the live editor.
+		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
+		if (activeView?.file?.path === file.path) {
+			activeView.editor.setValue(content);
+		}
+	}
+
 	private async createFileWithFolders(normalized: string, content: string): Promise<void> {
 		const folder = normalized.includes("/")
 			? normalized.substring(0, normalized.lastIndexOf("/"))

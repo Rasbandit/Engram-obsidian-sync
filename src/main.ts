@@ -488,8 +488,8 @@ export default class EngramSyncPlugin extends Plugin {
 		this.noteStream?.disconnect();
 		this.noteStream = null;
 
-		const { apiUrl, apiKey } = this.settings;
-		if (!apiUrl || !apiKey) {
+		const hasAuth = this.settings.apiKey || this.settings.refreshToken;
+		if (!this.settings.apiUrl || !hasAuth) {
 			this.liveConnected = false;
 			this.updateStatusBar(this.syncEngine.getStatus());
 			return;
