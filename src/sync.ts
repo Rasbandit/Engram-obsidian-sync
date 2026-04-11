@@ -1335,6 +1335,8 @@ export class SyncEngine {
 			const cursor = editor.getCursor();
 			const scroll = editor.getScrollInfo();
 			editor.setValue(content);
+			// Yield to let CodeMirror re-render before restoring position
+			await new Promise((r) => setTimeout(r, 0));
 			// Restore cursor (clamped to new content bounds) and scroll position
 			const lastLine = editor.lastLine();
 			editor.setCursor({
