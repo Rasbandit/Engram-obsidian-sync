@@ -973,10 +973,7 @@ export class SyncEngine {
 				}
 			} catch (e) {
 				// biome-ignore lint/suspicious/noConsole: error boundary
-				console.error(
-					`Engram Sync: failed to apply WebSocket event ${event.path}`,
-					e,
-				);
+				console.error(`Engram Sync: failed to apply WebSocket event ${event.path}`, e);
 			}
 		}
 	}
