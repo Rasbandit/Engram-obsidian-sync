@@ -5,7 +5,6 @@ import {
 	type App,
 	MarkdownView,
 	Notice,
-	Platform,
 	type TAbstractFile,
 	TFile,
 	TFolder,
@@ -1324,23 +1323,26 @@ export class SyncEngine {
 	}
 
 	/** Create a text file, ensuring parent folders exist. */
-	/** Modify a file and refresh the editor if it's currently open. */
+	/** Modify a file and restore scroll if it's currently open in the editor.
+	 *  vault.modify() can trigger a full re-render that resets scroll position. */
 	private async modifyFile(file: TFile, content: string): Promise<void> {
+		// Capture scroll position before modify if the file is active
+		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
+		const isActive = activeView?.file?.path === file.path;
+		const scroll = isActive ? activeView.editor.getScrollInfo() : null;
+		const cursor = isActive ? activeView.editor.getCursor() : null;
+
 		await this.app.vault.modify(file, content);
 
-		// On mobile, vault.modify() updates the editor natively — no extra work needed.
-		if (Platform?.isMobile) return;
-
-		// On desktop, vault.modify() writes to disk but doesn't always refresh
-		// the active editor buffer. Use replaceRange() instead of setValue() to
-		// go through CodeMirror's transaction system, which preserves scroll.
-		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
-		if (activeView?.file?.path === file.path) {
-			const editor = activeView.editor;
-			if (editor.getValue() === content) return;
-			const lastLine = editor.lastLine();
-			const lastCh = editor.getLine(lastLine).length;
-			editor.replaceRange(content, { line: 0, ch: 0 }, { line: lastLine, ch: lastCh });
+		// Restore scroll/cursor after vault.modify re-renders the editor
+		if (scroll && cursor && activeView) {
+			// Wait for Obsidian's re-render to complete before restoring
+			setTimeout(() => {
+				const editor = activeView.editor;
+				const lastLine = editor.lastLine();
+				editor.setCursor({ line: Math.min(cursor.line, lastLine), ch: cursor.ch });
+				editor.scrollTo(scroll.left, scroll.top);
+			}, 50);
 		}
 	}
 
