@@ -164,4 +164,11 @@ export class MarkdownView {
 	file: TFile | null = null;
 }
 
+export const Platform = {
+	isMobile: false,
+	isMobileApp: false,
+	isDesktop: true,
+	isDesktopApp: true,
+};
+
 export class App {}

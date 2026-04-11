@@ -50,6 +50,8 @@ const mockEditor = {
 	getScrollInfo: jest.fn().mockReturnValue({ left: 0, top: 0 }),
 	scrollTo: jest.fn(),
 	lastLine: jest.fn().mockReturnValue(0),
+	getLine: jest.fn().mockReturnValue(""),
+	replaceRange: jest.fn(),
 };
 
 const mockActiveView = {
@@ -2514,7 +2516,7 @@ describe("modifyFile active editor refresh", () => {
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
 	});
 
-	test("refreshes editor when synced file is currently open", async () => {
+	test("uses replaceRange on desktop when synced file is currently open", async () => {
 		const existingFile = new TFile("Notes/Open.md", Date.now() - 10000);
 		mockActiveView.file = existingFile;
 		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
@@ -2522,12 +2524,13 @@ describe("modifyFile active editor refresh", () => {
 			p === "Notes/Open.md" ? existingFile : null,
 		);
 		mockApp.vault.read.mockResolvedValue("old content");
+		// Editor still has old content after vault.modify (desktop quirk)
+		mockEditor.getValue.mockReturnValue("old content");
+		mockEditor.lastLine.mockReturnValue(0);
+		mockEditor.getLine.mockReturnValue("old content");
 
 		const engine = createEngine();
-		// Seed syncState so applyChange doesn't detect conflict
 		engine.syncState.set("Notes/Open.md", { hash: fnv1a("old content"), version: 1 });
-
-		mockEditor.lastLine.mockReturnValue(5);
 
 		await engine.applyChange({
 			path: "Notes/Open.md",
@@ -2541,14 +2544,13 @@ describe("modifyFile active editor refresh", () => {
 			version: 2,
 		});
 
-		// vault.modify should have been called with the correct content
-		const modifyCall = mockApp.vault.modify.mock.calls.find(
-			(c: any[]) => c[0]?.path === "Notes/Open.md",
+		// Should use replaceRange (scroll-preserving) not setValue
+		expect(mockEditor.replaceRange).toHaveBeenCalledWith(
+			"new content from server",
+			{ line: 0, ch: 0 },
+			{ line: 0, ch: 11 },
 		);
-		expect(modifyCall).toBeTruthy();
-		expect(modifyCall[1]).toBe("new content from server");
-		// editor.setValue should refresh the active editor
-		expect(mockEditor.setValue).toHaveBeenCalledWith("new content from server");
+		expect(mockEditor.setValue).not.toHaveBeenCalled();
 	});
 
 	test("does not touch editor when a different file is active", async () => {
@@ -2577,33 +2579,28 @@ describe("modifyFile active editor refresh", () => {
 		});
 
 		expect(mockApp.vault.modify).toHaveBeenCalled();
+		expect(mockEditor.replaceRange).not.toHaveBeenCalled();
 		expect(mockEditor.setValue).not.toHaveBeenCalled();
 	});
 
-	test("preserves cursor position and scroll on editor refresh", async () => {
-		const existingFile = new TFile("Notes/Scroll.md", Date.now() - 10000);
+	test("skips editor update when content already matches", async () => {
+		const existingFile = new TFile("Notes/Same.md", Date.now() - 10000);
 		mockActiveView.file = existingFile;
 		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
 		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
-			p === "Notes/Scroll.md" ? existingFile : null,
+			p === "Notes/Same.md" ? existingFile : null,
 		);
-		mockApp.vault.read.mockResolvedValue("line1\nline2\nline3");
+		mockApp.vault.read.mockResolvedValue("old content");
+		// Editor already has the new content (vault.modify worked)
+		mockEditor.getValue.mockReturnValue("new content");
 
 		const engine = createEngine();
-		engine.syncState.set("Notes/Scroll.md", {
-			hash: fnv1a("line1\nline2\nline3"),
-			version: 1,
-		});
-
-		// Simulate cursor at line 2, scrolled down 150px
-		mockEditor.getCursor.mockReturnValue({ line: 2, ch: 5 });
-		mockEditor.getScrollInfo.mockReturnValue({ left: 0, top: 150 });
-		mockEditor.lastLine.mockReturnValue(3);
+		engine.syncState.set("Notes/Same.md", { hash: fnv1a("old content"), version: 1 });
 
 		await engine.applyChange({
-			path: "Notes/Scroll.md",
-			title: "Scroll",
-			content: "line1\nline2\nline3\nline4",
+			path: "Notes/Same.md",
+			title: "Same",
+			content: "new content",
 			folder: "Notes",
 			tags: [],
 			mtime: Date.now() / 1000,
@@ -2612,48 +2609,11 @@ describe("modifyFile active editor refresh", () => {
 			version: 2,
 		});
 
-		expect(mockEditor.setValue).toHaveBeenCalledWith("line1\nline2\nline3\nline4");
-		expect(mockEditor.setCursor).toHaveBeenCalledWith({ line: 2, ch: 5 });
-		expect(mockEditor.scrollTo).toHaveBeenCalledWith(0, 150);
+		// Editor already has correct content — no replaceRange needed
+		expect(mockEditor.replaceRange).not.toHaveBeenCalled();
 	});
 
-	test("clamps cursor to last line when content shrinks", async () => {
-		const existingFile = new TFile("Notes/Shrink.md", Date.now() - 10000);
-		mockActiveView.file = existingFile;
-		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
-		mockApp.vault.getAbstractFileByPath.mockImplementation((p: string) =>
-			p === "Notes/Shrink.md" ? existingFile : null,
-		);
-		mockApp.vault.read.mockResolvedValue("line1\nline2\nline3\nline4\nline5");
-
-		const engine = createEngine();
-		engine.syncState.set("Notes/Shrink.md", {
-			hash: fnv1a("line1\nline2\nline3\nline4\nline5"),
-			version: 1,
-		});
-
-		// Cursor was at line 4, but new content only has 2 lines
-		mockEditor.getCursor.mockReturnValue({ line: 4, ch: 0 });
-		mockEditor.getScrollInfo.mockReturnValue({ left: 0, top: 0 });
-		mockEditor.lastLine.mockReturnValue(1); // 0-indexed, 2 lines
-
-		await engine.applyChange({
-			path: "Notes/Shrink.md",
-			title: "Shrink",
-			content: "line1\nline2",
-			folder: "Notes",
-			tags: [],
-			mtime: Date.now() / 1000,
-			updated_at: new Date().toISOString(),
-			deleted: false,
-			version: 2,
-		});
-
-		// Cursor should be clamped to last line (1), not line 4
-		expect(mockEditor.setCursor).toHaveBeenCalledWith({ line: 1, ch: 0 });
-	});
-
-	test("handles WebSocket stream event with inline content", async () => {
+	test("handles WebSocket stream event with inline content on desktop", async () => {
 		const existingFile = new TFile("Notes/WS.md", Date.now() - 10000);
 		mockActiveView.file = existingFile;
 		mockApp.workspace.getActiveViewOfType.mockReturnValue(mockActiveView);
@@ -2661,10 +2621,12 @@ describe("modifyFile active editor refresh", () => {
 			p === "Notes/WS.md" ? existingFile : null,
 		);
 		mockApp.vault.read.mockResolvedValue("original");
+		mockEditor.getValue.mockReturnValue("original");
+		mockEditor.lastLine.mockReturnValue(0);
+		mockEditor.getLine.mockReturnValue("original");
 
 		const engine = createEngine();
 		engine.syncState.set("Notes/WS.md", { hash: fnv1a("original"), version: 1 });
-		mockEditor.lastLine.mockReturnValue(2);
 
 		await engine.handleStreamEvent({
 			event_type: "upsert",
@@ -2680,6 +2642,6 @@ describe("modifyFile active editor refresh", () => {
 		});
 
 		expect(mockApp.vault.modify).toHaveBeenCalledWith(existingFile, "updated via websocket");
-		expect(mockEditor.setValue).toHaveBeenCalledWith("updated via websocket");
+		expect(mockEditor.replaceRange).toHaveBeenCalled();
 	});
 });

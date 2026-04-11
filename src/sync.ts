@@ -5,6 +5,7 @@ import {
 	type App,
 	MarkdownView,
 	Notice,
+	Platform,
 	type TAbstractFile,
 	TFile,
 	TFolder,
@@ -1327,23 +1328,19 @@ export class SyncEngine {
 	private async modifyFile(file: TFile, content: string): Promise<void> {
 		await this.app.vault.modify(file, content);
 
-		// If the file is open in the active editor, refresh the codemirror buffer.
-		// vault.modify() writes to disk but doesn't always update the live editor.
+		// On mobile, vault.modify() updates the editor natively — no extra work needed.
+		if (Platform?.isMobile) return;
+
+		// On desktop, vault.modify() writes to disk but doesn't always refresh
+		// the active editor buffer. Use replaceRange() instead of setValue() to
+		// go through CodeMirror's transaction system, which preserves scroll.
 		const activeView = this.app.workspace?.getActiveViewOfType(MarkdownView);
 		if (activeView?.file?.path === file.path) {
 			const editor = activeView.editor;
-			const cursor = editor.getCursor();
-			const scroll = editor.getScrollInfo();
-			editor.setValue(content);
-			// Yield to let CodeMirror re-render before restoring position
-			await new Promise((r) => setTimeout(r, 0));
-			// Restore cursor (clamped to new content bounds) and scroll position
+			if (editor.getValue() === content) return;
 			const lastLine = editor.lastLine();
-			editor.setCursor({
-				line: Math.min(cursor.line, lastLine),
-				ch: cursor.ch,
-			});
-			editor.scrollTo(scroll.left, scroll.top);
+			const lastCh = editor.getLine(lastLine).length;
+			editor.replaceRange(content, { line: 0, ch: 0 }, { line: lastLine, ch: lastCh });
 		}
 	}
 
