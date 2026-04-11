@@ -52,7 +52,9 @@ export class OAuthAuth implements AuthProvider {
 	private accessToken: string | null = null;
 	private expiresAt = 0;
 	private refreshFn: RefreshFn;
+	private onTokenRotated?: (newRefreshToken: string) => void;
 	private authenticated = true;
+	private inflightRefresh: Promise<string> | null = null;
 
 	/** Buffer in ms — refresh if token expires within this window. */
 	private static EXPIRY_BUFFER_MS = 60_000;
@@ -62,11 +64,13 @@ export class OAuthAuth implements AuthProvider {
 		vaultId: string | null,
 		userEmail: string | null,
 		refreshFn: RefreshFn,
+		onTokenRotated?: (newRefreshToken: string) => void,
 	) {
 		this.refreshToken = refreshToken;
 		this.vaultId = vaultId;
 		this.userEmail = userEmail;
 		this.refreshFn = refreshFn;
+		this.onTokenRotated = onTokenRotated;
 	}
 
 	async getToken(): Promise<string> {
@@ -74,12 +78,27 @@ export class OAuthAuth implements AuthProvider {
 			return this.accessToken;
 		}
 
+		// Deduplicate concurrent refresh calls — all callers share one in-flight request
+		if (this.inflightRefresh) {
+			return this.inflightRefresh;
+		}
+
+		this.inflightRefresh = this.doRefresh();
+		try {
+			return await this.inflightRefresh;
+		} finally {
+			this.inflightRefresh = null;
+		}
+	}
+
+	private async doRefresh(): Promise<string> {
 		try {
 			const result = await this.refreshFn(this.refreshToken);
 			this.accessToken = result.access_token;
 			this.refreshToken = result.refresh_token;
 			this.expiresAt = Date.now() + result.expires_in * 1000;
 			this.authenticated = true;
+			this.onTokenRotated?.(result.refresh_token);
 			return this.accessToken;
 		} catch (err) {
 			this.authenticated = false;

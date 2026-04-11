@@ -440,6 +440,10 @@ export default class EngramSyncPlugin extends Plugin {
 				this.settings.vaultId,
 				this.settings.userEmail ?? null,
 				refreshFn,
+				(newToken) => {
+					this.settings.refreshToken = newToken;
+					this.saveSettings();
+				},
 			);
 		}
 

@@ -122,4 +122,88 @@ describe("OAuthAuth", () => {
 
 		expect(auth.getRefreshToken()).toBe("engram_rt_rotated");
 	});
+
+	it("deduplicates concurrent refresh calls (race condition)", async () => {
+		let callCount = 0;
+		const slowRefresh = jest.fn(async (_token: string) => {
+			callCount++;
+			// Simulate network delay so concurrent calls overlap
+			await new Promise((r) => setTimeout(r, 50));
+			return {
+				access_token: `jwt_${callCount}`,
+				refresh_token: `engram_rt_${callCount}`,
+				expires_in: 3600,
+			};
+		});
+
+		const auth = new OAuthAuth("engram_rt_old", "vault-1", "user@test.com", slowRefresh);
+
+		// Fire 5 concurrent getToken() calls — simulates plugin startup
+		const results = await Promise.all([
+			auth.getToken(),
+			auth.getToken(),
+			auth.getToken(),
+			auth.getToken(),
+			auth.getToken(),
+		]);
+
+		// Only ONE refresh call should have been made
+		expect(slowRefresh).toHaveBeenCalledTimes(1);
+		// All callers get the same token
+		expect(new Set(results).size).toBe(1);
+	});
+
+	it("calls onTokenRotated callback after successful refresh", async () => {
+		mockRefreshFn.mockResolvedValue({
+			access_token: "jwt_123",
+			refresh_token: "engram_rt_new",
+			expires_in: 3600,
+		});
+
+		const onRotated = jest.fn();
+		const auth = new OAuthAuth(
+			"engram_rt_old",
+			"vault-1",
+			"user@test.com",
+			mockRefreshFn,
+			onRotated,
+		);
+		await auth.getToken();
+
+		expect(onRotated).toHaveBeenCalledWith("engram_rt_new");
+	});
+
+	it("does not call onTokenRotated on refresh failure", async () => {
+		mockRefreshFn.mockRejectedValue(new Error("401"));
+
+		const onRotated = jest.fn();
+		const auth = new OAuthAuth(
+			"engram_rt_old",
+			"vault-1",
+			"user@test.com",
+			mockRefreshFn,
+			onRotated,
+		);
+
+		await expect(auth.getToken()).rejects.toThrow("401");
+		expect(onRotated).not.toHaveBeenCalled();
+	});
+
+	it("retries refresh after a failed attempt (not permanently stuck)", async () => {
+		mockRefreshFn.mockRejectedValueOnce(new Error("network error")).mockResolvedValueOnce({
+			access_token: "jwt_recovered",
+			refresh_token: "engram_rt_recovered",
+			expires_in: 3600,
+		});
+
+		const auth = new OAuthAuth("engram_rt_old", "vault-1", "user@test.com", mockRefreshFn);
+
+		await expect(auth.getToken()).rejects.toThrow("network error");
+		expect(auth.isAuthenticated()).toBe(false);
+
+		// Second attempt should try again, not stay stuck
+		const token = await auth.getToken();
+		expect(token).toBe("jwt_recovered");
+		expect(auth.isAuthenticated()).toBe(true);
+	});
 });
