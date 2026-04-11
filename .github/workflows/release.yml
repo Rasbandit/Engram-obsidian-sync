@@ -51,11 +51,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
 
-          # Delete RC GitHub releases (--cleanup-tag also removes the git tag)
-          gh release list --limit 100 --json tagName --jq '.[].tagName' \
-            | grep "^${VERSION}-rc\." \
+          # Delete ALL RC releases (--cleanup-tag also removes the git tag).
+          # RCs from any version should not outlive a merge to main.
+          gh release list --limit 100 --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease) | .tagName' \
+            | grep -- '-rc\.' \
             | while read -r tag; do
                 echo "Deleting release: $tag"
                 gh release delete "$tag" --yes --cleanup-tag
@@ -63,7 +64,7 @@ jobs:
 
           # Safety net: delete any orphaned RC tags
           git fetch --tags
-          git tag -l "${VERSION}-rc.*" | while read -r tag; do
+          git tag -l "*-rc.*" | while read -r tag; do
             echo "Deleting orphaned tag: $tag"
             git push origin ":refs/tags/$tag" 2>/dev/null || true
           done
