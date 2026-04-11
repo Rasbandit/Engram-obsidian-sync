@@ -331,6 +331,57 @@ describe("SyncEngine.handleStreamEvent", () => {
 		);
 	});
 
+	test("upsert with inline content skips GET request", async () => {
+		const engine = createEngine();
+
+		await engine.handleStreamEvent({
+			event_type: "upsert",
+			path: "Notes/Inline.md",
+			timestamp: 1709345678,
+			content: "# Inline\n\nDelivered via broadcast",
+			title: "Inline",
+			folder: "Notes",
+			tags: ["test"],
+			mtime: 1709345678,
+			updated_at: "2026-03-01T12:00:00Z",
+			version: 3,
+		});
+
+		expect(mockApi.getNote).not.toHaveBeenCalled();
+		expect(mockApp.vault.create).toHaveBeenCalledWith(
+			"Notes/Inline.md",
+			"# Inline\n\nDelivered via broadcast",
+		);
+	});
+
+	test("upsert without inline content falls back to GET", async () => {
+		const engine = createEngine();
+
+		(mockApi.getNote as jest.Mock).mockResolvedValueOnce({
+			path: "Notes/Fallback.md",
+			title: "Fallback",
+			content: "# Fallback\n\nFetched via API",
+			folder: "Notes",
+			tags: [],
+			mtime: 1709345678,
+			created_at: "2026-03-01T12:00:00Z",
+			updated_at: "2026-03-01T12:00:00Z",
+		});
+
+		await engine.handleStreamEvent({
+			event_type: "upsert",
+			path: "Notes/Fallback.md",
+			timestamp: 1709345678,
+			// No content field — simulates folder rename broadcast
+		});
+
+		expect(mockApi.getNote).toHaveBeenCalledWith("Notes/Fallback.md");
+		expect(mockApp.vault.create).toHaveBeenCalledWith(
+			"Notes/Fallback.md",
+			"# Fallback\n\nFetched via API",
+		);
+	});
+
 	test("delete event trashes local file", async () => {
 		const engine = createEngine();
 		const existingFile = new TFile("Notes/ToRemove.md");

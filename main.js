@@ -2024,7 +2024,14 @@ var NoteChannel = class {
         event_type: p.event_type,
         path: p.path,
         timestamp: Date.now(),
-        kind: (_b = p.kind) != null ? _b : "note"
+        kind: (_b = p.kind) != null ? _b : "note",
+        content: p.content,
+        title: p.title,
+        folder: p.folder,
+        tags: p.tags,
+        mtime: p.mtime,
+        updated_at: p.updated_at,
+        version: p.version
       };
       rlog().info("channel", `Event: ${streamEvent.event_type} ${streamEvent.path}`);
       (_c = this.onEvent) == null ? void 0 : _c.call(this, streamEvent);
@@ -4214,7 +4221,7 @@ var SyncEngine = class {
   }
   /** Handle a WebSocket stream event (upsert or delete). */
   async handleStreamEvent(event) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f, _g;
     if (this.shouldIgnore(event.path)) return;
     devLog().log("ws", `${event.event_type} ${(_a = event.kind) != null ? _a : "note"}: ${event.path}`);
     rlog().info("ws", `Event: ${event.event_type} ${(_b = event.kind) != null ? _b : "note"}: ${event.path}`);
@@ -4251,6 +4258,18 @@ var SyncEngine = class {
             },
             attachment.content_base64
           );
+        } else if (event.content !== void 0) {
+          await this.applyChange({
+            path: event.path,
+            title: (_c = event.title) != null ? _c : "",
+            content: event.content,
+            folder: (_d = event.folder) != null ? _d : "",
+            tags: (_e = event.tags) != null ? _e : [],
+            mtime: (_f = event.mtime) != null ? _f : Date.now(),
+            updated_at: (_g = event.updated_at) != null ? _g : (/* @__PURE__ */ new Date()).toISOString(),
+            deleted: false,
+            version: event.version
+          });
         } else {
           const note = await this.api.getNote(event.path);
           await this.applyChange({
@@ -4266,7 +4285,7 @@ var SyncEngine = class {
         }
       } catch (e) {
         console.error(
-          `Engram Sync: failed to fetch content for WebSocket event ${event.path}`,
+          `Engram Sync: failed to apply WebSocket event ${event.path}`,
           e
         );
       }

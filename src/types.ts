@@ -89,6 +89,14 @@ export interface NoteStreamEvent {
 	path: string;
 	timestamp: number;
 	kind?: "note" | "attachment";
+	/** Inline note data — present when the server includes content in the broadcast. */
+	content?: string;
+	title?: string;
+	folder?: string;
+	tags?: string[];
+	mtime?: number;
+	updated_at?: string;
+	version?: number;
 }
 
 /** A queued change waiting to be pushed when connectivity returns. */
