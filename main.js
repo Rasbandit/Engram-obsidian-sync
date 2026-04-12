@@ -3269,8 +3269,8 @@ var EngramSyncSettingTab = class extends import_obsidian7.PluginSettingTab {
     const detected = [];
     for (const dir of PROBLEMATIC_DIRS) {
       if (currentIgnores.includes(dir.pattern)) continue;
-      const folder = this.app.vault.getAbstractFileByPath(dir.label);
-      if (folder && folder instanceof import_obsidian7.TFolder) {
+      const folder = this.app.vault.getFolderByPath(dir.label);
+      if (folder) {
         let count = 0;
         const walk = (f) => {
           for (const child of f.children) {
