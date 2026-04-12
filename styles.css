@@ -1,5 +1,10 @@
 /* Engram Sync plugin styles */
 
+/* Status bar */
+.engram-status-bar-clickable {
+	cursor: pointer;
+}
+
 /* Search — shared between modal and sidebar */
 .engram-search-input {
 	width: 100%;

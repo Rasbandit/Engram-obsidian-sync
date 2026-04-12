@@ -1,14 +1,15 @@
+import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { TFile } from "obsidian";
 import type { EngramApi } from "../src/api";
-import { SyncEngine } from "../src/sync";
+import { SyncEngine, fnv1a } from "../src/sync";
 import { DEFAULT_SETTINGS } from "../src/types";
 
 // Mock the API
 const mockApi = {
-	pushNote: jest.fn().mockResolvedValue({ note: {}, chunks_indexed: 1 }),
-	getChanges: jest.fn().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
-	deleteNote: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
-	getNote: jest.fn().mockResolvedValue({
+	pushNote: mock().mockResolvedValue({ note: {}, chunks_indexed: 1 }),
+	getChanges: mock().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
+	deleteNote: mock().mockResolvedValue({ deleted: true, path: "" }),
+	getNote: mock().mockResolvedValue({
 		path: "Notes/Remote.md",
 		title: "Remote Note",
 		content: "# Remote\n\nFrom SSE",
@@ -18,10 +19,10 @@ const mockApi = {
 		created_at: "2026-03-01T12:00:00Z",
 		updated_at: "2026-03-01T12:00:00Z",
 	}),
-	health: jest.fn().mockResolvedValue(true),
-	ping: jest.fn().mockResolvedValue({ ok: true }),
-	pushAttachment: jest.fn().mockResolvedValue({ attachment: {} }),
-	getAttachment: jest.fn().mockResolvedValue({
+	health: mock().mockResolvedValue(true),
+	ping: mock().mockResolvedValue({ ok: true }),
+	pushAttachment: mock().mockResolvedValue({ attachment: {} }),
+	getAttachment: mock().mockResolvedValue({
 		path: "Assets/image.png",
 		content_base64: "AQID",
 		mime_type: "image/png",
@@ -30,37 +31,78 @@ const mockApi = {
 		created_at: "2026-03-01T12:00:00Z",
 		updated_at: "2026-03-01T12:00:00Z",
 	}),
-	deleteAttachment: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
+	deleteAttachment: mock().mockResolvedValue({ deleted: true, path: "" }),
 	getAttachmentChanges: jest
 		.fn()
 		.mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
-	getRateLimit: jest.fn().mockResolvedValue(0),
-	getManifest: jest.fn().mockResolvedValue(null),
+	getRateLimit: mock().mockResolvedValue(0),
+	getManifest: mock().mockResolvedValue(null),
 	registerVault: jest
 		.fn()
 		.mockResolvedValue({ id: 1, name: "Test", slug: "test", is_default: true }),
 } as unknown as EngramApi;
 
 // Mock the Obsidian App
+const mockEditor = {
+	getValue: mock().mockReturnValue(""),
+	setValue: mock(),
+	getCursor: mock().mockReturnValue({ line: 0, ch: 0 }),
+	setCursor: mock(),
+	getScrollInfo: mock().mockReturnValue({ left: 0, top: 0 }),
+	scrollTo: mock(),
+	lastLine: mock().mockReturnValue(0),
+	getLine: mock().mockReturnValue(""),
+	replaceRange: mock(),
+};
+
+const mockActiveView = {
+	editor: mockEditor,
+	file: null as TFile | null,
+};
+
 const mockApp = {
 	vault: {
-		read: jest.fn().mockResolvedValue("# Test\n\nContent"),
-		readBinary: jest.fn().mockResolvedValue(new ArrayBuffer(3)),
-		getMarkdownFiles: jest.fn().mockReturnValue([]),
-		getFiles: jest.fn().mockReturnValue([]),
-		getAbstractFileByPath: jest.fn().mockReturnValue(null),
-		modify: jest.fn().mockResolvedValue(undefined),
-		modifyBinary: jest.fn().mockResolvedValue(undefined),
-		create: jest.fn().mockResolvedValue(undefined),
-		createBinary: jest.fn().mockResolvedValue(undefined),
-		createFolder: jest.fn().mockResolvedValue(undefined),
-		trash: jest.fn().mockResolvedValue(undefined),
-		rename: jest.fn().mockResolvedValue(undefined),
-		getName: jest.fn().mockReturnValue("Test Vault"),
+		read: mock().mockResolvedValue("# Test\n\nContent"),
+		cachedRead: mock().mockResolvedValue("# Test\n\nContent"),
+		readBinary: mock().mockResolvedValue(new ArrayBuffer(3)),
+		getMarkdownFiles: mock().mockReturnValue([]),
+		getFiles: mock().mockReturnValue([]),
+		getAbstractFileByPath: mock().mockReturnValue(null),
+		getFileByPath: mock().mockReturnValue(null) as jest.Mock,
+		modify: mock().mockResolvedValue(undefined),
+		process: mock().mockImplementation((_file: any, fn: (data: string) => string) => {
+			fn(""); // call the transform function
+			return Promise.resolve("");
+		}),
+		modifyBinary: mock().mockResolvedValue(undefined),
+		create: mock().mockResolvedValue(undefined),
+		createBinary: mock().mockResolvedValue(undefined),
+		createFolder: mock().mockResolvedValue(undefined),
+		trash: mock().mockResolvedValue(undefined),
+		rename: mock().mockResolvedValue(undefined),
+		getName: mock().mockReturnValue("Test Vault"),
+	},
+	workspace: {
+		getActiveViewOfType: mock().mockReturnValue(null),
 	},
 } as any;
 
-const mockSaveData = jest.fn().mockResolvedValue(undefined);
+const mockSaveData = mock().mockResolvedValue(undefined);
+
+/** Helper: get the content that was written via vault.process or vault.modify */
+function getWrittenContent(): string | undefined {
+	if (mockApp.vault.process.mock.calls.length > 0) {
+		const lastCall =
+			mockApp.vault.process.mock.calls[mockApp.vault.process.mock.calls.length - 1];
+		return lastCall[1](""); // call transform fn
+	}
+	if (mockApp.vault.modify.mock.calls.length > 0) {
+		const lastCall =
+			mockApp.vault.modify.mock.calls[mockApp.vault.modify.mock.calls.length - 1];
+		return lastCall[1];
+	}
+	return undefined;
+}
 
 const activeEngines: SyncEngine[] = [];
 
@@ -78,6 +120,19 @@ function createEngine(overrides = {}, { ready = true } = {}): SyncEngine {
 
 beforeEach(() => {
 	jest.clearAllMocks();
+	// Bun's clearAllMocks does NOT clear mockReturnValueOnce queues,
+	// so reset mocks that commonly use one-time returns to prevent leaks.
+	mockApp.vault.getFileByPath.mockReset().mockReturnValue(null);
+	mockApp.vault.getAbstractFileByPath.mockReset().mockReturnValue(null);
+	mockApp.vault.cachedRead.mockReset().mockResolvedValue("# Test\n\nContent");
+	mockApp.vault.read.mockReset().mockResolvedValue("# Test\n\nContent");
+	mockApp.vault.process
+		.mockReset()
+		.mockImplementation((_file: any, fn: (data: string) => string) => {
+			fn(""); // call the transform function
+			return Promise.resolve("");
+		});
+	(mockApi.pushNote as jest.Mock).mockReset().mockResolvedValue({ note: {}, chunks_indexed: 1 });
 });
 
 afterEach(() => {
@@ -279,7 +334,7 @@ describe("SyncEngine.pull", () => {
 		engine.setLastSync("2026-01-01T00:00:00Z");
 
 		const existingFile = new TFile("Notes/ToDelete.md");
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
 
 		(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
 			changes: [
@@ -385,7 +440,7 @@ describe("SyncEngine.handleStreamEvent", () => {
 	test("delete event trashes local file", async () => {
 		const engine = createEngine();
 		const existingFile = new TFile("Notes/ToRemove.md");
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
 
 		await engine.handleStreamEvent({
 			event_type: "delete",
@@ -872,8 +927,8 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		let conflictReceived: any = null;
 		engine.onConflict = async (info) => {
@@ -895,16 +950,16 @@ describe("SyncEngine conflict resolution", () => {
 
 		// First sync: establish the content hash by applying the initial version
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Original version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Original version");
 		await engine.applyChange(
 			makeChange({ content: "# Original version", mtime: REMOTE_MTIME }),
 		);
 
 		// Now a new remote change comes in, but local content hasn't changed
 		// (still matches the hash we stored from the first sync write)
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Original version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Original version");
 
 		let conflictCalled = false;
 		engine.onConflict = async () => {
@@ -917,7 +972,9 @@ describe("SyncEngine conflict resolution", () => {
 		);
 
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalled();
+		expect(
+			mockApp.vault.process.mock.calls.length + mockApp.vault.modify.mock.calls.length,
+		).toBeGreaterThan(0);
 	});
 
 	test("no conflict when content is identical", async () => {
@@ -925,8 +982,8 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Same content");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Same content");
 
 		let conflictCalled = false;
 		engine.onConflict = async () => {
@@ -945,11 +1002,11 @@ describe("SyncEngine conflict resolution", () => {
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
 		// Return file for both applyChange lookup and pushFile's internal check
-		(mockApp.vault.getAbstractFileByPath as jest.Mock)
+		(mockApp.vault.getFileByPath as jest.Mock)
 			.mockReturnValueOnce(localFile) // applyChange lookup
 			.mockReturnValueOnce(localFile); // pushFile doesn't call this, but be safe
-		// vault.read called twice: once for conflict detection, once for pushFile
-		(mockApp.vault.read as jest.Mock)
+		// vault.cachedRead called twice: once for conflict detection, once for pushFile
+		(mockApp.vault.cachedRead as jest.Mock)
 			.mockResolvedValueOnce("# Local version")
 			.mockResolvedValueOnce("# Local version");
 
@@ -972,14 +1029,14 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		engine.onConflict = async () => "keep-remote";
 
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Remote version");
+		expect(getWrittenContent()).toBe("# Remote version");
 	});
 
 	test("keep-both creates a conflict copy and keeps local", async () => {
@@ -987,8 +1044,8 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		engine.onConflict = async () => ({ choice: "keep-both" });
 
@@ -1008,8 +1065,8 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		engine.onConflict = async () => ({ choice: "skip" });
 
@@ -1025,13 +1082,13 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		// No onConflict handler — should default to keep-remote
 		await engine.applyChange(makeChange({ mtime: REMOTE_MTIME }));
 
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Remote version");
+		expect(getWrittenContent()).toBe("# Remote version");
 	});
 
 	test("deleted remote change does not trigger conflict", async () => {
@@ -1039,7 +1096,7 @@ describe("SyncEngine conflict resolution", () => {
 		engine.setLastSync(LAST_SYNC);
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 
 		let conflictCalled = false;
 		engine.onConflict = async () => {
@@ -1060,8 +1117,8 @@ describe("SyncEngine conflict resolution", () => {
 		// Local file has old mtime (2 weeks ago) — user hasn't touched it
 		const TWO_WEEKS_AGO_MS = (REMOTE_MTIME - 14 * 86400) * 1000;
 		const localFile = new TFile("Notes/Conflict.md", TWO_WEEKS_AGO_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Old local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Old local version");
 
 		// No syncedHash exists (firstSync=true scenario)
 		// Remote has newer content with recent mtime
@@ -1080,7 +1137,7 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Should NOT trigger conflict — local is stale, remote is newer
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remote version");
+		expect(getWrittenContent()).toBe("# Updated remote version");
 	});
 
 	test("still conflicts when firstSync but local file was recently modified", async () => {
@@ -1091,8 +1148,8 @@ describe("SyncEngine conflict resolution", () => {
 		// — user plausibly edited it, so conflict should still trigger
 		const THIRTY_MIN_AGO_MS = (REMOTE_MTIME - 1800) * 1000;
 		const localFile = new TFile("Notes/Conflict.md", THIRTY_MIN_AGO_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# User just edited this");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# User just edited this");
 
 		let conflictCalled = false;
 		engine.onConflict = async () => {
@@ -1117,15 +1174,15 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Wire up a real BaseStore with the base content
 		const { BaseStore } = require("../src/base-store");
-		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const mockAdapter = { read: mock(), write: mock() };
 		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
 		baseStore.set("Notes/Conflict.md", "# Title\nBase content here", 1);
 		engine.baseStore = baseStore;
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 		// Both sides edited the same line — overlap guaranteed
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Title\nLocal edit here");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Title\nLocal edit here");
 
 		let conflictReceived: any = null;
 		engine.onConflict = async (info) => {
@@ -1155,8 +1212,8 @@ describe("SyncEngine conflict resolution", () => {
 		engine.baseStore = null;
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Local version");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Local version");
 
 		let conflictReceived: any = null;
 		engine.onConflict = async (info) => {
@@ -1177,17 +1234,17 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Wire up BaseStore with the base content
 		const { BaseStore } = require("../src/base-store");
-		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const mockAdapter = { read: mock(), write: mock() };
 		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
 		baseStore.set("Notes/Conflict.md", "# Title\nSection A\n\nSection B", 1);
 		engine.baseStore = baseStore;
 
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
-		(mockApp.vault.getAbstractFileByPath as jest.Mock)
+		(mockApp.vault.getFileByPath as jest.Mock)
 			.mockReturnValueOnce(localFile) // applyChange lookup
 			.mockReturnValueOnce(localFile); // pushFile lookup
 		// Local edited Section A, remote edited Section B — non-overlapping
-		(mockApp.vault.read as jest.Mock)
+		(mockApp.vault.cachedRead as jest.Mock)
 			.mockResolvedValueOnce("# Title\nLocal A\n\nSection B") // conflict check
 			.mockResolvedValueOnce("# Title\nLocal A\n\nRemote B"); // pushFile reads merged
 
@@ -1207,10 +1264,7 @@ describe("SyncEngine conflict resolution", () => {
 		// Should auto-merge without calling conflict handler
 		expect(conflictCalled).toBe(false);
 		// Vault should be modified with merged content
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(
-			localFile,
-			"# Title\nLocal A\n\nRemote B",
-		);
+		expect(getWrittenContent()).toBe("# Title\nLocal A\n\nRemote B");
 	});
 
 	test("no false conflict when remote appends to previously synced file", async () => {
@@ -1220,15 +1274,15 @@ describe("SyncEngine conflict resolution", () => {
 		const localFile = new TFile("Notes/Conflict.md", LOCAL_MTIME_MS);
 
 		// First sync: pull initial content
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Note\n\nOriginal");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Note\n\nOriginal");
 		await engine.applyChange(
 			makeChange({ content: "# Note\n\nOriginal", mtime: REMOTE_MTIME }),
 		);
 
 		// Remote appends via MCP, local content is unchanged (Obsidian set mtime to "now")
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Note\n\nOriginal");
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Note\n\nOriginal");
 
 		let conflictCalled = false;
 		engine.onConflict = async () => {
@@ -1244,10 +1298,7 @@ describe("SyncEngine conflict resolution", () => {
 		);
 
 		expect(conflictCalled).toBe(false);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(
-			localFile,
-			"# Note\n\nOriginal\n\nAppended line",
-		);
+		expect(getWrittenContent()).toBe("# Note\n\nOriginal\n\nAppended line");
 	});
 });
 
@@ -1660,9 +1711,9 @@ describe("SyncEngine pull accuracy", () => {
 
 		// Local file has a LATER mtime than remote (simulates Obsidian setting mtime to "now")
 		const localFile = new TFile("Notes/Existing.md", Date.now());
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 		// Content matches the synced hash → user didn't edit locally → no conflict
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("# Old content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("# Old content");
 		// Establish sync state so the engine knows this file was previously synced
 		engine.importSyncState({ "Notes/Existing.md": { hash: 1126570110 } }); // fnv1a("# Old content")
 
@@ -1678,7 +1729,7 @@ describe("SyncEngine pull accuracy", () => {
 		});
 
 		expect(result).toBe(true);
-		expect(mockApp.vault.modify).toHaveBeenCalledWith(localFile, "# Updated remotely");
+		expect(getWrittenContent()).toBe("# Updated remotely");
 	});
 
 	test("pull returns accurate count when changes are skipped", async () => {
@@ -1750,7 +1801,7 @@ describe("SyncEngine pull accuracy", () => {
 
 		// Local file has LATER mtime than remote
 		const localFile = new TFile("Assets/image.png", Date.now());
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(localFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(localFile);
 
 		const result = await engine.applyAttachmentChange(
 			{
@@ -1822,7 +1873,7 @@ describe("SyncEngine WebSocket with kind routing", () => {
 	test("WebSocket delete with kind=attachment trashes local file", async () => {
 		const engine = createEngine();
 		const existingFile = new TFile("Assets/deleted.png");
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(existingFile);
 
 		await engine.handleStreamEvent({
 			event_type: "delete",
@@ -1885,8 +1936,8 @@ describe("SyncEngine auth validation", () => {
 		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("401"));
 
 		const file = new TFile("Notes/Test.md");
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("content");
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("content");
 
 		// Access private method via any cast
 		const result = await (engine as any).pushFile(file);
@@ -1931,7 +1982,7 @@ describe("ready gate", () => {
 		const engine = createEngine({ debounceMs: 10 }, { ready: false });
 		engine.setReady();
 		const file = new TFile("Notes/Test.md", Date.now());
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("content");
 
 		engine.handleModify(file);
 		await new Promise((r) => setTimeout(r, 50));
@@ -1946,7 +1997,7 @@ describe("content-free queue entries", () => {
 	test("failed push enqueues without content", async () => {
 		const engine = createEngine({ debounceMs: 10 });
 		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("offline"));
-		(mockApp.vault.read as jest.Mock).mockResolvedValueOnce("file content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce("file content");
 
 		const file = new TFile("Notes/Test.md", Date.now());
 		engine.handleModify(file);
@@ -1973,15 +2024,15 @@ describe("content-free queue entries", () => {
 		]);
 
 		const file = new TFile("Notes/Queued.md", Date.now());
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(file);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(file);
 		// Reset the default mock and set our specific return value
-		(mockApp.vault.read as jest.Mock).mockReset().mockResolvedValueOnce("vault content");
+		(mockApp.vault.cachedRead as jest.Mock).mockReset().mockResolvedValueOnce("vault content");
 
 		(engine as any).offline = true;
 		const flushed = await engine.flushQueue();
 
 		expect(flushed).toBe(1);
-		expect(mockApp.vault.read).toHaveBeenCalledWith(file);
+		expect(mockApp.vault.cachedRead).toHaveBeenCalledWith(file);
 		expect(mockApi.pushNote).toHaveBeenCalledWith(
 			"Notes/Queued.md",
 			"vault content",
@@ -1989,7 +2040,7 @@ describe("content-free queue entries", () => {
 		);
 
 		// Restore default mock for other tests
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Test\n\nContent");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("# Test\n\nContent");
 	});
 
 	test("flushQueue uses legacy entry content", async () => {
@@ -2009,7 +2060,7 @@ describe("content-free queue entries", () => {
 
 		expect(flushed).toBe(1);
 		expect(mockApi.pushNote).toHaveBeenCalledWith("Notes/Legacy.md", "stored content", 1000);
-		expect(mockApp.vault.read).not.toHaveBeenCalled();
+		expect(mockApp.vault.cachedRead).not.toHaveBeenCalled();
 	});
 
 	test("flushQueue skips deleted files", async () => {
@@ -2024,7 +2075,7 @@ describe("content-free queue entries", () => {
 			},
 		]);
 
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(null);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValueOnce(null);
 
 		(engine as any).offline = true;
 		const flushed = await engine.flushQueue();
@@ -2041,7 +2092,7 @@ describe("debounced persistence", () => {
 	test("enqueue does not persist immediately", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		await queue.enqueue({ path: "a.md", action: "upsert" as const, timestamp: 1 });
@@ -2058,7 +2109,7 @@ describe("debounced persistence", () => {
 	test("rapid enqueues coalesce into one persist", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		for (let i = 0; i < 5; i++) {
@@ -2076,7 +2127,7 @@ describe("debounced persistence", () => {
 	test("dequeue persists immediately", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		queue.load([{ path: "a.md", action: "upsert" as const, timestamp: 1 }]);
@@ -2113,7 +2164,7 @@ describe("push concurrency limit", () => {
 		// Fire 10 modify events
 		for (let i = 0; i < 10; i++) {
 			const file = new TFile(`Notes/File${i}.md`, Date.now());
-			(mockApp.vault.read as jest.Mock).mockResolvedValueOnce(`content ${i}`);
+			(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce(`content ${i}`);
 			engine.handleModify(file);
 		}
 
@@ -2150,7 +2201,7 @@ describe("push concurrency limit", () => {
 		// Fire 10 modify events
 		for (let i = 0; i < 10; i++) {
 			const file = new TFile(`Notes/File${i}.md`, Date.now());
-			(mockApp.vault.read as jest.Mock).mockResolvedValueOnce(`content ${i}`);
+			(mockApp.vault.cachedRead as jest.Mock).mockResolvedValueOnce(`content ${i}`);
 			engine.handleModify(file);
 		}
 
@@ -2250,7 +2301,7 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 		const engine = createEngine();
 		const file = new TFile("Notes/Existing.md", Date.now());
 		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file]);
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Existing\n\nContent");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("# Existing\n\nContent");
 
 		// Simulate syncState being populated (as happens after pull)
 		// by doing a pull that writes this file, then clearing the mock
@@ -2269,14 +2320,14 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 			],
 			server_time: "2026-03-01T12:00:01Z",
 		});
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValue(null);
 		engine.setLastSync("2026-01-01T00:00:00Z");
 		await engine.pull();
 
 		jest.clearAllMocks();
 		(mockApi.ping as jest.Mock).mockResolvedValue({ ok: true });
 		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file]);
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Existing\n\nContent");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("# Existing\n\nContent");
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
 
 		const pushed = await engine.pushAll();
@@ -2296,7 +2347,7 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 		const file1 = new TFile("Notes/Good.md", Date.now());
 		const file2 = new TFile("Notes/Bad.md", Date.now());
 		(mockApp.vault.getFiles as jest.Mock).mockReturnValue([file1, file2]);
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("content");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("content");
 		(mockApi.ping as jest.Mock).mockResolvedValue({ ok: true });
 		(mockApi.pushNote as jest.Mock)
 			.mockResolvedValueOnce({ note: {}, chunks_indexed: 1 })
@@ -2311,7 +2362,7 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 	test("pushFile(force=true) bypasses echo suppression", async () => {
 		const engine = createEngine();
 		const file = new TFile("Notes/Force.md", Date.now());
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("# Force\n\nContent");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("# Force\n\nContent");
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
 
 		// Simulate a synced hash by doing a normal push first
@@ -2334,9 +2385,9 @@ describe("SyncEngine.pushAll echo suppression fix", () => {
 	test("handleModify during pull queues for post-pull push", async () => {
 		const engine = createEngine({ debounceMs: 10 });
 		const file = new TFile("Notes/DuringPull.md", Date.now());
-		(mockApp.vault.read as jest.Mock).mockResolvedValue("# User edit during pull");
+		(mockApp.vault.cachedRead as jest.Mock).mockResolvedValue("# User edit during pull");
 		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(file);
+		(mockApp.vault.getFileByPath as jest.Mock).mockReturnValue(file);
 
 		// Start a pull — mock it to return no changes
 		(mockApi.getChanges as jest.Mock).mockImplementation(async () => {
@@ -2386,7 +2437,7 @@ describe("Path sanitization on push", () => {
 
 		const file = new TFile("Notes/test?.md", Date.now());
 		// vault needs to find the file for rename
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+		(mockApp.vault.getFileByPath as jest.Mock).mockImplementation((p: string) => {
 			if (p === "Notes/test?.md") return file;
 			return null;
 		});
@@ -2441,7 +2492,7 @@ describe("Path sanitization on push", () => {
 		});
 
 		const file = new TFile("Notes/What? Why: How*.md", Date.now());
-		(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+		(mockApp.vault.getFileByPath as jest.Mock).mockImplementation((p: string) => {
 			if (p === "Notes/What? Why: How*.md") return file;
 			return null;
 		});
@@ -2459,10 +2510,10 @@ describe("SyncEngine vault-scoped queue", () => {
 		const engine = createEngine({ vaultId: "42", debounceMs: 10 });
 		// Simulate a push failure that enqueues
 		(mockApi.pushNote as jest.Mock).mockRejectedValueOnce(new Error("network"));
-		mockApp.vault.read.mockResolvedValueOnce("content");
+		mockApp.vault.cachedRead.mockResolvedValueOnce("content");
 
 		const file = new TFile("test.md", Date.now());
-		mockApp.vault.getAbstractFileByPath.mockReturnValueOnce(file);
+		mockApp.vault.getFileByPath.mockReturnValueOnce(file);
 		engine.handleModify(file);
 
 		// Wait for debounce + async push
@@ -2472,5 +2523,316 @@ describe("SyncEngine vault-scoped queue", () => {
 		if (entries.length > 0) {
 			expect(entries[0].vaultId).toBe("42");
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Active editor refresh on sync (modifyFile)
+// ---------------------------------------------------------------------------
+
+describe("modifyFile active editor refresh", () => {
+	beforeEach(() => {
+		jest.restoreAllMocks();
+		jest.clearAllMocks();
+		// Reset mocks to defaults for this describe block
+		mockActiveView.file = null;
+		mockApp.workspace.getActiveViewOfType.mockReturnValue(null);
+		mockApp.vault.getFileByPath.mockReset();
+		mockApp.vault.getFileByPath.mockReturnValue(null);
+		mockApp.vault.cachedRead.mockReset();
+		mockApp.vault.cachedRead.mockResolvedValue("# Test\n\nContent");
+		mockApp.vault.modify.mockReset();
+		mockApp.vault.modify.mockResolvedValue(undefined);
+		mockApp.vault.process.mockReset();
+		mockApp.vault.process.mockImplementation((_file: any, fn: (data: string) => string) => {
+			fn("");
+			return Promise.resolve("");
+		});
+		(mockApi.pushNote as jest.Mock).mockReset();
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+	});
+
+	test("uses vault.process instead of vault.modify for scroll-safe updates", async () => {
+		const existingFile = new TFile("Notes/Open.md", Date.now() - 10000);
+		mockApp.vault.getFileByPath.mockImplementation((p: string) =>
+			p === "Notes/Open.md" ? existingFile : null,
+		);
+		mockApp.vault.cachedRead.mockResolvedValue("old content");
+
+		const engine = createEngine();
+		engine.syncState.set("Notes/Open.md", { hash: fnv1a("old content"), version: 1 });
+
+		await engine.applyChange({
+			path: "Notes/Open.md",
+			title: "Open",
+			content: "new content from server",
+			folder: "Notes",
+			tags: [],
+			mtime: Date.now() / 1000,
+			updated_at: new Date().toISOString(),
+			deleted: false,
+			version: 2,
+		});
+
+		// Should use vault.process (scroll-safe) not vault.modify
+		expect(mockApp.vault.process).toHaveBeenCalled();
+		expect(mockApp.vault.modify).not.toHaveBeenCalled();
+
+		// The transform function should return the new content
+		const transformFn = mockApp.vault.process.mock.calls[0][1];
+		expect(transformFn("anything")).toBe("new content from server");
+	});
+
+	test("falls back to vault.modify when vault.process is unavailable", async () => {
+		const existingFile = new TFile("Notes/Fallback.md", Date.now() - 10000);
+		mockApp.vault.getFileByPath.mockImplementation((p: string) =>
+			p === "Notes/Fallback.md" ? existingFile : null,
+		);
+		mockApp.vault.cachedRead.mockResolvedValue("old content");
+		// Simulate older Obsidian without vault.process
+		const savedProcess = mockApp.vault.process;
+		mockApp.vault.process = undefined;
+
+		const engine = createEngine();
+		engine.syncState.set("Notes/Fallback.md", { hash: fnv1a("old content"), version: 1 });
+
+		await engine.applyChange({
+			path: "Notes/Fallback.md",
+			title: "Fallback",
+			content: "new content",
+			folder: "Notes",
+			tags: [],
+			mtime: Date.now() / 1000,
+			updated_at: new Date().toISOString(),
+			deleted: false,
+			version: 2,
+		});
+
+		expect(mockApp.vault.modify).toHaveBeenCalled();
+		mockApp.vault.process = savedProcess;
+	});
+
+	test("uses vault.process on WebSocket stream event", async () => {
+		const existingFile = new TFile("Notes/WS.md", Date.now() - 10000);
+		mockApp.vault.getFileByPath.mockImplementation((p: string) =>
+			p === "Notes/WS.md" ? existingFile : null,
+		);
+		mockApp.vault.cachedRead.mockResolvedValue("original");
+
+		const engine = createEngine();
+		engine.syncState.set("Notes/WS.md", { hash: fnv1a("original"), version: 1 });
+
+		await engine.handleStreamEvent({
+			event_type: "upsert",
+			path: "Notes/WS.md",
+			timestamp: Date.now(),
+			content: "updated via websocket",
+			title: "WS",
+			folder: "Notes",
+			tags: [],
+			mtime: Date.now() / 1000,
+			updated_at: new Date().toISOString(),
+			version: 2,
+		});
+
+		expect(mockApp.vault.process).toHaveBeenCalled();
+		expect(mockApp.vault.modify).not.toHaveBeenCalled();
+	});
+});
+
+describe("SyncEngine Obsidian API best practices", () => {
+	describe("uses cachedRead for read-only operations", () => {
+		test("push uses cachedRead (not read) for content hashing", async () => {
+			const engine = createEngine({ debounceMs: 0 });
+			const file = new TFile("Notes/CachedTest.md");
+
+			mockApp.vault.cachedRead.mockResolvedValueOnce("# Cached content");
+			mockApp.vault.read.mockClear();
+			mockApp.vault.cachedRead.mockClear();
+			mockApp.vault.cachedRead.mockResolvedValueOnce("# Cached content");
+
+			// Trigger push via handleModify + flush debounce
+			engine.handleModify(file);
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(mockApp.vault.cachedRead).toHaveBeenCalledWith(file);
+			expect(mockApp.vault.read).not.toHaveBeenCalled();
+		});
+
+		test("pull conflict detection uses cachedRead for local content", async () => {
+			const engine = createEngine();
+			engine.setLastSync("2026-01-01T00:00:00Z");
+
+			const existingFile = new TFile("Notes/Conflict.md");
+			mockApp.vault.getFileByPath.mockReturnValueOnce(existingFile);
+			mockApp.vault.cachedRead.mockClear();
+			mockApp.vault.read.mockClear();
+			mockApp.vault.cachedRead.mockResolvedValueOnce("local content");
+
+			(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+				changes: [
+					{
+						path: "Notes/Conflict.md",
+						content: "remote content",
+						mtime: Date.now() / 1000 + 100,
+						version: 2,
+						deleted: false,
+						title: "Conflict",
+						folder: "Notes",
+						tags: [],
+						updated_at: new Date().toISOString(),
+					},
+				],
+				server_time: new Date().toISOString(),
+			});
+			(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+				changes: [],
+				server_time: new Date().toISOString(),
+			});
+
+			await engine.pull();
+
+			expect(mockApp.vault.cachedRead).toHaveBeenCalledWith(existingFile);
+			expect(mockApp.vault.read).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("uses getFileByPath for file lookups", () => {
+		test("pull uses getFileByPath instead of getAbstractFileByPath for notes", async () => {
+			const engine = createEngine();
+			engine.setLastSync("2026-01-01T00:00:00Z");
+
+			mockApp.vault.getFileByPath.mockClear();
+			mockApp.vault.getAbstractFileByPath.mockClear();
+			mockApp.vault.getFileByPath.mockReturnValue(null);
+
+			(mockApi.getChanges as jest.Mock).mockResolvedValueOnce({
+				changes: [
+					{
+						path: "Notes/New.md",
+						content: "new content",
+						mtime: Date.now() / 1000,
+						version: 1,
+						deleted: false,
+						title: "New",
+						folder: "Notes",
+						tags: [],
+						updated_at: new Date().toISOString(),
+					},
+				],
+				server_time: new Date().toISOString(),
+			});
+			(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValueOnce({
+				changes: [],
+				server_time: new Date().toISOString(),
+			});
+
+			await engine.pull();
+
+			expect(mockApp.vault.getFileByPath).toHaveBeenCalled();
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Sync state export/import round-trips
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine sync state management", () => {
+	test("exportSyncState returns all entries as plain object", () => {
+		const engine = createEngine();
+		engine.importSyncState({
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		});
+		const exported = engine.exportSyncState();
+		expect(exported).toEqual({
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		});
+	});
+
+	test("exportHashes returns hash-only projection", () => {
+		const engine = createEngine();
+		engine.importSyncState({
+			"Notes/A.md": { hash: 111, version: 3 } as any,
+			"Notes/B.md": { hash: 222 },
+		});
+		const hashes = engine.exportHashes();
+		expect(hashes).toEqual({
+			"Notes/A.md": 111,
+			"Notes/B.md": 222,
+		});
+	});
+
+	test("importHashes creates entries with hash property only", () => {
+		const engine = createEngine();
+		engine.importHashes({ "Notes/A.md": 111, "Notes/B.md": 222 });
+		const exported = engine.exportSyncState();
+		expect(exported["Notes/A.md"]).toEqual({ hash: 111 });
+		expect(exported["Notes/B.md"]).toEqual({ hash: 222 });
+	});
+
+	test("importSyncState + exportSyncState round-trips correctly", () => {
+		const engine = createEngine();
+		const original = {
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		};
+		engine.importSyncState(original);
+		expect(engine.exportSyncState()).toEqual(original);
+	});
+
+	test("importHashes + exportHashes round-trips correctly", () => {
+		const engine = createEngine();
+		const original = { "Notes/A.md": 111, "Notes/B.md": 222 };
+		engine.importHashes(original);
+		expect(engine.exportHashes()).toEqual(original);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// updateSettings
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine.updateSettings", () => {
+	test("re-parses ignore patterns after update", () => {
+		const engine = createEngine({ ignorePatterns: "secret/" });
+		expect(engine.shouldIgnore("secret/passwords.md")).toBe(true);
+		expect(engine.shouldIgnore("public/readme.md")).toBe(false);
+
+		engine.updateSettings({ ...DEFAULT_SETTINGS, ignorePatterns: "public/" });
+		expect(engine.shouldIgnore("secret/passwords.md")).toBe(false);
+		expect(engine.shouldIgnore("public/readme.md")).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Private utility methods (accessed via cast for coverage)
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine private utilities", () => {
+	// Note: md5() uses crypto.subtle.digest("MD5") which Obsidian supports
+	// but Bun's Web Crypto does not. MD5 tests require E2E in the backend repo.
+
+	test("arrayBuffersEqual returns true for identical buffers", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2, 3]).buffer;
+		const b = new Uint8Array([1, 2, 3]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(true);
+	});
+
+	test("arrayBuffersEqual returns false for different content", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2, 3]).buffer;
+		const b = new Uint8Array([1, 2, 4]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(false);
+	});
+
+	test("arrayBuffersEqual returns false for different lengths", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2]).buffer;
+		const b = new Uint8Array([1, 2, 3]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(false);
 	});
 });

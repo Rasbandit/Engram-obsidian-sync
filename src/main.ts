@@ -57,7 +57,7 @@ export default class EngramSyncPlugin extends Plugin {
 	authProvider: AuthProvider | null = null;
 	// biome-ignore lint/style/noNonNullAssertion: assigned in onload before any usage
 	syncEngine: SyncEngine = null!;
-	private syncInterval: ReturnType<typeof setInterval> | null = null;
+	private syncInterval: number | null = null;
 	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private liveConnected = false;
@@ -143,14 +143,11 @@ export default class EngramSyncPlugin extends Plugin {
 		// Register settings tab
 		this.addSettingTab(new EngramSyncSettingTab(this.app, this));
 
-		// Register vault events
+		// Register vault events (create is registered in onLayoutReady to avoid
+		// processing the startup burst — Obsidian fires 'create' for every existing
+		// file when the vault loads)
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
-				this.syncEngine.handleModify(file);
-			}),
-		);
-		this.registerEvent(
-			this.app.vault.on("create", (file) => {
 				this.syncEngine.handleModify(file);
 			}),
 		);
@@ -277,8 +274,8 @@ export default class EngramSyncPlugin extends Plugin {
 		// Status bar (click to sync)
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.setText("Engram: ready");
-		this.statusBarEl.style.cursor = "pointer";
-		this.statusBarEl.addEventListener("click", () => {
+		this.statusBarEl.addClass("engram-status-bar-clickable");
+		this.registerDomEvent(this.statusBarEl, "click", () => {
 			if (this.settings.apiUrl && this.settings.apiKey) {
 				new Notice("Engram Sync: syncing...");
 				this.syncEngine
@@ -306,6 +303,16 @@ export default class EngramSyncPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(async () => {
 			devLog().log("lifecycle", "layout ready — starting initial sync");
 			rlog().info("lifecycle", "Layout ready — starting initial sync");
+
+			// Register create handler here — vault.on('create') fires for every
+			// existing file during vault load, so we wait until layout is ready
+			// to avoid processing thousands of no-op events on startup.
+			this.registerEvent(
+				this.app.vault.on("create", (file) => {
+					this.syncEngine.handleModify(file);
+				}),
+			);
+
 			await this.baseStore?.load();
 			try {
 				if (this.settings.apiUrl && this.settings.apiKey) {
@@ -440,6 +447,10 @@ export default class EngramSyncPlugin extends Plugin {
 				this.settings.vaultId,
 				this.settings.userEmail ?? null,
 				refreshFn,
+				(newToken) => {
+					this.settings.refreshToken = newToken;
+					this.saveSettings();
+				},
 			);
 		}
 
@@ -484,8 +495,8 @@ export default class EngramSyncPlugin extends Plugin {
 		this.noteStream?.disconnect();
 		this.noteStream = null;
 
-		const { apiUrl, apiKey } = this.settings;
-		if (!apiUrl || !apiKey) {
+		const hasAuth = this.settings.apiKey || this.settings.refreshToken;
+		if (!this.settings.apiUrl || !hasAuth) {
 			this.liveConnected = false;
 			this.updateStatusBar(this.syncEngine.getStatus());
 			return;
@@ -644,7 +655,7 @@ export default class EngramSyncPlugin extends Plugin {
 
 		if (!this.settings.apiUrl || !this.settings.apiKey) return;
 
-		this.syncInterval = setInterval(async () => {
+		this.syncInterval = window.setInterval(async () => {
 			try {
 				const pulled = await this.syncEngine.pull();
 				if (pulled > 0) {
@@ -655,5 +666,6 @@ export default class EngramSyncPlugin extends Plugin {
 				console.error("Engram Sync: periodic pull failed", e);
 			}
 		}, EngramSyncPlugin.FALLBACK_POLL_MS);
+		this.registerInterval(this.syncInterval);
 	}
 }

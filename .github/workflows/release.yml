@@ -53,19 +53,30 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Delete RC GitHub releases (--cleanup-tag also removes the git tag)
-          gh release list --limit 100 --json tagName --jq '.[].tagName' \
-            | grep "^${VERSION}-rc\." \
-            | while read -r tag; do
-                echo "Deleting release: $tag"
-                gh release delete "$tag" --yes --cleanup-tag
-              done || true
+          # Previous version on main (before this merge) — catches RCs
+          # created before a mid-PR version bump (e.g. 0.8.6-rc.* when
+          # releasing 0.8.7).
+          PREV_VERSION=$(git show HEAD~1:manifest.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
 
-          # Safety net: delete any orphaned RC tags
+          for v in "$VERSION" "$PREV_VERSION"; do
+            [ -z "$v" ] && continue
+            echo "Cleaning up ${v}-rc.* releases"
+            gh release list --limit 100 --json tagName --jq '.[].tagName' \
+              | grep "^${v}-rc\." \
+              | while read -r tag; do
+                  echo "  Deleting release: $tag"
+                  gh release delete "$tag" --yes --cleanup-tag
+                done || true
+          done
+
+          # Safety net: delete any orphaned RC git tags for both versions
           git fetch --tags
-          git tag -l "${VERSION}-rc.*" | while read -r tag; do
-            echo "Deleting orphaned tag: $tag"
-            git push origin ":refs/tags/$tag" 2>/dev/null || true
+          for v in "$VERSION" "$PREV_VERSION"; do
+            [ -z "$v" ] && continue
+            git tag -l "${v}-rc.*" | while read -r tag; do
+              echo "  Deleting orphaned tag: $tag"
+              git push origin ":refs/tags/$tag" 2>/dev/null || true
+            done
           done
 
       - name: Create release tag

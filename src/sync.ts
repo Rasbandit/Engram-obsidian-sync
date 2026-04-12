@@ -45,7 +45,7 @@ const ALWAYS_IGNORED = [".obsidian/", ".trash/", ".git/"];
 const STALE_THRESHOLD_S = 3600;
 
 /** Fast string hash (FNV-1a 32-bit). Not cryptographic — just for content change detection. */
-function fnv1a(s: string): number {
+export function fnv1a(s: string): number {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < s.length; i++) {
 		h ^= s.charCodeAt(i);
@@ -493,7 +493,7 @@ export class SyncEngine {
 				const mimeType = this.getMimeType(file);
 				await this.api.pushAttachment(file.path, base64, mimeType, mtime);
 			} else {
-				const content = await this.app.vault.read(file);
+				const content = await this.app.vault.cachedRead(file);
 				// Echo suppression — skip pushing if content matches what the
 				// sync engine last wrote (pull/WebSocket). Prevents the pull→push loop
 				// where vault.modify() triggers handleModify() for every pulled file.
@@ -528,9 +528,9 @@ export class SyncEngine {
 								merge.merged,
 								mtime,
 							);
-							const localFile = this.app.vault.getAbstractFileByPath(file.path);
-							if (localFile && localFile instanceof TFile) {
-								await this.app.vault.modify(localFile, merge.merged);
+							const localFile = this.app.vault.getFileByPath(file.path);
+							if (localFile) {
+								await this.modifyFile(localFile, merge.merged);
 							}
 							if (!("conflict" in mergeResp)) {
 								const np = normalizePath(file.path);
@@ -580,9 +580,9 @@ export class SyncEngine {
 							}
 						}
 					} else if (resolution.choice === "keep-remote") {
-						const localFile = this.app.vault.getAbstractFileByPath(file.path);
-						if (localFile && localFile instanceof TFile) {
-							await this.app.vault.modify(localFile, serverNote.content);
+						const localFile = this.app.vault.getFileByPath(file.path);
+						if (localFile) {
+							await this.modifyFile(localFile, serverNote.content);
 							const np = normalizePath(file.path);
 							this.syncState.set(np, {
 								hash: fnv1a(serverNote.content),
@@ -596,9 +596,9 @@ export class SyncEngine {
 							resolution.mergedContent,
 							mtime,
 						);
-						const localFile = this.app.vault.getAbstractFileByPath(file.path);
-						if (localFile && localFile instanceof TFile) {
-							await this.app.vault.modify(localFile, resolution.mergedContent);
+						const localFile = this.app.vault.getFileByPath(file.path);
+						if (localFile) {
+							await this.modifyFile(localFile, resolution.mergedContent);
 						}
 						if (!("conflict" in mergeResp)) {
 							const np = normalizePath(file.path);
@@ -624,7 +624,7 @@ export class SyncEngine {
 				const serverPath = resp.note.path;
 				const serverVersion = resp.note.version;
 				if (serverPath && serverPath !== file.path) {
-					const localFile = this.app.vault.getAbstractFileByPath(file.path);
+					const localFile = this.app.vault.getFileByPath(file.path);
 					if (localFile) {
 						await this.app.vault.rename(localFile, serverPath);
 						devLog().log(
@@ -812,8 +812,8 @@ export class SyncEngine {
 		devLog().log("push", `flushing ${paths.length} post-pull pushes`);
 		rlog().info("push", `Post-pull flush: ${paths.length} files`);
 		for (const path of paths) {
-			const file = this.app.vault.getAbstractFileByPath(path);
-			if (file instanceof TFile) {
+			const file = this.app.vault.getFileByPath(path);
+			if (file) {
 				await this.pushFile(file);
 			}
 		}
@@ -921,8 +921,8 @@ export class SyncEngine {
 
 		if (event.event_type === "delete") {
 			const normalized = normalizePath(event.path);
-			const existing = this.app.vault.getAbstractFileByPath(normalized);
-			if (existing && existing instanceof TFile) {
+			const existing = this.app.vault.getFileByPath(normalized);
+			if (existing) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
 			}
@@ -988,8 +988,8 @@ export class SyncEngine {
 
 		if (change.deleted) {
 			// Delete local file if it exists
-			const existing = this.app.vault.getAbstractFileByPath(normalized);
-			if (existing && existing instanceof TFile) {
+			const existing = this.app.vault.getFileByPath(normalized);
+			if (existing) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
 				this.syncState.delete(normalized);
@@ -1001,12 +1001,12 @@ export class SyncEngine {
 		}
 
 		// Create or update the file
-		const existing = this.app.vault.getAbstractFileByPath(normalized);
-		if (existing && existing instanceof TFile) {
+		const existing = this.app.vault.getFileByPath(normalized);
+		if (existing) {
 			// Conflict detection — content-hash based.
 			// Mtime is unreliable because Obsidian sets it to "now" on every
 			// vault.modify(), so we track hashes of content we last wrote.
-			const localContent = await this.app.vault.read(existing);
+			const localContent = await this.app.vault.cachedRead(existing);
 			const localHash = fnv1a(localContent);
 			const lastSynced = this.syncState.get(normalized);
 			const lastSyncedHash = lastSynced?.hash;
@@ -1049,7 +1049,7 @@ export class SyncEngine {
 				if (pullBase) {
 					const merge = threeWayMerge(pullBase.content, localContent, change.content);
 					if (merge.clean) {
-						await this.app.vault.modify(existing, merge.merged);
+						await this.modifyFile(existing, merge.merged);
 						this.syncState.set(normalized, {
 							hash: fnv1a(merge.merged),
 							version: change.version,
@@ -1154,7 +1154,7 @@ export class SyncEngine {
 				if (resolution.choice === "merge" && resolution.mergedContent != null) {
 					// Apply user-merged content locally and push to server
 					try {
-						await this.app.vault.modify(existing, resolution.mergedContent);
+						await this.modifyFile(existing, resolution.mergedContent);
 						this.syncState.set(normalized, {
 							hash: fnv1a(resolution.mergedContent),
 							version: change.version,
@@ -1193,7 +1193,7 @@ export class SyncEngine {
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
-			await this.app.vault.modify(existing, change.content);
+			await this.modifyFile(existing, change.content);
 			this.syncState.set(normalized, {
 				hash: fnv1a(change.content),
 				version: change.version,
@@ -1232,8 +1232,8 @@ export class SyncEngine {
 		const normalized = normalizePath(change.path);
 
 		if (change.deleted) {
-			const existing = this.app.vault.getAbstractFileByPath(normalized);
-			if (existing && existing instanceof TFile) {
+			const existing = this.app.vault.getFileByPath(normalized);
+			if (existing) {
 				await this.app.vault.trash(existing, true);
 				await this.removeEmptyFolders(normalized);
 				rlog().info("pull", `Attachment deleted: ${change.path}`);
@@ -1246,9 +1246,9 @@ export class SyncEngine {
 		const resolvedBase64 =
 			contentBase64 ?? (await this.api.getAttachment(change.path)).content_base64;
 		const buffer = base64ToArrayBuffer(resolvedBase64);
-		const existing = this.app.vault.getAbstractFileByPath(normalized);
+		const existing = this.app.vault.getFileByPath(normalized);
 
-		if (existing && existing instanceof TFile) {
+		if (existing) {
 			// Skip if content is identical — prevents modify event and push-back loop
 			if (existing.stat.size === buffer.byteLength) {
 				const localBuffer = await this.app.vault.readBinary(existing);
@@ -1315,6 +1315,18 @@ export class SyncEngine {
 	}
 
 	/** Create a text file, ensuring parent folders exist. */
+	/** Modify a file using vault.process() when available (scroll-safe),
+	 *  falling back to vault.modify() for older Obsidian versions. */
+	private async modifyFile(file: TFile, content: string): Promise<void> {
+		if (this.app.vault.process) {
+			// vault.process() does an atomic read-modify-write that updates
+			// the editor in-place without resetting scroll position.
+			await this.app.vault.process(file, () => content);
+		} else {
+			await this.app.vault.modify(file, content);
+		}
+	}
+
 	private async createFileWithFolders(normalized: string, content: string): Promise<void> {
 		const folder = normalized.includes("/")
 			? normalized.substring(0, normalized.lastIndexOf("/"))
@@ -1493,8 +1505,8 @@ export class SyncEngine {
 					`Fixing ${toFix.length} files after pushAll (${missing.length} missing, ${diverged.length} diverged)`,
 				);
 				for (const path of toFix) {
-					const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
-					if (file instanceof TFile) {
+					const file = this.app.vault.getFileByPath(normalizePath(path));
+					if (file) {
 						await this.pushFile(file, true);
 					}
 				}
@@ -1546,7 +1558,7 @@ export class SyncEngine {
 			if (!serverHash) {
 				missing.push(file.path);
 			} else {
-				const content = await this.app.vault.read(file);
+				const content = await this.app.vault.cachedRead(file);
 				const localHash = await this.md5(content);
 				if (localHash !== serverHash) {
 					diverged.push(file.path);
@@ -1655,8 +1667,8 @@ export class SyncEngine {
 					let mimeType = entry.mimeType;
 					let mtime = entry.mtime;
 					if (!base64) {
-						const file = this.app.vault.getAbstractFileByPath(entry.path);
-						if (!(file instanceof TFile)) {
+						const file = this.app.vault.getFileByPath(entry.path);
+						if (!file) {
 							await this.queue.dequeue(
 								entry.path,
 								this.settings.vaultId ?? undefined,
@@ -1676,8 +1688,8 @@ export class SyncEngine {
 					let content = entry.content;
 					let mtime = entry.mtime;
 					if (content === undefined) {
-						const file = this.app.vault.getAbstractFileByPath(entry.path);
-						if (!(file instanceof TFile)) {
+						const file = this.app.vault.getFileByPath(entry.path);
+						if (!file) {
 							await this.queue.dequeue(
 								entry.path,
 								this.settings.vaultId ?? undefined,
@@ -1685,7 +1697,7 @@ export class SyncEngine {
 							flushed++;
 							continue;
 						}
-						content = await this.app.vault.read(file);
+						content = await this.app.vault.cachedRead(file);
 						mtime = file.stat.mtime / 1000;
 					}
 					// biome-ignore lint/style/noNonNullAssertion: mtime is always set for notes above

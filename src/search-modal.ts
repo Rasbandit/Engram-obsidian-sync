@@ -129,7 +129,7 @@ export class SearchModal extends Modal {
 			new Notice("No source path for this result");
 			return;
 		}
-		const file = this.app.vault.getAbstractFileByPath(result.source_path);
+		const file = this.app.vault.getFileByPath(result.source_path);
 		if (!file) {
 			new Notice("Note not synced locally");
 			return;

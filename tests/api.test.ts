@@ -1,9 +1,10 @@
 /**
  * Tests for api.ts — utility functions and EngramApi method behavior.
  */
-import type { Mock } from "bun:test";
+import { type Mock, beforeEach, describe, expect, mock, test } from "bun:test";
 import { requestUrl } from "obsidian";
 import { EngramApi, arrayBufferToBase64, base64ToArrayBuffer } from "../src/api";
+import type { AuthProvider } from "../src/auth";
 
 // requestUrl is mocked via tests/preload.ts — it is already a mock() instance
 const mockRequestUrl = requestUrl as unknown as Mock<() => Promise<any>>;
@@ -150,6 +151,31 @@ describe("EngramApi", () => {
 				}),
 			);
 			expect(result).toEqual({ path: "Notes/Test.md", status: "created" });
+		});
+
+		test("returns conflict response on 409 with json body", async () => {
+			const conflictBody = {
+				conflict: true,
+				server_note: { path: "test.md", content: "server", version: 5, mtime: 100 },
+			};
+			mockRequestUrl.mockRejectedValueOnce({ status: 409, json: conflictBody });
+			const result = await api.pushNote("test.md", "local", 100, 3);
+			expect("conflict" in result).toBe(true);
+		});
+
+		test("returns conflict response on 409 without json (text body only)", async () => {
+			// Obsidian requestUrl may throw without .json on non-2xx
+			mockRequestUrl.mockRejectedValueOnce({
+				status: 409,
+				text: '{"conflict":true,"server_note":{"path":"test.md","content":"server","version":5,"mtime":100}}',
+			});
+			const result = await api.pushNote("test.md", "local", 100, 3);
+			expect("conflict" in result).toBe(true);
+		});
+
+		test("throws on non-409 errors", async () => {
+			mockRequestUrl.mockRejectedValueOnce({ status: 500 });
+			await expect(api.pushNote("test.md", "content", 100)).rejects.toEqual({ status: 500 });
 		});
 	});
 
@@ -330,6 +356,177 @@ describe("EngramApi", () => {
 				status: 402,
 				json: { error: "vault_limit_reached", limit: 1 },
 			});
+		});
+	});
+
+	describe("getMe", () => {
+		test("sends GET /me and returns user object", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { user: { id: 1, email: "test@example.com" } },
+			} as any);
+			const result = await api.getMe();
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("GET");
+			expect(opts.url).toBe(`${TEST_API_BASE}/me`);
+			expect(result).toEqual({ id: 1, email: "test@example.com" });
+		});
+	});
+
+	describe("getNote", () => {
+		test("sends GET /notes/{encoded_path}", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { path: "Notes/My File.md", content: "# Hello", version: 1 },
+			} as any);
+			const result = await api.getNote("Notes/My File.md");
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("GET");
+			expect(opts.url).toContain(encodeURIComponent("Notes/My File.md"));
+			expect(result).toEqual({ path: "Notes/My File.md", content: "# Hello", version: 1 });
+		});
+	});
+
+	describe("pushAttachment", () => {
+		test("sends POST /attachments with path, content_base64, mime_type, mtime", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { path: "images/photo.png", status: "created" },
+			} as any);
+			const result = await api.pushAttachment(
+				"images/photo.png",
+				"aGVsbG8=",
+				"image/png",
+				1234567890,
+			);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("POST");
+			expect(opts.url).toBe(`${TEST_API_BASE}/attachments`);
+			const body = JSON.parse(opts.body);
+			expect(body.path).toBe("images/photo.png");
+			expect(body.content_base64).toBe("aGVsbG8=");
+			expect(body.mime_type).toBe("image/png");
+			expect(body.mtime).toBe(1234567890);
+			expect(result).toEqual({ path: "images/photo.png", status: "created" });
+		});
+	});
+
+	describe("getAttachment", () => {
+		test("sends GET /attachments/{encoded_path}", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { path: "images/my photo.png", content_base64: "aGVsbG8=" },
+			} as any);
+			const result = await api.getAttachment("images/my photo.png");
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("GET");
+			expect(opts.url).toContain(encodeURIComponent("images/my photo.png"));
+			expect(result).toEqual({ path: "images/my photo.png", content_base64: "aGVsbG8=" });
+		});
+	});
+
+	describe("deleteAttachment", () => {
+		test("sends DELETE /attachments/{encoded_path}", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { status: "deleted" },
+			} as any);
+			await api.deleteAttachment("images/photo.png");
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("DELETE");
+			expect(opts.url).toContain(encodeURIComponent("images/photo.png"));
+		});
+	});
+
+	describe("pushLogs", () => {
+		test("sends POST /logs with entries array", async () => {
+			mockRequestUrl.mockResolvedValueOnce({ status: 200, json: {} } as any);
+			const entries = [
+				{
+					ts: "2026-04-12T10:00:00Z",
+					level: "info",
+					category: "push",
+					message: "pushed test.md",
+					plugin_version: "0.3.6",
+					platform: "desktop",
+				},
+			];
+			await api.pushLogs(entries);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("POST");
+			expect(opts.url).toBe(`${TEST_API_BASE}/logs`);
+			const body = JSON.parse(opts.body);
+			expect(body.logs).toEqual(entries);
+		});
+	});
+
+	describe("getAttachmentChanges", () => {
+		test("sends GET /attachments/changes with URL-encoded since", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { changes: [], deleted: [] },
+			} as any);
+			await api.getAttachmentChanges("2026-04-01T00:00:00+00:00");
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("GET");
+			expect(opts.url).toContain(encodeURIComponent("2026-04-01T00:00:00+00:00"));
+		});
+	});
+
+	describe("auth provider integration", () => {
+		test("setAuthProvider stores the provider", () => {
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve("oauth-token")),
+				getVaultId: mock(() => "99"),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+			};
+			api.setAuthProvider(provider);
+			expect(api.getActiveVaultId()).toBe("99");
+		});
+
+		test("getActiveVaultId returns provider.getVaultId when provider set", () => {
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve("t")),
+				getVaultId: mock(() => "77"),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+			};
+			api.setAuthProvider(provider);
+			expect(api.getActiveVaultId()).toBe("77");
+		});
+
+		test("getActiveVaultId returns this.vaultId when no provider", () => {
+			api.setVaultId("42");
+			expect(api.getActiveVaultId()).toBe("42");
+		});
+
+		test("request uses provider.getToken in Authorization header", async () => {
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve("oauth-token-123")),
+				getVaultId: mock(() => null),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+			};
+			api.setAuthProvider(provider);
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { user: { id: 1, email: "test@example.com" } },
+			} as any);
+			await api.getMe();
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.headers.Authorization).toBe("Bearer oauth-token-123");
+		});
+
+		test("request falls back to apiKey when no authProvider", async () => {
+			// No provider set — should use the constructor apiKey
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: { user: { id: 1, email: "test@example.com" } },
+			} as any);
+			await api.getMe();
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.headers.Authorization).toBe(`Bearer ${TEST_KEY}`);
 		});
 	});
 });
