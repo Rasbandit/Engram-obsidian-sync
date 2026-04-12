@@ -14,6 +14,8 @@ For CDP and Obsidian remote debugging (MCP devtools, evaluate_script), read `doc
 For server ops, infrastructure, and deployment, read `../engram-workspace/docs/deployment.md`.
 For backend REST API (all endpoints, pipelines, auth, config), read `../engram-workspace/docs/api-contract.md`.
 For cross-project debugging workflows, read `../engram-workspace/docs/debugging.md`.
+For Obsidian API best practices and correct usage patterns, read `docs/context/obsidian-api-reference.md`.
+For audit of API misuses and improvement opportunities, read `docs/context/obsidian-api-audit.md`.
 
 ## What This Plugin Does
 

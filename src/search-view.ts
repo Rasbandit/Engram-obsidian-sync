@@ -35,24 +35,23 @@ export class SearchView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		const container = this.containerEl.children[1];
-		container.empty();
-		container.addClass("engram-search-view-container");
+		this.contentEl.empty();
+		this.contentEl.addClass("engram-search-view-container");
 
-		this.inputEl = container.createEl("input", {
+		this.inputEl = this.contentEl.createEl("input", {
 			type: "text",
 			placeholder: "Search your vault semantically...",
 			cls: "engram-search-input",
 		});
 
-		this.folderEl = container.createEl("input", {
+		this.folderEl = this.contentEl.createEl("input", {
 			type: "text",
 			placeholder: "Filter by folder...",
 			cls: "engram-search-input engram-search-folder-input",
 		});
 
-		this.resultsEl = container.createDiv({ cls: "engram-search-results" });
-		this.previewEl = container.createDiv({ cls: "engram-search-preview" });
+		this.resultsEl = this.contentEl.createDiv({ cls: "engram-search-results" });
+		this.previewEl = this.contentEl.createDiv({ cls: "engram-search-preview" });
 
 		this.renderEmpty();
 
@@ -61,10 +60,10 @@ export class SearchView extends ItemView {
 			this.debounceTimer = setTimeout(() => this.doSearch(), 300);
 		};
 
-		this.inputEl.addEventListener("input", scheduleSearch);
-		this.folderEl.addEventListener("input", scheduleSearch);
+		this.registerDomEvent(this.inputEl, "input", scheduleSearch);
+		this.registerDomEvent(this.folderEl, "input", scheduleSearch);
 
-		this.inputEl.addEventListener("keydown", (e) => {
+		this.registerDomEvent(this.inputEl, "keydown", (e) => {
 			if (e.key === "ArrowDown") {
 				e.preventDefault();
 				this.moveSelection(1);
@@ -183,7 +182,7 @@ export class SearchView extends ItemView {
 			new Notice("No source path for this result");
 			return;
 		}
-		const file = this.app.vault.getAbstractFileByPath(result.source_path);
+		const file = this.app.vault.getFileByPath(result.source_path);
 		if (!file) {
 			new Notice("Note not synced locally");
 			return;
