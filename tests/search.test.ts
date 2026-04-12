@@ -1,4 +1,4 @@
-import type { Mock } from "bun:test";
+import { type Mock, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { requestUrl } from "obsidian";
 import { EngramApi } from "../src/api";
 
@@ -98,7 +98,7 @@ describe("SearchModal debounce", () => {
 		jest.useFakeTimers();
 
 		let callCount = 0;
-		const mockSearch = jest.fn().mockImplementation(() => {
+		const mockSearch = mock().mockImplementation(() => {
 			callCount++;
 			return Promise.resolve({ query: "test", results: [] });
 		});

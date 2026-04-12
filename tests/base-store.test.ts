@@ -13,6 +13,7 @@
  * - Entries without version (legacy/migration edge case)
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { BaseStore } from "../src/base-store";
 
 /** Fake DataAdapter that records reads/writes in memory. */
@@ -20,11 +21,11 @@ function makeFakeAdapter() {
 	const files: Record<string, string> = {};
 	return {
 		files,
-		read: jest.fn(async (path: string) => {
+		read: mock(async (path: string) => {
 			if (path in files) return files[path];
 			throw new Error(`File not found: ${path}`);
 		}),
-		write: jest.fn(async (path: string, data: string) => {
+		write: mock(async (path: string, data: string) => {
 			files[path] = data;
 		}),
 	};

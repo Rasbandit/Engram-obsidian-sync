@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { ApiKeyAuth, OAuthAuth } from "../src/auth";
 
 describe("ApiKeyAuth", () => {
@@ -29,7 +30,7 @@ describe("ApiKeyAuth", () => {
 });
 
 describe("OAuthAuth", () => {
-	const mockRefreshFn = jest.fn();
+	const mockRefreshFn = mock();
 
 	beforeEach(() => {
 		mockRefreshFn.mockReset();
@@ -125,7 +126,7 @@ describe("OAuthAuth", () => {
 
 	it("deduplicates concurrent refresh calls (race condition)", async () => {
 		let callCount = 0;
-		const slowRefresh = jest.fn(async (_token: string) => {
+		const slowRefresh = mock(async (_token: string) => {
 			callCount++;
 			// Simulate network delay so concurrent calls overlap
 			await new Promise((r) => setTimeout(r, 50));
@@ -160,7 +161,7 @@ describe("OAuthAuth", () => {
 			expires_in: 3600,
 		});
 
-		const onRotated = jest.fn();
+		const onRotated = mock();
 		const auth = new OAuthAuth(
 			"engram_rt_old",
 			"vault-1",
@@ -176,7 +177,7 @@ describe("OAuthAuth", () => {
 	it("does not call onTokenRotated on refresh failure", async () => {
 		mockRefreshFn.mockRejectedValue(new Error("401"));
 
-		const onRotated = jest.fn();
+		const onRotated = mock();
 		const auth = new OAuthAuth(
 			"engram_rt_old",
 			"vault-1",

@@ -1,6 +1,7 @@
 /**
  * Tests for remote-log.ts — RemoteLogger buffer, flush, threshold, ring buffer.
  */
+import { beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { RemoteLogger, destroyRemoteLog, initRemoteLog, rlog } from "../src/remote-log";
 
 beforeEach(() => {
@@ -14,7 +15,7 @@ beforeEach(() => {
 describe("RemoteLogger basics", () => {
 	test("does not buffer when disabled", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		// Not enabled — entries should be dropped
 		logger.error("test", "message");
@@ -24,7 +25,7 @@ describe("RemoteLogger basics", () => {
 
 	test("buffers entries when enabled", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.info("sync", "started");
@@ -40,7 +41,7 @@ describe("RemoteLogger basics", () => {
 
 	test("entries include version and platform", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "2.1.0", "mobile-ios");
 		logger.setEnabled(true);
 		logger.warn("net", "timeout");
@@ -53,7 +54,7 @@ describe("RemoteLogger basics", () => {
 
 	test("error entries include stack trace", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.error("crash", "oops", "Error: oops\n  at foo.ts:1");
@@ -65,7 +66,7 @@ describe("RemoteLogger basics", () => {
 
 	test("entries have ISO timestamp", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.info("test", "msg");
@@ -83,7 +84,7 @@ describe("RemoteLogger basics", () => {
 describe("RemoteLogger flush threshold", () => {
 	test("auto-flushes at 20 entries", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 
@@ -106,7 +107,7 @@ describe("RemoteLogger flush threshold", () => {
 describe("RemoteLogger ring buffer", () => {
 	test("drops oldest entries when exceeding 200", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 
@@ -114,7 +115,7 @@ describe("RemoteLogger ring buffer", () => {
 		// But the ring buffer caps at 200 entries in the buffer at any time
 		// After flush threshold (20), the buffer is drained, so we won't hit 200
 		// To test the ring buffer, we need a pushFn that rejects (entries stay in buffer)
-		const rejectPushFn = jest.fn().mockRejectedValue(new Error("offline"));
+		const rejectPushFn = mock().mockRejectedValue(new Error("offline"));
 		logger.configure(rejectPushFn, "1.0.0", "desktop");
 
 		// The flush at 20 will fail, putting entries back. Keep adding.
@@ -125,7 +126,7 @@ describe("RemoteLogger ring buffer", () => {
 		}
 
 		// Flush whatever is left and verify it's <= 200
-		const finalPush = jest.fn().mockResolvedValue(undefined);
+		const finalPush = mock().mockResolvedValue(undefined);
 		logger.configure(finalPush, "1.0.0", "desktop");
 		logger.flush();
 
@@ -143,7 +144,7 @@ describe("RemoteLogger ring buffer", () => {
 describe("RemoteLogger enable/disable", () => {
 	test("disabling flushes remaining entries", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.info("test", "msg");
@@ -160,7 +161,7 @@ describe("RemoteLogger enable/disable", () => {
 describe("RemoteLogger flush guards", () => {
 	test("flush is no-op when buffer is empty", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.flush();
@@ -184,7 +185,7 @@ describe("RemoteLogger flush guards", () => {
 describe("RemoteLogger destroy", () => {
 	test("destroy flushes and clears", () => {
 		const logger = new RemoteLogger();
-		const pushFn = jest.fn().mockResolvedValue(undefined);
+		const pushFn = mock().mockResolvedValue(undefined);
 		logger.configure(pushFn, "1.0.0", "desktop");
 		logger.setEnabled(true);
 		logger.info("test", "final");

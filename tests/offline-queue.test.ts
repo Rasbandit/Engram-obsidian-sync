@@ -1,6 +1,7 @@
 /**
  * Tests for offline-queue.ts — enqueue, dequeue, deduplication, ordering, persistence.
  */
+import { describe, expect, jest, mock, test } from "bun:test";
 import { OfflineQueue } from "../src/offline-queue";
 import type { QueueEntry } from "../src/types";
 
@@ -123,7 +124,7 @@ describe("OfflineQueue load", () => {
 
 describe("OfflineQueue persistence", () => {
 	test("dequeue triggers immediate persist", async () => {
-		const persistFn = jest.fn().mockResolvedValue(undefined);
+		const persistFn = mock().mockResolvedValue(undefined);
 		const q = new OfflineQueue();
 		q.onPersist(persistFn);
 		await q.enqueue(makeEntry("a.md"));
@@ -132,7 +133,7 @@ describe("OfflineQueue persistence", () => {
 	});
 
 	test("clear triggers immediate persist", async () => {
-		const persistFn = jest.fn().mockResolvedValue(undefined);
+		const persistFn = mock().mockResolvedValue(undefined);
 		const q = new OfflineQueue();
 		q.onPersist(persistFn);
 		await q.enqueue(makeEntry("a.md"));
@@ -142,7 +143,7 @@ describe("OfflineQueue persistence", () => {
 
 	test("enqueue debounces persist", async () => {
 		jest.useFakeTimers();
-		const persistFn = jest.fn().mockResolvedValue(undefined);
+		const persistFn = mock().mockResolvedValue(undefined);
 		const q = new OfflineQueue(500);
 		q.onPersist(persistFn);
 
@@ -159,7 +160,7 @@ describe("OfflineQueue persistence", () => {
 
 	test("rapid enqueues coalesce into one persist", async () => {
 		jest.useFakeTimers();
-		const persistFn = jest.fn().mockResolvedValue(undefined);
+		const persistFn = mock().mockResolvedValue(undefined);
 		const q = new OfflineQueue(500);
 		q.onPersist(persistFn);
 
@@ -244,7 +245,7 @@ describe("OfflineQueue vault-scoped dedup", () => {
 describe("OfflineQueue destroy", () => {
 	test("destroy cancels pending persist timer", async () => {
 		jest.useFakeTimers();
-		const persistFn = jest.fn().mockResolvedValue(undefined);
+		const persistFn = mock().mockResolvedValue(undefined);
 		const q = new OfflineQueue(500);
 		q.onPersist(persistFn);
 

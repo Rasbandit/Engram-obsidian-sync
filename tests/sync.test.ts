@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { TFile } from "obsidian";
 import type { EngramApi } from "../src/api";
 import { SyncEngine, fnv1a } from "../src/sync";
@@ -5,10 +6,10 @@ import { DEFAULT_SETTINGS } from "../src/types";
 
 // Mock the API
 const mockApi = {
-	pushNote: jest.fn().mockResolvedValue({ note: {}, chunks_indexed: 1 }),
-	getChanges: jest.fn().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
-	deleteNote: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
-	getNote: jest.fn().mockResolvedValue({
+	pushNote: mock().mockResolvedValue({ note: {}, chunks_indexed: 1 }),
+	getChanges: mock().mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
+	deleteNote: mock().mockResolvedValue({ deleted: true, path: "" }),
+	getNote: mock().mockResolvedValue({
 		path: "Notes/Remote.md",
 		title: "Remote Note",
 		content: "# Remote\n\nFrom SSE",
@@ -18,10 +19,10 @@ const mockApi = {
 		created_at: "2026-03-01T12:00:00Z",
 		updated_at: "2026-03-01T12:00:00Z",
 	}),
-	health: jest.fn().mockResolvedValue(true),
-	ping: jest.fn().mockResolvedValue({ ok: true }),
-	pushAttachment: jest.fn().mockResolvedValue({ attachment: {} }),
-	getAttachment: jest.fn().mockResolvedValue({
+	health: mock().mockResolvedValue(true),
+	ping: mock().mockResolvedValue({ ok: true }),
+	pushAttachment: mock().mockResolvedValue({ attachment: {} }),
+	getAttachment: mock().mockResolvedValue({
 		path: "Assets/image.png",
 		content_base64: "AQID",
 		mime_type: "image/png",
@@ -30,12 +31,12 @@ const mockApi = {
 		created_at: "2026-03-01T12:00:00Z",
 		updated_at: "2026-03-01T12:00:00Z",
 	}),
-	deleteAttachment: jest.fn().mockResolvedValue({ deleted: true, path: "" }),
+	deleteAttachment: mock().mockResolvedValue({ deleted: true, path: "" }),
 	getAttachmentChanges: jest
 		.fn()
 		.mockResolvedValue({ changes: [], server_time: "2026-01-01T00:00:00Z" }),
-	getRateLimit: jest.fn().mockResolvedValue(0),
-	getManifest: jest.fn().mockResolvedValue(null),
+	getRateLimit: mock().mockResolvedValue(0),
+	getManifest: mock().mockResolvedValue(null),
 	registerVault: jest
 		.fn()
 		.mockResolvedValue({ id: 1, name: "Test", slug: "test", is_default: true }),
@@ -43,15 +44,15 @@ const mockApi = {
 
 // Mock the Obsidian App
 const mockEditor = {
-	getValue: jest.fn().mockReturnValue(""),
-	setValue: jest.fn(),
-	getCursor: jest.fn().mockReturnValue({ line: 0, ch: 0 }),
-	setCursor: jest.fn(),
-	getScrollInfo: jest.fn().mockReturnValue({ left: 0, top: 0 }),
-	scrollTo: jest.fn(),
-	lastLine: jest.fn().mockReturnValue(0),
-	getLine: jest.fn().mockReturnValue(""),
-	replaceRange: jest.fn(),
+	getValue: mock().mockReturnValue(""),
+	setValue: mock(),
+	getCursor: mock().mockReturnValue({ line: 0, ch: 0 }),
+	setCursor: mock(),
+	getScrollInfo: mock().mockReturnValue({ left: 0, top: 0 }),
+	scrollTo: mock(),
+	lastLine: mock().mockReturnValue(0),
+	getLine: mock().mockReturnValue(""),
+	replaceRange: mock(),
 };
 
 const mockActiveView = {
@@ -61,32 +62,32 @@ const mockActiveView = {
 
 const mockApp = {
 	vault: {
-		read: jest.fn().mockResolvedValue("# Test\n\nContent"),
-		cachedRead: jest.fn().mockResolvedValue("# Test\n\nContent"),
-		readBinary: jest.fn().mockResolvedValue(new ArrayBuffer(3)),
-		getMarkdownFiles: jest.fn().mockReturnValue([]),
-		getFiles: jest.fn().mockReturnValue([]),
-		getAbstractFileByPath: jest.fn().mockReturnValue(null),
-		getFileByPath: jest.fn().mockReturnValue(null) as jest.Mock,
-		modify: jest.fn().mockResolvedValue(undefined),
-		process: jest.fn().mockImplementation((_file: any, fn: (data: string) => string) => {
+		read: mock().mockResolvedValue("# Test\n\nContent"),
+		cachedRead: mock().mockResolvedValue("# Test\n\nContent"),
+		readBinary: mock().mockResolvedValue(new ArrayBuffer(3)),
+		getMarkdownFiles: mock().mockReturnValue([]),
+		getFiles: mock().mockReturnValue([]),
+		getAbstractFileByPath: mock().mockReturnValue(null),
+		getFileByPath: mock().mockReturnValue(null) as jest.Mock,
+		modify: mock().mockResolvedValue(undefined),
+		process: mock().mockImplementation((_file: any, fn: (data: string) => string) => {
 			fn(""); // call the transform function
 			return Promise.resolve("");
 		}),
-		modifyBinary: jest.fn().mockResolvedValue(undefined),
-		create: jest.fn().mockResolvedValue(undefined),
-		createBinary: jest.fn().mockResolvedValue(undefined),
-		createFolder: jest.fn().mockResolvedValue(undefined),
-		trash: jest.fn().mockResolvedValue(undefined),
-		rename: jest.fn().mockResolvedValue(undefined),
-		getName: jest.fn().mockReturnValue("Test Vault"),
+		modifyBinary: mock().mockResolvedValue(undefined),
+		create: mock().mockResolvedValue(undefined),
+		createBinary: mock().mockResolvedValue(undefined),
+		createFolder: mock().mockResolvedValue(undefined),
+		trash: mock().mockResolvedValue(undefined),
+		rename: mock().mockResolvedValue(undefined),
+		getName: mock().mockReturnValue("Test Vault"),
 	},
 	workspace: {
-		getActiveViewOfType: jest.fn().mockReturnValue(null),
+		getActiveViewOfType: mock().mockReturnValue(null),
 	},
 } as any;
 
-const mockSaveData = jest.fn().mockResolvedValue(undefined);
+const mockSaveData = mock().mockResolvedValue(undefined);
 
 /** Helper: get the content that was written via vault.process or vault.modify */
 function getWrittenContent(): string | undefined {
@@ -1173,7 +1174,7 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Wire up a real BaseStore with the base content
 		const { BaseStore } = require("../src/base-store");
-		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const mockAdapter = { read: mock(), write: mock() };
 		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
 		baseStore.set("Notes/Conflict.md", "# Title\nBase content here", 1);
 		engine.baseStore = baseStore;
@@ -1233,7 +1234,7 @@ describe("SyncEngine conflict resolution", () => {
 
 		// Wire up BaseStore with the base content
 		const { BaseStore } = require("../src/base-store");
-		const mockAdapter = { read: jest.fn(), write: jest.fn() };
+		const mockAdapter = { read: mock(), write: mock() };
 		const baseStore = new BaseStore(mockAdapter, "sync-bases.json");
 		baseStore.set("Notes/Conflict.md", "# Title\nSection A\n\nSection B", 1);
 		engine.baseStore = baseStore;
@@ -2091,7 +2092,7 @@ describe("debounced persistence", () => {
 	test("enqueue does not persist immediately", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		await queue.enqueue({ path: "a.md", action: "upsert" as const, timestamp: 1 });
@@ -2108,7 +2109,7 @@ describe("debounced persistence", () => {
 	test("rapid enqueues coalesce into one persist", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		for (let i = 0; i < 5; i++) {
@@ -2126,7 +2127,7 @@ describe("debounced persistence", () => {
 	test("dequeue persists immediately", async () => {
 		const { OfflineQueue } = require("../src/offline-queue");
 		const queue = new OfflineQueue(100);
-		const persistSpy = jest.fn().mockResolvedValue(undefined);
+		const persistSpy = mock().mockResolvedValue(undefined);
 		queue.onPersist(persistSpy);
 
 		queue.load([{ path: "a.md", action: "upsert" as const, timestamp: 1 }]);
