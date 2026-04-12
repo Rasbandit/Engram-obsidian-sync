@@ -2733,3 +2733,106 @@ describe("SyncEngine Obsidian API best practices", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Sync state export/import round-trips
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine sync state management", () => {
+	test("exportSyncState returns all entries as plain object", () => {
+		const engine = createEngine();
+		engine.importSyncState({
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		});
+		const exported = engine.exportSyncState();
+		expect(exported).toEqual({
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		});
+	});
+
+	test("exportHashes returns hash-only projection", () => {
+		const engine = createEngine();
+		engine.importSyncState({
+			"Notes/A.md": { hash: 111, version: 3 } as any,
+			"Notes/B.md": { hash: 222 },
+		});
+		const hashes = engine.exportHashes();
+		expect(hashes).toEqual({
+			"Notes/A.md": 111,
+			"Notes/B.md": 222,
+		});
+	});
+
+	test("importHashes creates entries with hash property only", () => {
+		const engine = createEngine();
+		engine.importHashes({ "Notes/A.md": 111, "Notes/B.md": 222 });
+		const exported = engine.exportSyncState();
+		expect(exported["Notes/A.md"]).toEqual({ hash: 111 });
+		expect(exported["Notes/B.md"]).toEqual({ hash: 222 });
+	});
+
+	test("importSyncState + exportSyncState round-trips correctly", () => {
+		const engine = createEngine();
+		const original = {
+			"Notes/A.md": { hash: 111 },
+			"Notes/B.md": { hash: 222 },
+		};
+		engine.importSyncState(original);
+		expect(engine.exportSyncState()).toEqual(original);
+	});
+
+	test("importHashes + exportHashes round-trips correctly", () => {
+		const engine = createEngine();
+		const original = { "Notes/A.md": 111, "Notes/B.md": 222 };
+		engine.importHashes(original);
+		expect(engine.exportHashes()).toEqual(original);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// updateSettings
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine.updateSettings", () => {
+	test("re-parses ignore patterns after update", () => {
+		const engine = createEngine({ ignorePatterns: "secret/" });
+		expect(engine.shouldIgnore("secret/passwords.md")).toBe(true);
+		expect(engine.shouldIgnore("public/readme.md")).toBe(false);
+
+		engine.updateSettings({ ...DEFAULT_SETTINGS, ignorePatterns: "public/" });
+		expect(engine.shouldIgnore("secret/passwords.md")).toBe(false);
+		expect(engine.shouldIgnore("public/readme.md")).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Private utility methods (accessed via cast for coverage)
+// ---------------------------------------------------------------------------
+
+describe("SyncEngine private utilities", () => {
+	// Note: md5() uses crypto.subtle.digest("MD5") which Obsidian supports
+	// but Bun's Web Crypto does not. MD5 tests require E2E in the backend repo.
+
+	test("arrayBuffersEqual returns true for identical buffers", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2, 3]).buffer;
+		const b = new Uint8Array([1, 2, 3]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(true);
+	});
+
+	test("arrayBuffersEqual returns false for different content", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2, 3]).buffer;
+		const b = new Uint8Array([1, 2, 4]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(false);
+	});
+
+	test("arrayBuffersEqual returns false for different lengths", () => {
+		const engine = createEngine();
+		const a = new Uint8Array([1, 2]).buffer;
+		const b = new Uint8Array([1, 2, 3]).buffer;
+		expect((engine as any).arrayBuffersEqual(a, b)).toBe(false);
+	});
+});
