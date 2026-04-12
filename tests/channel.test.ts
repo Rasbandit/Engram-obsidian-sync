@@ -2,6 +2,7 @@
  * Tests for channel.ts — Phoenix channel with vault-scoped topics.
  */
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { AuthProvider } from "../src/auth";
 import { NoteChannel } from "../src/channel";
 
 // Capture WebSocket constructor calls
@@ -117,6 +118,82 @@ describe("NoteChannel updateConfig with vaultId", () => {
 
 		const joinMsg = getLastSentMessage(lastWsInstance);
 		expect(joinMsg[2]).toBe("sync:42:99");
+
+		channel.disconnect();
+	});
+});
+
+describe("NoteChannel.isConnected", () => {
+	test("returns false before connect", () => {
+		const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
+		expect(channel.isConnected()).toBe(false);
+	});
+
+	test("returns true after successful join reply", async () => {
+		const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
+		await channel.connect();
+		simulateOpen(lastWsInstance);
+
+		// The join message was sent; simulate a successful phx_reply
+		const joinMsg = JSON.parse(lastWsInstance.sent[0]);
+		const joinRef = joinMsg[0]; // join ref
+		const ref = joinMsg[1]; // message ref
+		simulateMessage(lastWsInstance, [
+			joinRef,
+			ref,
+			"sync:42:7",
+			"phx_reply",
+			{ status: "ok", response: {} },
+		]);
+
+		expect(channel.isConnected()).toBe(true);
+		channel.disconnect();
+	});
+
+	test("returns false after disconnect", async () => {
+		const channel = new NoteChannel("http://localhost:4000", "key", "42", "7");
+		await channel.connect();
+		simulateOpen(lastWsInstance);
+
+		const joinMsg = JSON.parse(lastWsInstance.sent[0]);
+		simulateMessage(lastWsInstance, [
+			joinMsg[0],
+			joinMsg[1],
+			"sync:42:7",
+			"phx_reply",
+			{ status: "ok", response: {} },
+		]);
+		expect(channel.isConnected()).toBe(true);
+
+		channel.disconnect();
+		expect(channel.isConnected()).toBe(false);
+	});
+});
+
+describe("NoteChannel.setAuthProvider", () => {
+	test("stores the provider and uses its token for WebSocket URL", async () => {
+		const provider: AuthProvider = {
+			getToken: mock(() => Promise.resolve("oauth-ws-token-abc")),
+			getVaultId: mock(() => "99"),
+			isAuthenticated: mock(() => true),
+			signOut: mock(() => {}),
+		};
+		const channel = new NoteChannel("http://localhost:4000", "fallback-key", "42", "7");
+		channel.setAuthProvider(provider);
+		await channel.connect();
+
+		// The WebSocket URL should contain the oauth token, not the fallback key
+		expect(lastWsUrl).toContain("oauth-ws-token-abc");
+		expect(lastWsUrl).not.toContain("fallback-key");
+
+		channel.disconnect();
+	});
+
+	test("uses apiKey when no auth provider set", async () => {
+		const channel = new NoteChannel("http://localhost:4000", "my-api-key", "42", "7");
+		await channel.connect();
+
+		expect(lastWsUrl).toContain("my-api-key");
 
 		channel.disconnect();
 	});
