@@ -1597,7 +1597,9 @@ var EngramApi = class _EngramApi {
       return resp.json;
     } catch (e) {
       if (typeof e === "object" && e !== null && e.status === 409) {
-        return e.json;
+        const err = e;
+        if (err.json) return err.json;
+        if (err.text) return JSON.parse(err.text);
       }
       throw e;
     }
@@ -1723,25 +1725,40 @@ var ApiKeyAuth = class {
   }
 };
 var _OAuthAuth = class _OAuthAuth {
-  constructor(refreshToken, vaultId, userEmail, refreshFn) {
+  constructor(refreshToken, vaultId, userEmail, refreshFn, onTokenRotated) {
     this.accessToken = null;
     this.expiresAt = 0;
     this.authenticated = true;
+    this.inflightRefresh = null;
     this.refreshToken = refreshToken;
     this.vaultId = vaultId;
     this.userEmail = userEmail;
     this.refreshFn = refreshFn;
+    this.onTokenRotated = onTokenRotated;
   }
   async getToken() {
     if (this.accessToken && this.expiresAt > Date.now() + _OAuthAuth.EXPIRY_BUFFER_MS) {
       return this.accessToken;
     }
+    if (this.inflightRefresh) {
+      return this.inflightRefresh;
+    }
+    this.inflightRefresh = this.doRefresh();
+    try {
+      return await this.inflightRefresh;
+    } finally {
+      this.inflightRefresh = null;
+    }
+  }
+  async doRefresh() {
+    var _a;
     try {
       const result = await this.refreshFn(this.refreshToken);
       this.accessToken = result.access_token;
       this.refreshToken = result.refresh_token;
       this.expiresAt = Date.now() + result.expires_in * 1e3;
       this.authenticated = true;
+      (_a = this.onTokenRotated) == null ? void 0 : _a.call(this, result.refresh_token);
       return this.accessToken;
     } catch (err) {
       this.authenticated = false;
@@ -2684,7 +2701,7 @@ var SearchModal = class extends import_obsidian4.Modal {
       new import_obsidian4.Notice("No source path for this result");
       return;
     }
-    const file = this.app.vault.getAbstractFileByPath(result.source_path);
+    const file = this.app.vault.getFileByPath(result.source_path);
     if (!file) {
       new import_obsidian4.Notice("Note not synced locally");
       return;
@@ -2738,29 +2755,28 @@ var SearchView = class extends import_obsidian5.ItemView {
     return "search";
   }
   async onOpen() {
-    const container = this.containerEl.children[1];
-    container.empty();
-    container.addClass("engram-search-view-container");
-    this.inputEl = container.createEl("input", {
+    this.contentEl.empty();
+    this.contentEl.addClass("engram-search-view-container");
+    this.inputEl = this.contentEl.createEl("input", {
       type: "text",
       placeholder: "Search your vault semantically...",
       cls: "engram-search-input"
     });
-    this.folderEl = container.createEl("input", {
+    this.folderEl = this.contentEl.createEl("input", {
       type: "text",
       placeholder: "Filter by folder...",
       cls: "engram-search-input engram-search-folder-input"
     });
-    this.resultsEl = container.createDiv({ cls: "engram-search-results" });
-    this.previewEl = container.createDiv({ cls: "engram-search-preview" });
+    this.resultsEl = this.contentEl.createDiv({ cls: "engram-search-results" });
+    this.previewEl = this.contentEl.createDiv({ cls: "engram-search-preview" });
     this.renderEmpty();
     const scheduleSearch = () => {
       if (this.debounceTimer) clearTimeout(this.debounceTimer);
       this.debounceTimer = setTimeout(() => this.doSearch(), 300);
     };
-    this.inputEl.addEventListener("input", scheduleSearch);
-    this.folderEl.addEventListener("input", scheduleSearch);
-    this.inputEl.addEventListener("keydown", (e) => {
+    this.registerDomEvent(this.inputEl, "input", scheduleSearch);
+    this.registerDomEvent(this.folderEl, "input", scheduleSearch);
+    this.registerDomEvent(this.inputEl, "keydown", (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         this.moveSelection(1);
@@ -2860,7 +2876,7 @@ var SearchView = class extends import_obsidian5.ItemView {
       new import_obsidian5.Notice("No source path for this result");
       return;
     }
-    const file = this.app.vault.getAbstractFileByPath(result.source_path);
+    const file = this.app.vault.getFileByPath(result.source_path);
     if (!file) {
       new import_obsidian5.Notice("Note not synced locally");
       return;
@@ -3871,7 +3887,7 @@ var SyncEngine = class {
         const mimeType = this.getMimeType(file);
         await this.api.pushAttachment(file.path, base64, mimeType, mtime);
       } else {
-        const content = await this.app.vault.read(file);
+        const content = await this.app.vault.cachedRead(file);
         const hash = fnv1a(content);
         const existing = this.syncState.get((0, import_obsidian8.normalizePath)(file.path));
         if (!force && existing !== void 0 && hash === existing.hash) {
@@ -3899,9 +3915,9 @@ var SyncEngine = class {
                 merge.merged,
                 mtime
               );
-              const localFile = this.app.vault.getAbstractFileByPath(file.path);
-              if (localFile && localFile instanceof import_obsidian8.TFile) {
-                await this.app.vault.modify(localFile, merge.merged);
+              const localFile = this.app.vault.getFileByPath(file.path);
+              if (localFile) {
+                await this.modifyFile(localFile, merge.merged);
               }
               if (!("conflict" in mergeResp)) {
                 const np = (0, import_obsidian8.normalizePath)(file.path);
@@ -3943,9 +3959,9 @@ var SyncEngine = class {
               }
             }
           } else if (resolution.choice === "keep-remote") {
-            const localFile = this.app.vault.getAbstractFileByPath(file.path);
-            if (localFile && localFile instanceof import_obsidian8.TFile) {
-              await this.app.vault.modify(localFile, serverNote.content);
+            const localFile = this.app.vault.getFileByPath(file.path);
+            if (localFile) {
+              await this.modifyFile(localFile, serverNote.content);
               const np = (0, import_obsidian8.normalizePath)(file.path);
               this.syncState.set(np, {
                 hash: fnv1a(serverNote.content),
@@ -3959,9 +3975,9 @@ var SyncEngine = class {
               resolution.mergedContent,
               mtime
             );
-            const localFile = this.app.vault.getAbstractFileByPath(file.path);
-            if (localFile && localFile instanceof import_obsidian8.TFile) {
-              await this.app.vault.modify(localFile, resolution.mergedContent);
+            const localFile = this.app.vault.getFileByPath(file.path);
+            if (localFile) {
+              await this.modifyFile(localFile, resolution.mergedContent);
             }
             if (!("conflict" in mergeResp)) {
               const np = (0, import_obsidian8.normalizePath)(file.path);
@@ -3983,7 +3999,7 @@ var SyncEngine = class {
         const serverPath = resp.note.path;
         const serverVersion = resp.note.version;
         if (serverPath && serverPath !== file.path) {
-          const localFile = this.app.vault.getAbstractFileByPath(file.path);
+          const localFile = this.app.vault.getFileByPath(file.path);
           if (localFile) {
             await this.app.vault.rename(localFile, serverPath);
             devLog().log(
@@ -4146,8 +4162,8 @@ var SyncEngine = class {
     devLog().log("push", `flushing ${paths.length} post-pull pushes`);
     rlog().info("push", `Post-pull flush: ${paths.length} files`);
     for (const path of paths) {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof import_obsidian8.TFile) {
+      const file = this.app.vault.getFileByPath(path);
+      if (file) {
         await this.pushFile(file);
       }
     }
@@ -4236,8 +4252,8 @@ var SyncEngine = class {
     const isAttachment = event.kind === "attachment";
     if (event.event_type === "delete") {
       const normalized = (0, import_obsidian8.normalizePath)(event.path);
-      const existing = this.app.vault.getAbstractFileByPath(normalized);
-      if (existing && existing instanceof import_obsidian8.TFile) {
+      const existing = this.app.vault.getFileByPath(normalized);
+      if (existing) {
         await this.app.vault.trash(existing, true);
         await this.removeEmptyFolders(normalized);
       }
@@ -4284,10 +4300,7 @@ var SyncEngine = class {
           });
         }
       } catch (e) {
-        console.error(
-          `Engram Sync: failed to apply WebSocket event ${event.path}`,
-          e
-        );
+        console.error(`Engram Sync: failed to apply WebSocket event ${event.path}`, e);
       }
     }
   }
@@ -4299,8 +4312,8 @@ var SyncEngine = class {
     if (this.shouldIgnore(change.path)) return false;
     const normalized = (0, import_obsidian8.normalizePath)(change.path);
     if (change.deleted) {
-      const existing2 = this.app.vault.getAbstractFileByPath(normalized);
-      if (existing2 && existing2 instanceof import_obsidian8.TFile) {
+      const existing2 = this.app.vault.getFileByPath(normalized);
+      if (existing2) {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
         this.syncState.delete(normalized);
@@ -4310,9 +4323,9 @@ var SyncEngine = class {
       }
       return false;
     }
-    const existing = this.app.vault.getAbstractFileByPath(normalized);
-    if (existing && existing instanceof import_obsidian8.TFile) {
-      const localContent = await this.app.vault.read(existing);
+    const existing = this.app.vault.getFileByPath(normalized);
+    if (existing) {
+      const localContent = await this.app.vault.cachedRead(existing);
       const localHash = fnv1a(localContent);
       const lastSynced = this.syncState.get(normalized);
       const lastSyncedHash = lastSynced == null ? void 0 : lastSynced.hash;
@@ -4339,7 +4352,7 @@ var SyncEngine = class {
         if (pullBase) {
           const merge = threeWayMerge(pullBase.content, localContent, change.content);
           if (merge.clean) {
-            await this.app.vault.modify(existing, merge.merged);
+            await this.modifyFile(existing, merge.merged);
             this.syncState.set(normalized, {
               hash: fnv1a(merge.merged),
               version: change.version
@@ -4431,7 +4444,7 @@ var SyncEngine = class {
         }
         if (resolution.choice === "merge" && resolution.mergedContent != null) {
           try {
-            await this.app.vault.modify(existing, resolution.mergedContent);
+            await this.modifyFile(existing, resolution.mergedContent);
             this.syncState.set(normalized, {
               hash: fnv1a(resolution.mergedContent),
               version: change.version
@@ -4466,7 +4479,7 @@ var SyncEngine = class {
         rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
-      await this.app.vault.modify(existing, change.content);
+      await this.modifyFile(existing, change.content);
       this.syncState.set(normalized, {
         hash: fnv1a(change.content),
         version: change.version
@@ -4498,8 +4511,8 @@ var SyncEngine = class {
     if (this.shouldIgnore(change.path)) return false;
     const normalized = (0, import_obsidian8.normalizePath)(change.path);
     if (change.deleted) {
-      const existing2 = this.app.vault.getAbstractFileByPath(normalized);
-      if (existing2 && existing2 instanceof import_obsidian8.TFile) {
+      const existing2 = this.app.vault.getFileByPath(normalized);
+      if (existing2) {
         await this.app.vault.trash(existing2, true);
         await this.removeEmptyFolders(normalized);
         rlog().info("pull", `Attachment deleted: ${change.path}`);
@@ -4509,8 +4522,8 @@ var SyncEngine = class {
     }
     const resolvedBase64 = contentBase64 != null ? contentBase64 : (await this.api.getAttachment(change.path)).content_base64;
     const buffer = base64ToArrayBuffer(resolvedBase64);
-    const existing = this.app.vault.getAbstractFileByPath(normalized);
-    if (existing && existing instanceof import_obsidian8.TFile) {
+    const existing = this.app.vault.getFileByPath(normalized);
+    if (existing) {
       if (existing.stat.size === buffer.byteLength) {
         const localBuffer = await this.app.vault.readBinary(existing);
         if (this.arrayBuffersEqual(localBuffer, buffer)) {
@@ -4568,6 +4581,15 @@ var SyncEngine = class {
     return { choice: "keep-remote" };
   }
   /** Create a text file, ensuring parent folders exist. */
+  /** Modify a file using vault.process() when available (scroll-safe),
+   *  falling back to vault.modify() for older Obsidian versions. */
+  async modifyFile(file, content) {
+    if (this.app.vault.process) {
+      await this.app.vault.process(file, () => content);
+    } else {
+      await this.app.vault.modify(file, content);
+    }
+  }
   async createFileWithFolders(normalized, content) {
     const folder = normalized.includes("/") ? normalized.substring(0, normalized.lastIndexOf("/")) : "";
     if (folder) {
@@ -4696,8 +4718,8 @@ var SyncEngine = class {
           `Fixing ${toFix.length} files after pushAll (${missing.length} missing, ${diverged.length} diverged)`
         );
         for (const path of toFix) {
-          const file = this.app.vault.getAbstractFileByPath((0, import_obsidian8.normalizePath)(path));
-          if (file instanceof import_obsidian8.TFile) {
+          const file = this.app.vault.getFileByPath((0, import_obsidian8.normalizePath)(path));
+          if (file) {
             await this.pushFile(file, true);
           }
         }
@@ -4738,7 +4760,7 @@ var SyncEngine = class {
       if (!serverHash) {
         missing.push(file.path);
       } else {
-        const content = await this.app.vault.read(file);
+        const content = await this.app.vault.cachedRead(file);
         const localHash = await this.md5(content);
         if (localHash !== serverHash) {
           diverged.push(file.path);
@@ -4832,8 +4854,8 @@ var SyncEngine = class {
           let mimeType = entry.mimeType;
           let mtime = entry.mtime;
           if (!base64) {
-            const file = this.app.vault.getAbstractFileByPath(entry.path);
-            if (!(file instanceof import_obsidian8.TFile)) {
+            const file = this.app.vault.getFileByPath(entry.path);
+            if (!file) {
               await this.queue.dequeue(
                 entry.path,
                 (_a = this.settings.vaultId) != null ? _a : void 0
@@ -4851,8 +4873,8 @@ var SyncEngine = class {
           let content = entry.content;
           let mtime = entry.mtime;
           if (content === void 0) {
-            const file = this.app.vault.getAbstractFileByPath(entry.path);
-            if (!(file instanceof import_obsidian8.TFile)) {
+            const file = this.app.vault.getFileByPath(entry.path);
+            if (!file) {
               await this.queue.dequeue(
                 entry.path,
                 (_b = this.settings.vaultId) != null ? _b : void 0
@@ -4860,7 +4882,7 @@ var SyncEngine = class {
               flushed++;
               continue;
             }
-            content = await this.app.vault.read(file);
+            content = await this.app.vault.cachedRead(file);
             mtime = file.stat.mtime / 1e3;
           }
           await this.api.pushNote(entry.path, content, mtime);
@@ -5090,11 +5112,6 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin 
       })
     );
     this.registerEvent(
-      this.app.vault.on("create", (file) => {
-        this.syncEngine.handleModify(file);
-      })
-    );
-    this.registerEvent(
       this.app.vault.on("delete", (file) => {
         this.syncEngine.handleDelete(file);
       })
@@ -5202,8 +5219,8 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin 
     this.startSyncInterval();
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.setText("Engram: ready");
-    this.statusBarEl.style.cursor = "pointer";
-    this.statusBarEl.addEventListener("click", () => {
+    this.statusBarEl.addClass("engram-status-bar-clickable");
+    this.registerDomEvent(this.statusBarEl, "click", () => {
       if (this.settings.apiUrl && this.settings.apiKey) {
         new import_obsidian9.Notice("Engram Sync: syncing...");
         this.syncEngine.fullSync().then(({ pulled, pushed }) => {
@@ -5224,6 +5241,11 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin 
       var _a2;
       devLog().log("lifecycle", "layout ready \u2014 starting initial sync");
       rlog().info("lifecycle", "Layout ready \u2014 starting initial sync");
+      this.registerEvent(
+        this.app.vault.on("create", (file) => {
+          this.syncEngine.handleModify(file);
+        })
+      );
       await ((_a2 = this.baseStore) == null ? void 0 : _a2.load());
       try {
         if (this.settings.apiUrl && this.settings.apiKey) {
@@ -5344,7 +5366,11 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin 
         this.settings.refreshToken,
         this.settings.vaultId,
         (_a = this.settings.userEmail) != null ? _a : null,
-        refreshFn
+        refreshFn,
+        (newToken) => {
+          this.settings.refreshToken = newToken;
+          this.saveSettings();
+        }
       );
     }
     if (this.settings.apiKey) {
@@ -5380,8 +5406,8 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian9.Plugin 
     var _a;
     (_a = this.noteStream) == null ? void 0 : _a.disconnect();
     this.noteStream = null;
-    const { apiUrl, apiKey } = this.settings;
-    if (!apiUrl || !apiKey) {
+    const hasAuth = this.settings.apiKey || this.settings.refreshToken;
+    if (!this.settings.apiUrl || !hasAuth) {
       this.liveConnected = false;
       this.updateStatusBar(this.syncEngine.getStatus());
       return;
@@ -5510,7 +5536,7 @@ Last sync: ${date.toLocaleString()}`;
       this.syncInterval = null;
     }
     if (!this.settings.apiUrl || !this.settings.apiKey) return;
-    this.syncInterval = setInterval(async () => {
+    this.syncInterval = window.setInterval(async () => {
       try {
         const pulled = await this.syncEngine.pull();
         if (pulled > 0) {
@@ -5520,6 +5546,7 @@ Last sync: ${date.toLocaleString()}`;
         console.error("Engram Sync: periodic pull failed", e);
       }
     }, _EngramSyncPlugin.FALLBACK_POLL_MS);
+    this.registerInterval(this.syncInterval);
   }
 };
 _EngramSyncPlugin.FALLBACK_POLL_MS = 5 * 60 * 1e3;
