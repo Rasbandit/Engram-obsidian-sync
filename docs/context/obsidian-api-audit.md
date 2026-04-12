@@ -1,9 +1,9 @@
 # Context Doc: Obsidian API Audit
 
-_Last verified: 2026-04-11_
+_Last verified: 2026-04-12_
 
 ## Status
-Working — audit complete, findings documented, no fixes applied yet.
+Working — audit complete, all HIGH and MEDIUM fixes applied (commit 5d7304c on fix/oauth-token-refresh).
 
 ## What This Is
 Comprehensive audit of every Obsidian API usage in the engram-obsidian-sync plugin, cross-referenced against official docs at docs.obsidian.md and the obsidian.d.ts type definitions. Identifies misuses, anti-patterns, and improvement opportunities ranked by severity.
@@ -53,6 +53,8 @@ this.app.workspace.onLayoutReady(async () => {
 
 **Note:** `modify`, `delete`, and `rename` do NOT fire on vault load — only `create` does. So only the create handler needs to move, but moving all four inside `onLayoutReady` is cleaner.
 
+**Status:** ✅ Fixed. `vault.on('create')` registration moved inside `onLayoutReady` callback.
+
 ---
 
 ### H2: Never uses `vault.cachedRead()` — always uses `vault.read()`
@@ -75,6 +77,8 @@ The plugin uses `vault.read()` everywhere, even when it only needs content for c
 **Impact:** The reconciliation path (line 1569) is the worst offender — it reads **every syncable file** from disk to compute hashes. With `cachedRead()`, most reads would hit Obsidian's in-memory cache, significantly reducing I/O.
 
 **Fix:** Replace `vault.read()` with `vault.cachedRead()` in all four locations. Reserve `vault.read()` only for the `modifyFile()` path (which already uses `vault.process()`).
+
+**Status:** ✅ Fixed. All four `vault.read()` calls replaced with `vault.cachedRead()`.
 
 ---
 
@@ -101,7 +105,7 @@ const existing = this.app.vault.getFileByPath(normalized);
 if (existing) { ... }
 ```
 
-**Note:** Keep `getAbstractFileByPath()` only where you genuinely need both files and folders (e.g., `ensureFolder` at line 1364 and `removeEmptyFolders` at line 1381 which check for TFolder).
+**Status:** ✅ Fixed. All file lookups use `getFileByPath()`. Remaining `getAbstractFileByPath()` usages (sync.ts:1356, 1373) are folder-related and intentional. `settings.ts:352` was converted to `getFolderByPath()` — it only needs folder lookup.
 
 ---
 
@@ -124,6 +128,8 @@ this.statusBarEl.addEventListener("click", () => { ... });
 // AFTER
 this.registerDomEvent(this.statusBarEl, "click", () => { ... });
 ```
+
+**Status:** ✅ Fixed. Uses `registerDomEvent` now.
 
 ---
 
@@ -152,6 +158,8 @@ this.registerInterval(this.syncInterval);
 
 **Note:** Even with `registerInterval`, keep the manual `clearInterval` in `startSyncInterval()` (line 644-646) since that method restarts the interval on settings change.
 
+**Status:** ✅ Fixed. Uses `window.setInterval` + `registerInterval`.
+
 ---
 
 ## MEDIUM — Should Improve
@@ -170,6 +178,8 @@ this.registerInterval(this.syncInterval);
 this.statusBarEl.addClass("engram-status-bar-clickable");
 ```
 
+**Status:** ✅ Fixed. CSS class added in `styles.css`, inline style removed.
+
 ---
 
 ### M2: `MarkdownView` imported but never used
@@ -179,6 +189,8 @@ this.statusBarEl.addClass("engram-status-bar-clickable");
 **Problem:** `MarkdownView` is imported from `"obsidian"` but never referenced in the file. Dead import.
 
 **Fix:** Remove from the import statement.
+
+**Status:** ✅ Fixed. Import removed.
 
 ---
 
@@ -205,6 +217,8 @@ await this.app.vault.process(file, (current) => {
 
 **Verdict:** Acceptable as-is. The `process()` usage is correct for its purpose (scroll preservation). The atomicity benefit is secondary here. Document this as an intentional design choice, not a bug.
 
+**Status:** ⊘ Won't fix — intentional full-content overwrite for sync.
+
 ---
 
 ### M4: `requestUrl` default `throw: true` inconsistent error handling
@@ -219,6 +233,8 @@ await this.app.vault.process(file, (current) => {
 
 This is functional but inconsistent. The official docs recommend setting `throw: false` for manual error handling, but the current pattern is also valid. No change strictly needed.
 
+**Status:** ⊘ Won't fix — current try/catch pattern is functional and consistent within the codebase.
+
 ---
 
 ### M5: Search view DOM listeners not using `registerDomEvent`
@@ -226,6 +242,8 @@ This is functional but inconsistent. The official docs recommend setting `throw:
 **Location:** `search-view.ts:64-65, 67-78`
 
 **Problem:** Event listeners on `inputEl` and `folderEl` use raw `addEventListener` instead of `this.registerDomEvent()`. Since these elements are owned by the view and destroyed on `onClose()`, the listeners will be garbage-collected. But `registerDomEvent` is the idiomatic Obsidian pattern and provides defense-in-depth.
+
+**Status:** ✅ Fixed. All search view DOM listeners use `registerDomEvent`.
 
 ---
 
@@ -251,6 +269,8 @@ const container = this.containerEl.children[1];
 const container = this.contentEl;
 ```
 
+**Status:** ✅ Fixed. Uses `this.contentEl` directly.
+
 ---
 
 ## LOW — Minor Improvements
@@ -265,6 +285,8 @@ const container = this.contentEl;
 
 **Verdict:** Acceptable. Document as intentional. If Obsidian ever adds a public API for this, switch to it.
 
+**Status:** ⊘ Won't fix — no public alternative. Mobile fallback (`vault.getName()`) handles the absence gracefully.
+
 ---
 
 ### L2: BaseStore uses `vault.adapter` directly
@@ -275,6 +297,8 @@ const container = this.contentEl;
 
 **Verdict:** This is **correct and intentional**. The base store file lives in `.obsidian/plugins/engram-sync/sync-bases.json` — a hidden folder that the Vault API cannot access. The adapter is the correct tool for plugin config/data files. The `loadData()`/`saveData()` Plugin methods use the adapter internally too.
 
+**Status:** ⊘ Won't fix — correct usage for hidden folder access.
+
 ---
 
 ### L3: `vault.getFiles()` called multiple times for batch operations
@@ -283,7 +307,9 @@ const container = this.contentEl;
 
 **Problem:** `getFiles()` is called separately in `pushModifiedFiles()`, `countSyncableFiles()`, `pushAll()`, and `reconcile()`. Each call returns all vault files. In a large vault (10k+ files), this creates significant array allocations.
 
-**Verdict:** Low priority. These are batch operations that run infrequently (manual triggers or startup). Caching the file list would add complexity for minimal gain.
+**Verdict:** Low priority. These are batch operations that run infrequently (manual triggers or startup). The four methods (`pushModifiedFiles`, `countSyncableFiles`, `pushAll`, `reconcile`) are never called together in the same flow, so sharing a cached file list would be premature abstraction.
+
+**Status:** ⊘ Won't fix — separate call sites, infrequent execution, no measurable perf impact.
 
 ---
 

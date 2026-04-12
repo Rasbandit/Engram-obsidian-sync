@@ -46,23 +46,26 @@ Doc-only changes (CLAUDE.md, docs/) can be committed and pushed directly to main
 **Tests are the spec. If a test fails, fix the app — not the test.**
 
 ```bash
-bun test              # Run all 223 unit tests
+bun test              # Run all 313 unit tests
 bun test --verbose    # Verbose output
-bun test --coverage   # With coverage report
+bun test --coverage   # With coverage report (89% funcs, 97% lines)
 bun run build         # Build the plugin (production)
 ```
 
-### Test files (223 tests across 8 files)
+### Test files (313 tests across 11 files)
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `tests/sync.test.ts` | 116 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, WebSocket events, echo suppression, status tracking, first sync detection, 3-way merge, destroy |
-| `tests/api.test.ts` | 25 | All EngramApi methods (pushNote, getChanges, deleteNote, getRateLimit, getManifest, search), base64 utilities, auth headers, URL encoding, error handling |
+| `tests/sync.test.ts` | 134 | SyncEngine: shouldIgnore, handleModify/Delete/Rename, pull, WebSocket events, echo suppression, status tracking, first sync detection, 3-way merge, destroy, sync state export/import, updateSettings, arrayBuffersEqual |
+| `tests/api.test.ts` | 47 | All EngramApi methods, base64 utilities, auth headers, URL encoding, error handling, auth provider integration, attachment methods, pushLogs |
+| `tests/dev-log.test.ts` | 20 | Ring buffer (log, dump, filter, stats, clear), 500-entry cap, singleton lifecycle (init/destroy), noop logger |
 | `tests/diff.test.ts` | 17 | computeDiff, groupIntoHunks, buildMergedContent (line-by-line diff, hunk context, merge choices) |
 | `tests/three-way-merge.test.ts` | 15 | 3-way merge via diff-match-patch: clean merges, overlap detection, fallback behavior |
 | `tests/offline-queue.test.ts` | 17 | Enqueue/dequeue, deduplication by path, oldest-first ordering, load/clear, debounced persistence, coalesced writes, destroy cancels timers |
 | `tests/remote-log.test.ts` | 15 | Buffer management, flush threshold (20 entries), ring buffer overflow (200 cap), flush-on-disable, singleton lifecycle |
 | `tests/base-store.test.ts` | 13 | BaseStore: persist/retrieve last-synced content for 3-way merge base |
+| `tests/channel.test.ts` | 10 | Phoenix channel: topic format, vault_deleted events, updateConfig, isConnected, setAuthProvider, auth token flow |
+| `tests/auth.test.ts` | 20 | ApiKeyAuth, OAuthAuth: token management, refresh, deduplication, persistence |
 | `tests/search.test.ts` | 5 | EngramApi.search, SearchModal debounce |
 
 ### Test configuration
@@ -71,9 +74,9 @@ bun run build         # Build the plugin (production)
 - **Obsidian mock:** `tests/__mocks__/obsidian.ts` — minimal mocks for TFile, Plugin, Modal, requestUrl, etc.
 - **Coverage thresholds:** 40% minimum for branches, functions, lines, statements
 
-### Untested files (UI-heavy, minimal testable logic)
+### Untested files (UI-heavy — test via E2E in backend repo)
 
-`settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`, `channel.ts`, `dev-log.ts`
+`settings.ts`, `conflict-modal.ts`, `first-sync-modal.ts`, `search-modal.ts`, `search-view.ts`, `main.ts`
 
 ## Package Manager
 

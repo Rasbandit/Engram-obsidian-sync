@@ -1,6 +1,6 @@
 # Context Doc: Obsidian Plugin API Reference
 
-_Last verified: 2026-04-11_
+_Last verified: 2026-04-12_
 
 ## Status
 Working — comprehensive reference for correct Obsidian API usage in this plugin.

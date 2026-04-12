@@ -349,8 +349,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			if (currentIgnores.includes(dir.pattern)) continue;
 
 			// Check if this directory exists in vault
-			const folder = this.app.vault.getAbstractFileByPath(dir.label);
-			if (folder && folder instanceof TFolder) {
+			const folder = this.app.vault.getFolderByPath(dir.label);
+			if (folder) {
 				// Count files recursively
 				let count = 0;
 				const walk = (f: TFolder) => {
