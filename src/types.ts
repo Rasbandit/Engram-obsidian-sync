@@ -254,6 +254,49 @@ export interface FileSyncState {
 	version?: number;
 }
 
+/** A single entry in the sync log ring buffer. */
+export interface SyncLogEntry {
+	timestamp: Date;
+	action: "push" | "pull" | "delete" | "conflict" | "skip" | "error";
+	path: string;
+	result: "ok" | "error" | "skipped";
+	error?: string;
+	details?: string;
+}
+
+/** Vault information returned by GET /vaults */
+export interface VaultInfo {
+	id: number;
+	name: string;
+	slug: string;
+	is_default: boolean;
+	created_at: string;
+}
+
+export interface SyncPlan {
+	vaultName: string;
+	serverNoteCount: number;
+	localNoteCount: number;
+	localAttachmentCount: number;
+	toPush: { notes: string[]; attachments: string[] };
+	toPull: { notes: string[]; attachments: string[] };
+	conflicts: string[];
+	toDeleteLocal: string[];
+	toDeleteRemote: string[];
+}
+
+/** Result of the pre-sync modal for pull operations. */
+export type PullAction = "pull" | "wipe-pull" | "cancel";
+
+export interface SyncProgress {
+	phase: "deleting" | "pushing" | "pulling" | "attachments" | "complete";
+	current: number;
+	total: number;
+	failed: number;
+	/** Current file being processed (optional, for display). */
+	currentPath?: string;
+}
+
 /** 409 conflict response from the server when expected_version mismatches. */
 export interface VersionConflictResponse {
 	conflict: true;

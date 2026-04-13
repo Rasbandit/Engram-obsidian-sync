@@ -15,6 +15,7 @@ import type {
 	NoteDetail,
 	NoteResponse,
 	SearchResponse,
+	VaultInfo,
 	VaultRegistrationResponse,
 	VersionConflictResponse,
 } from "./types";
@@ -113,6 +114,16 @@ export class EngramApi {
 			client_id: clientId,
 		});
 		return resp.json as VaultRegistrationResponse;
+	}
+
+	/** Fetch all vaults accessible by the current user. Returns [] on error. */
+	async listVaults(): Promise<VaultInfo[]> {
+		try {
+			const resp = await this.request("GET", "/vaults");
+			return (resp.json as { vaults: VaultInfo[] }).vaults;
+		} catch {
+			return [];
+		}
 	}
 
 	/** Authenticated ping — verifies both connectivity and API key. */

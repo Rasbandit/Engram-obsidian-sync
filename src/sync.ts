@@ -7,6 +7,7 @@ import type { BaseStore } from "./base-store";
 import { devLog } from "./dev-log";
 import { OfflineQueue } from "./offline-queue";
 import { rlog } from "./remote-log";
+import type { SyncLog } from "./sync-log";
 import { threeWayMerge } from "./three-way-merge";
 import type {
 	AttachmentChange,
@@ -18,6 +19,9 @@ import type {
 	NoteStreamEvent,
 	QueueEntry,
 	ReconcileResult,
+	SyncLogEntry,
+	SyncPlan,
+	SyncProgress,
 	SyncStatus,
 	VersionConflictResponse,
 } from "./types";
@@ -134,6 +138,12 @@ export class SyncEngine {
 	 *  If null, conflicts are auto-resolved as keep-remote (legacy behavior). */
 	onConflict: ((info: ConflictInfo) => Promise<ConflictResolution>) | null = null;
 
+	/** Called after each batch during pushAll/pullAll to report progress. */
+	onSyncProgress: ((progress: SyncProgress) => void) | null = null;
+
+	/** Optional sync log — receives an entry for each push/pull outcome. */
+	syncLog: SyncLog | null = null;
+
 	constructor(
 		private app: App,
 		private api: EngramApi,
@@ -224,6 +234,17 @@ export class SyncEngine {
 		this.onStatusChange?.(this.getStatus());
 	}
 
+	/** Append an entry to the sync log (no-op if syncLog is null). */
+	private logEntry(
+		action: SyncLogEntry["action"],
+		path: string,
+		result: SyncLogEntry["result"],
+		error?: string,
+		details?: string,
+	): void {
+		this.syncLog?.append({ timestamp: new Date(), action, path, result, error, details });
+	}
+
 	// --- Ignore pattern matching ---
 
 	private parseIgnorePatterns(): void {
@@ -296,9 +317,13 @@ export class SyncEngine {
 		this.emitStatus();
 	}
 
+	/** When true, vault delete events are suppressed (used during local wipe). */
+	suppressDeletes = false;
+
 	/** Handle a vault delete event. */
 	async handleDelete(file: TAbstractFile): Promise<void> {
 		if (!this.ready) return;
+		if (this.suppressDeletes) return;
 		if (!this.isSyncable(file)) return;
 		if (this.shouldIgnore(file.path)) return;
 
@@ -659,15 +684,14 @@ export class SyncEngine {
 		} catch (e) {
 			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
-			devLog().log(
-				"error",
-				`push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
-			);
+			const errMsg = e instanceof Error ? e.message : String(e);
+			devLog().log("error", `push failed: ${file.path} — ${errMsg}`);
 			rlog().error(
 				"push",
-				`Push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
+				`Push failed: ${file.path} — ${errMsg}`,
 				e instanceof Error ? e.stack : undefined,
 			);
+			this.logEntry("push", file.path, "error", errMsg);
 			// Queue for retry — content-free to avoid O(n²) serialization.
 			// Content will be re-read from vault when flushing.
 			await this.enqueueChange({
@@ -822,13 +846,76 @@ export class SyncEngine {
 	/** Force-pull ALL notes and attachments from the server, overwriting local files.
 	 *  Ignores lastSync — fetches everything. Skips conflict detection. */
 	async pullAll(): Promise<number> {
+		return this._pullAll(false);
+	}
+
+	/** Wipe all local syncable files, reset sync state, then pull everything from server. */
+	async wipePullAll(): Promise<number> {
+		return this._pullAll(true);
+	}
+
+	private async _pullAll(wipe: boolean): Promise<number> {
 		if (this.pulling) return 0;
 
+		this.syncLog?.clear();
 		this.pulling = true;
 		this.lastError = "";
 		this.emitStatus();
-		devLog().log("pull", "pullAll: fetching everything from server");
-		rlog().info("pull", "PullAll started — fetching everything from epoch");
+
+		if (wipe) {
+			// Suppress delete sync — we're wiping locally, not deleting from server
+			this.suppressDeletes = true;
+			devLog().log("pull", "wipePullAll: deleting all local syncable files");
+			rlog().info("pull", "WipePullAll started — deleting local files");
+			const files = this.app.vault.getFiles() as TFile[];
+			const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+			const wipeTotal = syncable.length;
+			this.onSyncProgress?.({ phase: "deleting", current: 0, total: wipeTotal, failed: 0 });
+			let wipeFailed = 0;
+			for (let i = 0; i < syncable.length; i++) {
+				const file = syncable[i];
+				try {
+					await this.app.vault.trash(file, true);
+					this.logEntry("delete", file.path, "ok", undefined, "wipe");
+				} catch (e) {
+					wipeFailed++;
+					const msg = e instanceof Error ? e.message : String(e);
+					this.logEntry("delete", file.path, "error", msg);
+				}
+				this.onSyncProgress?.({
+					phase: "deleting",
+					current: i + 1,
+					total: wipeTotal,
+					failed: wipeFailed,
+					currentPath: file.path,
+				});
+				// Yield to UI thread periodically so progress modal can repaint
+				if ((i + 1) % 20 === 0) {
+					await new Promise((resolve) => setTimeout(resolve, 0));
+				}
+			}
+			// Reset sync state — everything will be re-synced from server
+			this.syncState.clear();
+			this.lastSync = "";
+			await this.saveData({ lastSync: "" });
+			devLog().log(
+				"pull",
+				`wipePullAll: deleted ${syncable.length} local files, sync state reset`,
+			);
+			rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
+			// NOTE: suppressDeletes stays true until the entire pull completes.
+			// Obsidian's delete events fire asynchronously — resetting here would
+			// allow queued events to leak through and soft-delete server data.
+		}
+
+		devLog().log(
+			"pull",
+			`${wipe ? "wipePullAll" : "pullAll"}: fetching everything from server`,
+		);
+		rlog().info(
+			"pull",
+			`${wipe ? "WipePullAll" : "PullAll"} started — fetching everything from epoch`,
+		);
 		try {
 			const epoch = "1970-01-01T00:00:00Z";
 			const [noteResp, attachResp] = await Promise.all([
@@ -843,32 +930,161 @@ export class SyncEngine {
 				"pull",
 				`PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
 			);
+
+			// Pre-filter: skip notes whose local content already matches server.
+			// Skip filtering after a wipe — nothing local to compare against, and
+			// Obsidian's file cache may still return stale data for trashed files.
+			let noteChanges: typeof noteResp.changes;
+			let attachChanges: typeof attachResp.changes;
+
+			if (wipe) {
+				noteChanges = noteResp.changes;
+				attachChanges = attachResp.changes;
+			} else {
+				noteChanges = [];
+				for (const change of noteResp.changes) {
+					if (change.deleted || this.shouldIgnore(change.path)) {
+						noteChanges.push(change);
+						continue;
+					}
+					const existing = this.app.vault.getFileByPath(normalizePath(change.path));
+					if (existing) {
+						const localContent = await this.app.vault.cachedRead(existing);
+						if (localContent === change.content) {
+							// Content identical — update sync state but skip the work
+							const normalized = normalizePath(change.path);
+							this.syncState.set(normalized, {
+								hash: fnv1a(localContent),
+								version: change.version,
+							});
+							if (change.version != null) {
+								this.baseStore?.set(normalized, change.content, change.version);
+							}
+							continue;
+						}
+					}
+					noteChanges.push(change);
+				}
+
+				attachChanges = attachResp.changes.filter((change) => {
+					if (change.deleted) return true;
+					return !this.app.vault.getFileByPath(normalizePath(change.path));
+				});
+			}
+
 			let applied = 0;
-			let skipped = 0;
+			let failed = 0;
+			const noteCount = noteChanges.length;
+			const attachCount = attachChanges.length;
+			const total = noteCount + attachCount;
 
-			for (const change of noteResp.changes) {
-				try {
-					if (await this.applyChange(change, true)) applied++;
-				} catch (e) {
-					skipped++;
-					const msg = e instanceof Error ? e.message : String(e);
-					// biome-ignore lint/suspicious/noConsole: error boundary
-					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
-					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`,
+			);
+			// Show first 5 notes to check deleted flag + content presence
+			for (const n of noteResp.changes.slice(0, 5)) {
+				// biome-ignore lint/suspicious/noConsole: diagnostic
+				console.log(
+					`[engram-debug] sample note: path=${n.path} deleted=${n.deleted} hasContent=${n.content != null} contentLen=${n.content?.length ?? 0}`,
+				);
+			}
+			// Count how many are deleted
+			const deletedCount = noteResp.changes.filter((n) => n.deleted).length;
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(
+				`[engram-debug] pullAll: ${deletedCount}/${noteResp.changes.length} notes have deleted=true`,
+			);
+
+			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
+
+			// Pull notes in batches of 10 for parallelism
+			for (let i = 0; i < noteChanges.length; i += 10) {
+				const batch = noteChanges.slice(i, i + 10);
+				const lastPath = batch[batch.length - 1].path;
+				const results = await Promise.all(
+					batch.map(async (change) => {
+						try {
+							const ok = await this.applyChange(change, true);
+							if (ok) {
+								this.logEntry("pull", change.path, "ok");
+							} else {
+								this.logEntry(
+									"skip",
+									change.path,
+									"skipped",
+									undefined,
+									"unchanged",
+								);
+							}
+							return ok ? ("ok" as const) : ("skip" as const);
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
+							this.logEntry("pull", change.path, "error", msg);
+							return "error" as const;
+						}
+					}),
+				);
+				for (const r of results) {
+					if (r === "ok") applied++;
+					else if (r === "error") failed++;
 				}
+				this.onSyncProgress?.({
+					phase: "pulling",
+					current: Math.min(i + batch.length, noteChanges.length),
+					total,
+					failed,
+					currentPath: lastPath,
+				});
 			}
 
-			for (const change of attachResp.changes) {
-				try {
-					if (await this.applyAttachmentChange(change)) applied++;
-				} catch (e) {
-					skipped++;
-					const msg = e instanceof Error ? e.message : String(e);
-					// biome-ignore lint/suspicious/noConsole: error boundary
-					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
-					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
+			// Pull attachments in batches of 5 (larger files)
+			for (let i = 0; i < attachChanges.length; i += 5) {
+				const batch = attachChanges.slice(i, i + 5);
+				const lastPath = batch[batch.length - 1].path;
+				const results = await Promise.all(
+					batch.map(async (change) => {
+						try {
+							const ok = await this.applyAttachmentChange(change);
+							if (ok) {
+								this.logEntry("pull", change.path, "ok");
+							} else {
+								this.logEntry(
+									"skip",
+									change.path,
+									"skipped",
+									undefined,
+									"unchanged",
+								);
+							}
+							return ok ? ("ok" as const) : ("skip" as const);
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
+							this.logEntry("pull", change.path, "error", msg);
+							return "error" as const;
+						}
+					}),
+				);
+				for (const r of results) {
+					if (r === "ok") applied++;
+					else if (r === "error") failed++;
 				}
+				this.onSyncProgress?.({
+					phase: "pulling",
+					current: noteCount + Math.min(i + batch.length, attachChanges.length),
+					total,
+					failed,
+					currentPath: lastPath,
+				});
 			}
+
+			this.onSyncProgress?.({ phase: "complete", current: total, total, failed });
 
 			// Update lastSync to server time
 			const serverTime =
@@ -878,8 +1094,15 @@ export class SyncEngine {
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
-			devLog().log("pull", `pullAll: done — applied ${applied}, lastSync=${this.lastSync}`);
-			rlog().info("pull", `PullAll done — applied ${applied}, skipped ${skipped}`);
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`,
+			);
+			devLog().log(
+				"pull",
+				`pullAll: done — applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`,
+			);
+			rlog().info("pull", `PullAll done — applied=${applied}, failed=${failed}`);
 			return applied;
 		} catch (e) {
 			// biome-ignore lint/suspicious/noConsole: error boundary
@@ -895,6 +1118,7 @@ export class SyncEngine {
 			return 0;
 		} finally {
 			this.pulling = false;
+			this.suppressDeletes = false;
 			this.emitStatus();
 			await this.flushPostPullPushes();
 		}
@@ -982,11 +1206,18 @@ export class SyncEngine {
 	 *  Returns true when a file was actually created, modified, or trashed.
 	 *  When forceOverwrite is true, skip conflict detection and always apply. */
 	async applyChange(change: NoteChange, forceOverwrite = false): Promise<boolean> {
-		if (this.shouldIgnore(change.path)) return false;
+		if (this.shouldIgnore(change.path)) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(`[engram-debug] applyChange SKIP (ignored): ${change.path}`);
+			return false;
+		}
 
 		const normalized = normalizePath(change.path);
 
 		if (change.deleted) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(`[engram-debug] applyChange DELETE: ${change.path}`);
+
 			// Delete local file if it exists
 			const existing = this.app.vault.getFileByPath(normalized);
 			if (existing) {
@@ -1184,6 +1415,8 @@ export class SyncEngine {
 				rlog().info("conflict", `Resolved: ${change.path} → keep-remote`);
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
+				// biome-ignore lint/suspicious/noConsole: diagnostic
+				console.log(`[engram-debug] applyChange SKIP (identical): ${change.path}`);
 				this.syncState.set(normalized, { hash: localHash, version: change.version });
 				if (change.version != null) {
 					this.baseStore?.set(normalized, change.content, change.version);
@@ -1193,6 +1426,10 @@ export class SyncEngine {
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(
+				`[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`,
+			);
 			await this.modifyFile(existing, change.content);
 			this.syncState.set(normalized, {
 				hash: fnv1a(change.content),
@@ -1208,7 +1445,17 @@ export class SyncEngine {
 			return true;
 		}
 		// New file — create it
-		await this.createFileWithFolders(normalized, change.content);
+		// biome-ignore lint/suspicious/noConsole: diagnostic
+		console.log(
+			`[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`,
+		);
+		try {
+			await this.createFileWithFolders(normalized, change.content);
+		} catch (createErr) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.error(`[engram-debug] applyChange CREATE FAILED: ${normalized}`, createErr);
+			throw createErr;
+		}
 		this.syncState.set(normalized, {
 			hash: fnv1a(change.content),
 			version: change.version,
@@ -1455,8 +1702,150 @@ export class SyncEngine {
 		return !this.lastSync;
 	}
 
+	/** Compute what a sync would do without executing it (dry-run preview).
+	 *
+	 *  mode:
+	 *  - "full"     — bidirectional: compute toPush, toPull, conflicts, deletions
+	 *  - "push-all" — push only: compute toPush, skip toPull
+	 *  - "pull-all" — pull only: compute toPull, skip toPush
+	 */
+	async computeSyncPlan(mode: "push-all" | "pull-all" | "full"): Promise<SyncPlan> {
+		const epoch = "1970-01-01T00:00:00Z";
+		const since = mode === "full" ? this.lastSync || epoch : epoch;
+
+		const [noteResp, attachResp] = await Promise.all([
+			this.api.getChanges(since),
+			this.api.getAttachmentChanges(since),
+		]);
+
+		// Build lookup sets from server state
+		const serverNotes = new Map<string, { deleted: boolean }>();
+		for (const c of noteResp.changes) {
+			serverNotes.set(c.path, { deleted: c.deleted });
+		}
+
+		const serverAttachments = new Map<string, { deleted: boolean }>();
+		for (const c of attachResp.changes) {
+			serverAttachments.set(c.path, { deleted: c.deleted });
+		}
+
+		// Enumerate local files
+		const allFiles = this.app.vault.getFiles() as TFile[];
+		const syncable = allFiles.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+
+		const localNotes: string[] = [];
+		const localAttachments: string[] = [];
+		for (const f of syncable) {
+			if (this.isBinaryFile(f)) {
+				localAttachments.push(f.path);
+			} else {
+				localNotes.push(f.path);
+			}
+		}
+
+		const localNoteSet = new Set(localNotes);
+		const localAttachSet = new Set(localAttachments);
+
+		// Categorise server note changes
+		const toPullNotes: string[] = [];
+		const conflictNotes: string[] = [];
+		const toDeleteLocal: string[] = [];
+
+		for (const [path, { deleted }] of serverNotes) {
+			if (deleted) {
+				// Server deleted — mark for local deletion if present
+				if (localNoteSet.has(path)) {
+					toDeleteLocal.push(path);
+				}
+				continue;
+			}
+			if (localNoteSet.has(path)) {
+				// Both sides have it — compare content to see if pull is needed
+				const file = this.app.vault.getFileByPath(path);
+				if (file) {
+					const content = await this.app.vault.cachedRead(file);
+					const localHash = fnv1a(content);
+
+					// Check if server content actually differs from local
+					const serverChange = noteResp.changes.find((c) => c.path === path);
+					const serverHash = serverChange ? fnv1a(serverChange.content) : undefined;
+
+					if (serverHash !== undefined && localHash === serverHash) {
+						// Content identical — nothing to do, skip entirely
+						continue;
+					}
+
+					const synced = this.syncState.get(path);
+					if (synced?.hash !== undefined && localHash !== synced.hash) {
+						// Local changed since last sync AND server changed — conflict
+						conflictNotes.push(path);
+					} else {
+						// Local unchanged or never synced — server has new content
+						toPullNotes.push(path);
+					}
+				} else {
+					toPullNotes.push(path);
+				}
+			} else {
+				// Only on server — need to pull
+				toPullNotes.push(path);
+			}
+		}
+
+		// Categorise server attachment changes
+		const toPullAttachments: string[] = [];
+		const toDeleteLocalAttach: string[] = [];
+
+		for (const [path, { deleted }] of serverAttachments) {
+			if (deleted) {
+				if (localAttachSet.has(path)) {
+					toDeleteLocalAttach.push(path);
+				}
+				continue;
+			}
+			if (!localAttachSet.has(path)) {
+				toPullAttachments.push(path);
+			}
+		}
+
+		// Files only local → need to push (not on server at all)
+		const toPushNotes: string[] = [];
+		for (const path of localNotes) {
+			if (!serverNotes.has(path)) {
+				toPushNotes.push(path);
+			}
+		}
+
+		const toPushAttachments: string[] = [];
+		for (const path of localAttachments) {
+			if (!serverAttachments.has(path)) {
+				toPushAttachments.push(path);
+			}
+		}
+
+		return {
+			vaultName: this.app.vault.getName(),
+			serverNoteCount: [...serverNotes.values()].filter((v) => !v.deleted).length,
+			localNoteCount: localNotes.length,
+			localAttachmentCount: localAttachments.length,
+			toPush: {
+				notes: mode === "pull-all" ? [] : toPushNotes,
+				attachments: mode === "pull-all" ? [] : toPushAttachments,
+			},
+			toPull: {
+				notes: mode === "push-all" ? [] : toPullNotes,
+				attachments: mode === "push-all" ? [] : toPullAttachments,
+			},
+			conflicts: mode === "push-all" || mode === "pull-all" ? [] : conflictNotes,
+			toDeleteLocal: [...toDeleteLocal, ...toDeleteLocalAttach],
+			toDeleteRemote: [], // computed during execution (local deletes since last sync)
+		};
+	}
+
 	/** Push ALL syncable files (initial import). */
 	async pushAll(): Promise<number> {
+		this.syncLog?.clear();
+
 		// Verify auth before pushing to give a clear error on bad API key
 		const { ok, error } = await this.api.ping();
 		if (!ok) {
@@ -1467,31 +1856,57 @@ export class SyncEngine {
 
 		const files = this.app.vault.getFiles();
 		const toSync = files.filter((f: TFile) => this.isSyncable(f) && !this.shouldIgnore(f.path));
-		let pushed = 0;
 
-		new Notice(`Engram Sync: pushing ${toSync.length} files...`);
+		let pushed = 0;
+		let failed = 0;
+		const total = toSync.length;
+
+		devLog().log("push", `pushAll: ${total} files`);
+		rlog().info("push", `PushAll started — ${total} files`);
+
+		this.onSyncProgress?.({ phase: "pushing", current: 0, total, failed: 0 });
 
 		for (let i = 0; i < toSync.length; i += 10) {
 			const batch = toSync.slice(i, i + 10);
-			const results = await Promise.all(batch.map((f: TFile) => this.pushFile(f, true)));
+			const results = await Promise.all(
+				batch.map(async (f: TFile) => {
+					try {
+						const ok = await this.pushFile(f, true);
+						if (ok) {
+							this.logEntry("push", f.path, "ok");
+						} else {
+							this.logEntry("skip", f.path, "skipped", undefined, "unchanged");
+						}
+						return ok;
+					} catch (e) {
+						failed++;
+						const msg = e instanceof Error ? e.message : String(e);
+						this.logEntry("push", f.path, "error", msg);
+						return false;
+					}
+				}),
+			);
 			pushed += results.filter(Boolean).length;
-
-			if (pushed % 100 === 0) {
-				new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files...`);
-			}
+			this.onSyncProgress?.({
+				phase: "pushing",
+				current: i + batch.length,
+				total,
+				failed,
+				currentPath: batch[batch.length - 1].path,
+			});
 		}
 
-		const skipped = toSync.length - pushed;
-		if (skipped > 0) {
-			const skippedPaths = toSync
-				.filter((f: TFile) => !this.pushing.has(f.path))
-				.map((f: TFile) => f.path);
-			devLog().log("push", `pushAll skipped ${skipped} files: ${skippedPaths.join(", ")}`);
-			rlog().warn("push", `PushAll skipped ${skipped} files`);
-			new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files (${skipped} skipped)`);
-		} else {
-			new Notice(`Engram Sync: push complete (${pushed} files)`);
-		}
+		this.onSyncProgress?.({ phase: "complete", current: total, total, failed });
+
+		const skipped = total - pushed - failed;
+		devLog().log(
+			"push",
+			`pushAll done — pushed=${pushed}, skipped=${skipped}, failed=${failed}`,
+		);
+		rlog().info(
+			"push",
+			`PushAll done — pushed=${pushed}, skipped=${skipped}, failed=${failed}`,
+		);
 
 		// Post-push reconciliation
 		const reconcileResult = await this.reconcile();
@@ -1510,7 +1925,6 @@ export class SyncEngine {
 						await this.pushFile(file, true);
 					}
 				}
-				new Notice(`Engram Sync: reconciled ${toFix.length} files`);
 			}
 		}
 
