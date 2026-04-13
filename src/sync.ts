@@ -1749,35 +1749,52 @@ export class SyncEngine {
 
 	/** DEBUG: Delete all local syncable files. Temporary test method. */
 	async debugWipeLocal(): Promise<number> {
+		// Delete all files first
 		const files = this.app.vault.getFiles() as TFile[];
 		// biome-ignore lint/suspicious/noConsole: debug method
 		console.log(`[engram-debug] getFiles() returned ${files.length} files`);
-		if (files.length > 0) {
-			for (const f of files.slice(0, 10)) {
-				// biome-ignore lint/suspicious/noConsole: debug method
-				console.log(
-					`[engram-debug]   path="${f.path}" ext="${f.extension}" isTFile=${f instanceof TFile} syncable=${this.isSyncable(f)} ignored=${this.shouldIgnore(f.path)}`,
-				);
-			}
-		}
-		const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
-		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(`[engram-debug] syncable=${syncable.length} / total=${files.length}`);
-		let deleted = 0;
-		for (const file of syncable) {
+		let deletedFiles = 0;
+		for (const file of files) {
+			if (this.shouldIgnore(file.path)) continue;
 			try {
-				// biome-ignore lint/suspicious/noConsole: debug method
-				console.log(`[engram-debug] trashing: ${file.path}`);
 				await this.app.vault.trash(file, true);
-				deleted++;
+				deletedFiles++;
 			} catch (e) {
 				// biome-ignore lint/suspicious/noConsole: debug method
-				console.error(`[engram-debug] failed to trash ${file.path}:`, e);
+				console.error(`[engram-debug] failed to trash file ${file.path}:`, e);
 			}
 		}
+
+		// Then delete all empty folders (deepest first to avoid parent-before-child)
+		const allFolders = this.app.vault
+			.getAllLoadedFiles()
+			.filter((f): f is TFolder => f instanceof TFolder && f.path !== "/")
+			.sort((a, b) => b.path.length - a.path.length); // deepest first
+
 		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(`[engram-debug] done: deleted ${deleted}/${syncable.length}`);
-		return deleted;
+		console.log(`[engram-debug] found ${allFolders.length} folders to check`);
+		let deletedFolders = 0;
+		for (const folder of allFolders) {
+			if (this.shouldIgnore(folder.path)) continue;
+			if (folder.path.startsWith(".")) continue; // skip .obsidian etc
+			try {
+				// Re-check if folder still exists and is empty (children may have been deleted)
+				const current = this.app.vault.getAbstractFileByPath(folder.path);
+				if (current instanceof TFolder && current.children.length === 0) {
+					await this.app.vault.trash(current, true);
+					deletedFolders++;
+				}
+			} catch (e) {
+				// biome-ignore lint/suspicious/noConsole: debug method
+				console.error(`[engram-debug] failed to trash folder ${folder.path}:`, e);
+			}
+		}
+
+		// biome-ignore lint/suspicious/noConsole: debug method
+		console.log(
+			`[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`,
+		);
+		return deletedFiles + deletedFolders;
 	}
 
 	/** Push ALL syncable files (initial import). */
