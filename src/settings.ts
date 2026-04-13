@@ -5,6 +5,7 @@ import { type App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { DeviceFlowModal } from "./device-flow-modal";
 import type EngramSyncPlugin from "./main";
 import { PreSyncModal, WipeConfirmModal } from "./pre-sync-modal";
+import { SyncProgressModal } from "./sync-progress-modal";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
 const PROBLEMATIC_DIRS = [
@@ -288,11 +289,13 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			const pct =
 				progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 			const phaseLabel =
-				progress.phase === "pushing"
-					? "Pushing notes"
-					: progress.phase === "pulling"
-						? "Pulling notes"
-						: "Syncing attachments";
+				progress.phase === "deleting"
+					? "Deleting local files"
+					: progress.phase === "pushing"
+						? "Pushing notes"
+						: progress.phase === "pulling"
+							? "Pulling notes"
+							: "Syncing attachments";
 			progressLabel.setText(
 				`${phaseLabel}... ${progress.current}/${progress.total}${progress.failed > 0 ? ` (${progress.failed} failed)` : ""}`,
 			);
@@ -318,16 +321,15 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 							btn.setDisabled(false);
 							return;
 						}
+						const progressModal = this.openProgressModal();
 						const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
 						const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
-						if (errors > 0) {
-							new Notice(
-								`Sync complete: pulled ${pulled}, pushed ${pushed}, ${errors} failed — run "Engram: Show sync log" for details`,
-								10000,
-							);
-						} else {
-							new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
-						}
+						progressModal.update({
+							phase: "complete",
+							current: pulled + pushed,
+							total: pulled + pushed,
+							failed: errors,
+						});
 					} catch (e) {
 						new Notice(
 							`Engram Sync: ${e instanceof Error ? e.message : "sync failed"}`,
@@ -357,16 +359,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 								btn.setDisabled(false);
 								return;
 							}
-							const count = await this.plugin.syncEngine.pushAll();
-							const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
-							if (errors > 0) {
-								new Notice(
-									`Sync complete: ${count} pushed, ${errors} failed — run "Engram: Show sync log" for details`,
-									10000,
-								);
-							} else {
-								new Notice(`Sync complete: ${count} pushed`);
-							}
+							this.openProgressModal();
+							await this.plugin.syncEngine.pushAll();
 						} catch (e) {
 							new Notice(
 								`Engram Sync: ${e instanceof Error ? e.message : "push failed"}`,
@@ -409,29 +403,12 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 									btn.setDisabled(false);
 									return;
 								}
-								const count = await this.plugin.syncEngine.wipePullAll();
-								const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
-								if (errors > 0) {
-									new Notice(
-										`Wipe & pull complete: ${count} pulled, ${errors} failed — run "Engram: Show sync log" for details`,
-										10000,
-									);
-								} else {
-									new Notice(`Wipe & pull complete: ${count} pulled`);
-								}
-								this.display();
+								this.openProgressModal();
+								await this.plugin.syncEngine.wipePullAll();
 								return;
 							}
-							const count = await this.plugin.syncEngine.pullAll();
-							const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
-							if (errors > 0) {
-								new Notice(
-									`Sync complete: ${count} pulled, ${errors} failed — run "Engram: Show sync log" for details`,
-									10000,
-								);
-							} else {
-								new Notice(`Sync complete: ${count} pulled`);
-							}
+							this.openProgressModal();
+							await this.plugin.syncEngine.pullAll();
 						} catch (e) {
 							new Notice(
 								`Engram Sync: ${e instanceof Error ? e.message : "pull failed"}`,
@@ -441,6 +418,18 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						}
 					}),
 			);
+	}
+
+	/** Open a progress modal and wire it to the sync engine's progress callback. */
+	private openProgressModal(): SyncProgressModal {
+		const modal = new SyncProgressModal(this.app);
+		const prevCallback = this.plugin.syncEngine.onSyncProgress;
+		this.plugin.syncEngine.onSyncProgress = (progress) => {
+			modal.update(progress);
+			prevCallback?.(progress);
+		};
+		modal.open();
+		return modal;
 	}
 
 	private async startDeviceFlow(): Promise<void> {

@@ -863,14 +863,25 @@ export class SyncEngine {
 			rlog().info("pull", "WipePullAll started — deleting local files");
 			const files = this.app.vault.getFiles() as TFile[];
 			const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
-			for (const file of syncable) {
+			const wipeTotal = syncable.length;
+			this.onSyncProgress?.({ phase: "deleting", current: 0, total: wipeTotal, failed: 0 });
+			let wipeFailed = 0;
+			for (let i = 0; i < syncable.length; i++) {
+				const file = syncable[i];
 				try {
 					await this.app.vault.trash(file, true);
 					this.logEntry("delete", file.path, "ok", undefined, "wipe");
 				} catch (e) {
+					wipeFailed++;
 					const msg = e instanceof Error ? e.message : String(e);
 					this.logEntry("delete", file.path, "error", msg);
 				}
+				this.onSyncProgress?.({
+					phase: "deleting",
+					current: i + 1,
+					total: wipeTotal,
+					failed: wipeFailed,
+				});
 			}
 			// Reset sync state — everything will be re-synced from server
 			this.syncState.clear();

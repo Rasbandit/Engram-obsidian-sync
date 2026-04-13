@@ -289,7 +289,7 @@ export interface SyncPlan {
 export type PullAction = "pull" | "wipe-pull" | "cancel";
 
 export interface SyncProgress {
-	phase: "pushing" | "pulling" | "attachments" | "complete";
+	phase: "deleting" | "pushing" | "pulling" | "attachments" | "complete";
 	current: number;
 	total: number;
 	failed: number;
