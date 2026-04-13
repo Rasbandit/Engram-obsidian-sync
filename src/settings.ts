@@ -127,6 +127,53 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 				});
 		}
 
+		// ── Vault Picker ──
+		if (this.plugin.settings.apiKey || this.plugin.settings.refreshToken) {
+			containerEl.createEl("h3", { text: "Vault" });
+
+			new Setting(containerEl)
+				.setName("Sync vault")
+				.setDesc("Select which vault this plugin syncs with")
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", "Loading vaults...");
+					dropdown.setDisabled(true);
+
+					this.plugin.api.listVaults().then((vaults) => {
+						dropdown.selectEl.empty();
+						if (vaults.length === 0) {
+							dropdown.addOption("", "No vaults found — first sync will create one");
+						} else {
+							for (const v of vaults) {
+								const label = v.is_default ? `${v.name} (default)` : v.name;
+								dropdown.addOption(String(v.id), label);
+							}
+						}
+						dropdown.setDisabled(false);
+
+						if (this.plugin.settings.vaultId) {
+							dropdown.setValue(this.plugin.settings.vaultId);
+						}
+
+						dropdown.onChange(async (value) => {
+							if (value && value !== this.plugin.settings.vaultId) {
+								this.plugin.settings.vaultId = value;
+								this.plugin.api.setVaultId(value);
+								await this.plugin.saveSettings();
+								this.display();
+							}
+						});
+					});
+				});
+
+			if (this.plugin.settings.vaultId) {
+				const infoEl = containerEl.createEl("p", {
+					cls: "setting-item-description",
+				});
+				infoEl.setText("Connected");
+				infoEl.style.marginTop = "-10px";
+			}
+		}
+
 		new Setting(containerEl)
 			.setName("Remote logging")
 			.setDesc("Send sync events to the server for remote debugging.")
@@ -208,6 +255,49 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		// ── Progress bar (hidden until sync is active) ──
+		const progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" });
+		progressContainer.style.display = "none";
+		progressContainer.style.padding = "12px 0";
+
+		const progressLabel = progressContainer.createEl("p", {
+			text: "Syncing...",
+			cls: "engram-progress-label",
+		});
+		progressLabel.style.margin = "0 0 4px 0";
+
+		const progressBarOuter = progressContainer.createDiv({ cls: "engram-progress-bar-outer" });
+		progressBarOuter.style.height = "6px";
+		progressBarOuter.style.background = "var(--background-modifier-border)";
+		progressBarOuter.style.borderRadius = "3px";
+		progressBarOuter.style.overflow = "hidden";
+
+		const progressBarInner = progressBarOuter.createDiv({ cls: "engram-progress-bar-inner" });
+		progressBarInner.style.height = "100%";
+		progressBarInner.style.width = "0%";
+		progressBarInner.style.background = "var(--interactive-accent)";
+		progressBarInner.style.transition = "width 0.2s ease";
+
+		this.plugin.syncEngine.onSyncProgress = (progress) => {
+			if (progress.phase === "complete") {
+				progressContainer.style.display = "none";
+				return;
+			}
+			progressContainer.style.display = "block";
+			const pct =
+				progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+			const phaseLabel =
+				progress.phase === "pushing"
+					? "Pushing notes"
+					: progress.phase === "pulling"
+						? "Pulling notes"
+						: "Syncing attachments";
+			progressLabel.setText(
+				`${phaseLabel}... ${progress.current}/${progress.total}${progress.failed > 0 ? ` (${progress.failed} failed)` : ""}`,
+			);
+			progressBarInner.style.width = `${pct}%`;
+		};
+
 		// ── Actions ──
 		new Setting(containerEl).setName("Actions").setHeading();
 
@@ -216,14 +306,34 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			.setDesc("Pull remote changes and push local changes")
 			.addButton((btn) =>
 				btn.setButtonText("Sync").onClick(async () => {
-					new Notice("Engram Sync: syncing...");
 					try {
+						btn.setDisabled(true);
+						const plan = await this.plugin.syncEngine.computeSyncPlan("full");
+						const { PreSyncModal } = await import("./pre-sync-modal");
+						const confirmed = await new PreSyncModal(
+							this.app,
+							plan,
+						).awaitConfirmation();
+						if (!confirmed) {
+							btn.setDisabled(false);
+							return;
+						}
 						const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
-						new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
+						const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
+						if (errors > 0) {
+							new Notice(
+								`Sync complete: pulled ${pulled}, pushed ${pushed}, ${errors} failed — run "Engram: Show sync log" for details`,
+								10000,
+							);
+						} else {
+							new Notice(`Engram Sync: pulled ${pulled}, pushed ${pushed}`);
+						}
 					} catch (e) {
 						new Notice(
 							`Engram Sync: ${e instanceof Error ? e.message : "sync failed"}`,
 						);
+					} finally {
+						btn.setDisabled(false);
 					}
 				}),
 			);
@@ -236,20 +346,34 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					.setButtonText("Push All")
 					.setWarning()
 					.onClick(async () => {
-						const count = this.plugin.syncEngine.countSyncableFiles();
-						if (
-							!confirm(
-								`Push ${count} files to Engram? This may overwrite server content.`,
-							)
-						)
-							return;
 						try {
-							const pushed = await this.plugin.syncEngine.pushAll();
-							new Notice(`Engram Sync: pushed ${pushed} files`);
+							btn.setDisabled(true);
+							const plan = await this.plugin.syncEngine.computeSyncPlan("push-all");
+							const { PreSyncModal } = await import("./pre-sync-modal");
+							const confirmed = await new PreSyncModal(
+								this.app,
+								plan,
+							).awaitConfirmation();
+							if (!confirmed) {
+								btn.setDisabled(false);
+								return;
+							}
+							const count = await this.plugin.syncEngine.pushAll();
+							const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
+							if (errors > 0) {
+								new Notice(
+									`Sync complete: ${count} pushed, ${errors} failed — run "Engram: Show sync log" for details`,
+									10000,
+								);
+							} else {
+								new Notice(`Sync complete: ${count} pushed`);
+							}
 						} catch (e) {
 							new Notice(
 								`Engram Sync: ${e instanceof Error ? e.message : "push failed"}`,
 							);
+						} finally {
+							btn.setDisabled(false);
 						}
 					}),
 			);
@@ -262,20 +386,34 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					.setButtonText("Pull All")
 					.setWarning()
 					.onClick(async () => {
-						if (
-							!confirm(
-								"Pull all files from server? Local changes will be overwritten.",
-							)
-						)
-							return;
 						try {
-							new Notice("Engram Sync: pulling all from server...");
+							btn.setDisabled(true);
+							const plan = await this.plugin.syncEngine.computeSyncPlan("pull-all");
+							const { PreSyncModal } = await import("./pre-sync-modal");
+							const confirmed = await new PreSyncModal(
+								this.app,
+								plan,
+							).awaitConfirmation();
+							if (!confirmed) {
+								btn.setDisabled(false);
+								return;
+							}
 							const count = await this.plugin.syncEngine.pullAll();
-							new Notice(`Engram Sync: pulled ${count} files from server`);
+							const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
+							if (errors > 0) {
+								new Notice(
+									`Sync complete: ${count} pulled, ${errors} failed — run "Engram: Show sync log" for details`,
+									10000,
+								);
+							} else {
+								new Notice(`Sync complete: ${count} pulled`);
+							}
 						} catch (e) {
 							new Notice(
 								`Engram Sync: ${e instanceof Error ? e.message : "pull failed"}`,
 							);
+						} finally {
+							btn.setDisabled(false);
 						}
 					}),
 			);
