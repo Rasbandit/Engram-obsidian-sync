@@ -430,3 +430,31 @@
 	border-radius: 6px;
 	padding: 8px;
 }
+
+/* ── Settings tab bar ────────────────────────────────────────── */
+
+.engram-tab-bar {
+	display: flex;
+	gap: 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 16px;
+}
+
+.engram-tab {
+	padding: 8px 16px;
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.engram-tab:hover {
+	color: var(--text-normal);
+}
+
+.engram-tab.is-active {
+	color: var(--text-normal);
+	border-bottom-color: var(--interactive-accent);
+}
