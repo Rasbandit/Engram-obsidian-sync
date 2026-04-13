@@ -3520,13 +3520,6 @@ function renderAccountTab(ctx) {
         });
       });
     });
-    if (plugin.settings.vaultId) {
-      const infoEl = containerEl.createEl("p", {
-        cls: "setting-item-description"
-      });
-      infoEl.setText("Connected");
-      infoEl.style.marginTop = "-10px";
-    }
   }
   new import_obsidian9.Setting(containerEl).setName("Actions").setHeading();
   new import_obsidian9.Setting(containerEl).setName("Sync now").setDesc("Pull remote changes and push local changes").addButton(
@@ -3666,9 +3659,10 @@ function renderAdvancedTab(ctx) {
     });
     text.inputEl.rows = 6;
     text.inputEl.style.width = "100%";
+    text.inputEl.style.boxSizing = "border-box";
   });
   ignoreSetting.settingEl.style.flexDirection = "column";
-  ignoreSetting.settingEl.style.alignItems = "flex-start";
+  ignoreSetting.settingEl.style.alignItems = "stretch";
   ignoreSetting.settingEl.style.gap = "8px";
   new import_obsidian10.Setting(containerEl).setName("Diagnostics").setHeading();
   new import_obsidian10.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(

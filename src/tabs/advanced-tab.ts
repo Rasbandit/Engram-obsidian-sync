@@ -76,9 +76,10 @@ export function renderAdvancedTab(ctx: TabContext): void {
 				});
 			text.inputEl.rows = 6;
 			text.inputEl.style.width = "100%";
+			text.inputEl.style.boxSizing = "border-box";
 		});
 	ignoreSetting.settingEl.style.flexDirection = "column";
-	ignoreSetting.settingEl.style.alignItems = "flex-start";
+	ignoreSetting.settingEl.style.alignItems = "stretch";
 	ignoreSetting.settingEl.style.gap = "8px";
 
 	// ── Diagnostics ──

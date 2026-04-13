@@ -138,14 +138,6 @@ export function renderAccountTab(ctx: TabContext): void {
 					});
 				});
 			});
-
-		if (plugin.settings.vaultId) {
-			const infoEl = containerEl.createEl("p", {
-				cls: "setting-item-description",
-			});
-			infoEl.setText("Connected");
-			infoEl.style.marginTop = "-10px";
-		}
 	}
 
 	// ── Actions ──
