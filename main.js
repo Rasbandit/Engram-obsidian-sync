@@ -4107,6 +4107,8 @@ var SyncEngine = class {
     this.onSyncProgress = null;
     /** Optional sync log — receives an entry for each push/pull outcome. */
     this.syncLog = null;
+    /** When true, vault delete events are suppressed (used during local wipe). */
+    this.suppressDeletes = false;
     /** Paths modified during a pull that need pushing once pull completes. */
     this.pendingPostPullPushes = /* @__PURE__ */ new Set();
     this.parseIgnorePatterns();
@@ -4244,6 +4246,7 @@ var SyncEngine = class {
   async handleDelete(file) {
     var _a;
     if (!this.ready) return;
+    if (this.suppressDeletes) return;
     if (!this.isSyncable(file)) return;
     if (this.shouldIgnore(file.path)) return;
     const isBinary = this.isBinaryFile(file);
@@ -4703,6 +4706,7 @@ var SyncEngine = class {
     this.lastError = "";
     this.emitStatus();
     if (wipe) {
+      this.suppressDeletes = true;
       devLog().log("pull", "wipePullAll: deleting all local syncable files");
       rlog().info("pull", "WipePullAll started \u2014 deleting local files");
       const files = this.app.vault.getFiles();
@@ -4738,6 +4742,7 @@ var SyncEngine = class {
         `wipePullAll: deleted ${syncable.length} local files, sync state reset`
       );
       rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
+      this.suppressDeletes = false;
     }
     devLog().log(
       "pull",
@@ -4810,7 +4815,9 @@ var SyncEngine = class {
       for (let i = 0; i < noteChanges.length; i++) {
         const change = noteChanges[i];
         if (i < 3) {
-          console.log(`[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${(_g = (_f = change.content) == null ? void 0 : _f.length) != null ? _g : "null"}`);
+          console.log(
+            `[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${(_g = (_f = change.content) == null ? void 0 : _f.length) != null ? _g : "null"}`
+          );
         }
         try {
           const ok = await this.applyChange(change, true);
@@ -4860,7 +4867,9 @@ var SyncEngine = class {
       const serverTime = noteResp.server_time > attachResp.server_time ? noteResp.server_time : attachResp.server_time;
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
-      console.log(`[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`);
+      console.log(
+        `[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`
+      );
       devLog().log(
         "pull",
         `pullAll: done \u2014 applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`
@@ -5440,6 +5449,7 @@ var SyncEngine = class {
   }
   /** DEBUG: Delete all local syncable files. Temporary test method. */
   async debugWipeLocal() {
+    this.suppressDeletes = true;
     const files = this.app.vault.getFiles();
     console.log(`[engram-debug] getFiles() returned ${files.length} files`);
     let deletedFiles = 0;
@@ -5471,6 +5481,7 @@ var SyncEngine = class {
     console.log(
       `[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`
     );
+    this.suppressDeletes = false;
     return deletedFiles + deletedFolders;
   }
   /** Push ALL syncable files (initial import). */

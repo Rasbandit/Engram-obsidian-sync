@@ -317,9 +317,13 @@ export class SyncEngine {
 		this.emitStatus();
 	}
 
+	/** When true, vault delete events are suppressed (used during local wipe). */
+	suppressDeletes = false;
+
 	/** Handle a vault delete event. */
 	async handleDelete(file: TAbstractFile): Promise<void> {
 		if (!this.ready) return;
+		if (this.suppressDeletes) return;
 		if (!this.isSyncable(file)) return;
 		if (this.shouldIgnore(file.path)) return;
 
@@ -859,6 +863,8 @@ export class SyncEngine {
 		this.emitStatus();
 
 		if (wipe) {
+			// Suppress delete sync — we're wiping locally, not deleting from server
+			this.suppressDeletes = true;
 			devLog().log("pull", "wipePullAll: deleting all local syncable files");
 			rlog().info("pull", "WipePullAll started — deleting local files");
 			const files = this.app.vault.getFiles() as TFile[];
@@ -896,6 +902,7 @@ export class SyncEngine {
 				`wipePullAll: deleted ${syncable.length} local files, sync state reset`,
 			);
 			rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
+			this.suppressDeletes = false;
 		}
 
 		devLog().log(
@@ -1772,6 +1779,7 @@ export class SyncEngine {
 
 	/** DEBUG: Delete all local syncable files. Temporary test method. */
 	async debugWipeLocal(): Promise<number> {
+		this.suppressDeletes = true;
 		// Delete all files first
 		const files = this.app.vault.getFiles() as TFile[];
 		// biome-ignore lint/suspicious/noConsole: debug method
@@ -1817,6 +1825,7 @@ export class SyncEngine {
 		console.log(
 			`[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`,
 		);
+		this.suppressDeletes = false;
 		return deletedFiles + deletedFolders;
 	}
 
