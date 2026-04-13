@@ -3719,14 +3719,6 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
         }
       })
     );
-    new import_obsidian9.Setting(containerEl).setName("DEBUG: Wipe local vault").setDesc("Delete all syncable files locally. Check console for output.").addButton(
-      (btn) => btn.setButtonText("Wipe Local").setWarning().onClick(async () => {
-        btn.setDisabled(true);
-        const count = await this.plugin.syncEngine.debugWipeLocal();
-        new import_obsidian9.Notice(`DEBUG: deleted ${count} files. Check console.`);
-        btn.setDisabled(false);
-      })
-    );
   }
   /** Open a progress modal and wire it to the sync engine's progress callback. */
   async openProgressModal() {
@@ -5512,43 +5504,6 @@ var SyncEngine = class {
       toDeleteRemote: []
       // computed during execution (local deletes since last sync)
     };
-  }
-  /** DEBUG: Delete all local syncable files. Temporary test method. */
-  async debugWipeLocal() {
-    this.suppressDeletes = true;
-    const files = this.app.vault.getFiles();
-    console.log(`[engram-debug] getFiles() returned ${files.length} files`);
-    let deletedFiles = 0;
-    for (const file of files) {
-      if (this.shouldIgnore(file.path)) continue;
-      try {
-        await this.app.vault.trash(file, true);
-        deletedFiles++;
-      } catch (e) {
-        console.error(`[engram-debug] failed to trash file ${file.path}:`, e);
-      }
-    }
-    const allFolders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof import_obsidian10.TFolder && f.path !== "/").sort((a, b) => b.path.length - a.path.length);
-    console.log(`[engram-debug] found ${allFolders.length} folders to check`);
-    let deletedFolders = 0;
-    for (const folder of allFolders) {
-      if (this.shouldIgnore(folder.path)) continue;
-      if (folder.path.startsWith(".")) continue;
-      try {
-        const current = this.app.vault.getAbstractFileByPath(folder.path);
-        if (current instanceof import_obsidian10.TFolder && current.children.length === 0) {
-          await this.app.vault.trash(current, true);
-          deletedFolders++;
-        }
-      } catch (e) {
-        console.error(`[engram-debug] failed to trash folder ${folder.path}:`, e);
-      }
-    }
-    console.log(
-      `[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`
-    );
-    this.suppressDeletes = false;
-    return deletedFiles + deletedFolders;
   }
   /** Push ALL syncable files (initial import). */
   async pushAll() {

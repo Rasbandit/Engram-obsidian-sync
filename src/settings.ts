@@ -419,22 +419,6 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						}
 					}),
 			);
-
-		// ── DEBUG: Temporary wipe button ──
-		new Setting(containerEl)
-			.setName("DEBUG: Wipe local vault")
-			.setDesc("Delete all syncable files locally. Check console for output.")
-			.addButton((btn) =>
-				btn
-					.setButtonText("Wipe Local")
-					.setWarning()
-					.onClick(async () => {
-						btn.setDisabled(true);
-						const count = await this.plugin.syncEngine.debugWipeLocal();
-						new Notice(`DEBUG: deleted ${count} files. Check console.`);
-						btn.setDisabled(false);
-					}),
-			);
 	}
 
 	/** Open a progress modal and wire it to the sync engine's progress callback. */

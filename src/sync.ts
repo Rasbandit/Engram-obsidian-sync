@@ -1842,58 +1842,6 @@ export class SyncEngine {
 		};
 	}
 
-	/** DEBUG: Delete all local syncable files. Temporary test method. */
-	async debugWipeLocal(): Promise<number> {
-		this.suppressDeletes = true;
-		// Delete all files first
-		const files = this.app.vault.getFiles() as TFile[];
-		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(`[engram-debug] getFiles() returned ${files.length} files`);
-		let deletedFiles = 0;
-		for (const file of files) {
-			if (this.shouldIgnore(file.path)) continue;
-			try {
-				await this.app.vault.trash(file, true);
-				deletedFiles++;
-			} catch (e) {
-				// biome-ignore lint/suspicious/noConsole: debug method
-				console.error(`[engram-debug] failed to trash file ${file.path}:`, e);
-			}
-		}
-
-		// Then delete all empty folders (deepest first to avoid parent-before-child)
-		const allFolders = this.app.vault
-			.getAllLoadedFiles()
-			.filter((f): f is TFolder => f instanceof TFolder && f.path !== "/")
-			.sort((a, b) => b.path.length - a.path.length); // deepest first
-
-		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(`[engram-debug] found ${allFolders.length} folders to check`);
-		let deletedFolders = 0;
-		for (const folder of allFolders) {
-			if (this.shouldIgnore(folder.path)) continue;
-			if (folder.path.startsWith(".")) continue; // skip .obsidian etc
-			try {
-				// Re-check if folder still exists and is empty (children may have been deleted)
-				const current = this.app.vault.getAbstractFileByPath(folder.path);
-				if (current instanceof TFolder && current.children.length === 0) {
-					await this.app.vault.trash(current, true);
-					deletedFolders++;
-				}
-			} catch (e) {
-				// biome-ignore lint/suspicious/noConsole: debug method
-				console.error(`[engram-debug] failed to trash folder ${folder.path}:`, e);
-			}
-		}
-
-		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(
-			`[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`,
-		);
-		this.suppressDeletes = false;
-		return deletedFiles + deletedFolders;
-	}
-
 	/** Push ALL syncable files (initial import). */
 	async pushAll(): Promise<number> {
 		this.syncLog?.clear();
