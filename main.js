@@ -4712,7 +4712,7 @@ var SyncEngine = class {
     return this._pullAll(true);
   }
   async _pullAll(wipe) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     if (this.pulling) return 0;
     (_a = this.syncLog) == null ? void 0 : _a.clear();
     this.pulling = true;
@@ -4825,7 +4825,16 @@ var SyncEngine = class {
       console.log(
         `[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`
       );
-      (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, { phase: "pulling", current: 0, total, failed: 0 });
+      for (const n of noteResp.changes.slice(0, 5)) {
+        console.log(
+          `[engram-debug] sample note: path=${n.path} deleted=${n.deleted} hasContent=${n.content != null} contentLen=${(_f = (_e = n.content) == null ? void 0 : _e.length) != null ? _f : 0}`
+        );
+      }
+      const deletedCount = noteResp.changes.filter((n) => n.deleted).length;
+      console.log(
+        `[engram-debug] pullAll: ${deletedCount}/${noteResp.changes.length} notes have deleted=true`
+      );
+      (_g = this.onSyncProgress) == null ? void 0 : _g.call(this, { phase: "pulling", current: 0, total, failed: 0 });
       for (let i = 0; i < noteChanges.length; i += 10) {
         const batch = noteChanges.slice(i, i + 10);
         const lastPath = batch[batch.length - 1].path;
@@ -4836,7 +4845,13 @@ var SyncEngine = class {
               if (ok) {
                 this.logEntry("pull", change.path, "ok");
               } else {
-                this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
+                this.logEntry(
+                  "skip",
+                  change.path,
+                  "skipped",
+                  void 0,
+                  "unchanged"
+                );
               }
               return ok ? "ok" : "skip";
             } catch (e) {
@@ -4851,7 +4866,7 @@ var SyncEngine = class {
           if (r === "ok") applied++;
           else if (r === "error") failed++;
         }
-        (_f = this.onSyncProgress) == null ? void 0 : _f.call(this, {
+        (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, {
           phase: "pulling",
           current: Math.min(i + batch.length, noteChanges.length),
           total,
@@ -4869,7 +4884,13 @@ var SyncEngine = class {
               if (ok) {
                 this.logEntry("pull", change.path, "ok");
               } else {
-                this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
+                this.logEntry(
+                  "skip",
+                  change.path,
+                  "skipped",
+                  void 0,
+                  "unchanged"
+                );
               }
               return ok ? "ok" : "skip";
             } catch (e) {
@@ -4884,7 +4905,7 @@ var SyncEngine = class {
           if (r === "ok") applied++;
           else if (r === "error") failed++;
         }
-        (_g = this.onSyncProgress) == null ? void 0 : _g.call(this, {
+        (_i = this.onSyncProgress) == null ? void 0 : _i.call(this, {
           phase: "pulling",
           current: noteCount + Math.min(i + batch.length, attachChanges.length),
           total,
@@ -4892,7 +4913,7 @@ var SyncEngine = class {
           currentPath: lastPath
         });
       }
-      (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, { phase: "complete", current: total, total, failed });
+      (_j = this.onSyncProgress) == null ? void 0 : _j.call(this, { phase: "complete", current: total, total, failed });
       const serverTime = noteResp.server_time > attachResp.server_time ? noteResp.server_time : attachResp.server_time;
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
@@ -4995,9 +5016,13 @@ var SyncEngine = class {
    *  When forceOverwrite is true, skip conflict detection and always apply. */
   async applyChange(change, forceOverwrite = false) {
     var _a, _b, _c, _d, _e, _f, _g, _h;
-    if (this.shouldIgnore(change.path)) return false;
+    if (this.shouldIgnore(change.path)) {
+      console.log(`[engram-debug] applyChange SKIP (ignored): ${change.path}`);
+      return false;
+    }
     const normalized = (0, import_obsidian10.normalizePath)(change.path);
     if (change.deleted) {
+      console.log(`[engram-debug] applyChange DELETE: ${change.path}`);
       const existing2 = this.app.vault.getFileByPath(normalized);
       if (existing2) {
         await this.app.vault.trash(existing2, true);
@@ -5158,6 +5183,7 @@ var SyncEngine = class {
         }
         rlog().info("conflict", `Resolved: ${change.path} \u2192 keep-remote`);
       } else if (localContent === change.content) {
+        console.log(`[engram-debug] applyChange SKIP (identical): ${change.path}`);
         this.syncState.set(normalized, { hash: localHash, version: change.version });
         if (change.version != null) {
           (_f = this.baseStore) == null ? void 0 : _f.set(normalized, change.content, change.version);
@@ -5165,6 +5191,7 @@ var SyncEngine = class {
         rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
+      console.log(`[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`);
       await this.modifyFile(existing, change.content);
       this.syncState.set(normalized, {
         hash: fnv1a(change.content),
@@ -5179,7 +5206,13 @@ var SyncEngine = class {
       );
       return true;
     }
-    await this.createFileWithFolders(normalized, change.content);
+    console.log(`[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`);
+    try {
+      await this.createFileWithFolders(normalized, change.content);
+    } catch (createErr) {
+      console.error(`[engram-debug] applyChange CREATE FAILED: ${normalized}`, createErr);
+      throw createErr;
+    }
     this.syncState.set(normalized, {
       hash: fnv1a(change.content),
       version: change.version

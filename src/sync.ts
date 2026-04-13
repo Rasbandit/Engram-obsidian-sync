@@ -984,6 +984,19 @@ export class SyncEngine {
 			console.log(
 				`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`,
 			);
+			// Show first 5 notes to check deleted flag + content presence
+			for (const n of noteResp.changes.slice(0, 5)) {
+				// biome-ignore lint/suspicious/noConsole: diagnostic
+				console.log(
+					`[engram-debug] sample note: path=${n.path} deleted=${n.deleted} hasContent=${n.content != null} contentLen=${n.content?.length ?? 0}`,
+				);
+			}
+			// Count how many are deleted
+			const deletedCount = noteResp.changes.filter((n) => n.deleted).length;
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(
+				`[engram-debug] pullAll: ${deletedCount}/${noteResp.changes.length} notes have deleted=true`,
+			);
 
 			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
 
@@ -1190,11 +1203,18 @@ export class SyncEngine {
 	 *  Returns true when a file was actually created, modified, or trashed.
 	 *  When forceOverwrite is true, skip conflict detection and always apply. */
 	async applyChange(change: NoteChange, forceOverwrite = false): Promise<boolean> {
-		if (this.shouldIgnore(change.path)) return false;
+		if (this.shouldIgnore(change.path)) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(`[engram-debug] applyChange SKIP (ignored): ${change.path}`);
+			return false;
+		}
 
 		const normalized = normalizePath(change.path);
 
 		if (change.deleted) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(`[engram-debug] applyChange DELETE: ${change.path}`);
+
 			// Delete local file if it exists
 			const existing = this.app.vault.getFileByPath(normalized);
 			if (existing) {
@@ -1392,6 +1412,8 @@ export class SyncEngine {
 				rlog().info("conflict", `Resolved: ${change.path} → keep-remote`);
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
+				// biome-ignore lint/suspicious/noConsole: diagnostic
+				console.log(`[engram-debug] applyChange SKIP (identical): ${change.path}`);
 				this.syncState.set(normalized, { hash: localHash, version: change.version });
 				if (change.version != null) {
 					this.baseStore?.set(normalized, change.content, change.version);
@@ -1401,6 +1423,10 @@ export class SyncEngine {
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.log(
+				`[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`,
+			);
 			await this.modifyFile(existing, change.content);
 			this.syncState.set(normalized, {
 				hash: fnv1a(change.content),
@@ -1416,7 +1442,17 @@ export class SyncEngine {
 			return true;
 		}
 		// New file — create it
-		await this.createFileWithFolders(normalized, change.content);
+		// biome-ignore lint/suspicious/noConsole: diagnostic
+		console.log(
+			`[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`,
+		);
+		try {
+			await this.createFileWithFolders(normalized, change.content);
+		} catch (createErr) {
+			// biome-ignore lint/suspicious/noConsole: diagnostic
+			console.error(`[engram-debug] applyChange CREATE FAILED: ${normalized}`, createErr);
+			throw createErr;
+		}
 		this.syncState.set(normalized, {
 			hash: fnv1a(change.content),
 			version: change.version,
