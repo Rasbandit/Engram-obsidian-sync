@@ -7,6 +7,7 @@ import type { BaseStore } from "./base-store";
 import { devLog } from "./dev-log";
 import { OfflineQueue } from "./offline-queue";
 import { rlog } from "./remote-log";
+import type { SyncLog } from "./sync-log";
 import { threeWayMerge } from "./three-way-merge";
 import type {
 	AttachmentChange,
@@ -18,7 +19,9 @@ import type {
 	NoteStreamEvent,
 	QueueEntry,
 	ReconcileResult,
+	SyncLogEntry,
 	SyncPlan,
+	SyncProgress,
 	SyncStatus,
 	VersionConflictResponse,
 } from "./types";
@@ -135,6 +138,12 @@ export class SyncEngine {
 	 *  If null, conflicts are auto-resolved as keep-remote (legacy behavior). */
 	onConflict: ((info: ConflictInfo) => Promise<ConflictResolution>) | null = null;
 
+	/** Called after each batch during pushAll/pullAll to report progress. */
+	onSyncProgress: ((progress: SyncProgress) => void) | null = null;
+
+	/** Optional sync log — receives an entry for each push/pull outcome. */
+	syncLog: SyncLog | null = null;
+
 	constructor(
 		private app: App,
 		private api: EngramApi,
@@ -223,6 +232,17 @@ export class SyncEngine {
 	/** Emit current status to listener. */
 	private emitStatus(): void {
 		this.onStatusChange?.(this.getStatus());
+	}
+
+	/** Append an entry to the sync log (no-op if syncLog is null). */
+	private logEntry(
+		action: SyncLogEntry["action"],
+		path: string,
+		result: SyncLogEntry["result"],
+		error?: string,
+		details?: string,
+	): void {
+		this.syncLog?.append({ timestamp: new Date(), action, path, result, error, details });
 	}
 
 	// --- Ignore pattern matching ---
@@ -844,32 +864,63 @@ export class SyncEngine {
 				"pull",
 				`PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
 			);
-			let applied = 0;
-			let skipped = 0;
 
-			for (const change of noteResp.changes) {
+			let applied = 0;
+			let failed = 0;
+			const noteCount = noteResp.changes.length;
+			const attachCount = attachResp.changes.length;
+			const total = noteCount + attachCount;
+
+			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
+
+			for (let i = 0; i < noteResp.changes.length; i++) {
+				const change = noteResp.changes[i];
 				try {
-					if (await this.applyChange(change, true)) applied++;
+					const ok = await this.applyChange(change, true);
+					if (ok) {
+						applied++;
+						this.logEntry("pull", change.path, "ok");
+					} else {
+						this.logEntry("skip", change.path, "skipped", undefined, "unchanged");
+					}
 				} catch (e) {
-					skipped++;
+					failed++;
 					const msg = e instanceof Error ? e.message : String(e);
 					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
 					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
+					this.logEntry("pull", change.path, "error", msg);
 				}
+				this.onSyncProgress?.({ phase: "pulling", current: i + 1, total, failed });
 			}
 
-			for (const change of attachResp.changes) {
+			for (let i = 0; i < attachResp.changes.length; i++) {
+				const change = attachResp.changes[i];
 				try {
-					if (await this.applyAttachmentChange(change)) applied++;
+					const ok = await this.applyAttachmentChange(change);
+					if (ok) {
+						applied++;
+						this.logEntry("pull", change.path, "ok");
+					} else {
+						this.logEntry("skip", change.path, "skipped", undefined, "unchanged");
+					}
 				} catch (e) {
-					skipped++;
+					failed++;
 					const msg = e instanceof Error ? e.message : String(e);
 					// biome-ignore lint/suspicious/noConsole: error boundary
 					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
 					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
+					this.logEntry("pull", change.path, "error", msg);
 				}
+				this.onSyncProgress?.({
+					phase: "pulling",
+					current: noteCount + i + 1,
+					total,
+					failed,
+				});
 			}
+
+			this.onSyncProgress?.({ phase: "complete", current: total, total, failed });
 
 			// Update lastSync to server time
 			const serverTime =
@@ -879,8 +930,11 @@ export class SyncEngine {
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
-			devLog().log("pull", `pullAll: done — applied ${applied}, lastSync=${this.lastSync}`);
-			rlog().info("pull", `PullAll done — applied ${applied}, skipped ${skipped}`);
+			devLog().log(
+				"pull",
+				`pullAll: done — applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`,
+			);
+			rlog().info("pull", `PullAll done — applied=${applied}, failed=${failed}`);
 			return applied;
 		} catch (e) {
 			// biome-ignore lint/suspicious/noConsole: error boundary
@@ -1594,31 +1648,51 @@ export class SyncEngine {
 
 		const files = this.app.vault.getFiles();
 		const toSync = files.filter((f: TFile) => this.isSyncable(f) && !this.shouldIgnore(f.path));
-		let pushed = 0;
 
-		new Notice(`Engram Sync: pushing ${toSync.length} files...`);
+		let pushed = 0;
+		let failed = 0;
+		const total = toSync.length;
+
+		devLog().log("push", `pushAll: ${total} files`);
+		rlog().info("push", `PushAll started — ${total} files`);
+
+		this.onSyncProgress?.({ phase: "pushing", current: 0, total, failed: 0 });
 
 		for (let i = 0; i < toSync.length; i += 10) {
 			const batch = toSync.slice(i, i + 10);
-			const results = await Promise.all(batch.map((f: TFile) => this.pushFile(f, true)));
+			const results = await Promise.all(
+				batch.map(async (f: TFile) => {
+					try {
+						const ok = await this.pushFile(f, true);
+						if (ok) {
+							this.logEntry("push", f.path, "ok");
+						} else {
+							this.logEntry("skip", f.path, "skipped", undefined, "unchanged");
+						}
+						return ok;
+					} catch (e) {
+						failed++;
+						const msg = e instanceof Error ? e.message : String(e);
+						this.logEntry("push", f.path, "error", msg);
+						return false;
+					}
+				}),
+			);
 			pushed += results.filter(Boolean).length;
-
-			if (pushed % 100 === 0) {
-				new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files...`);
-			}
+			this.onSyncProgress?.({ phase: "pushing", current: i + batch.length, total, failed });
 		}
 
-		const skipped = toSync.length - pushed;
-		if (skipped > 0) {
-			const skippedPaths = toSync
-				.filter((f: TFile) => !this.pushing.has(f.path))
-				.map((f: TFile) => f.path);
-			devLog().log("push", `pushAll skipped ${skipped} files: ${skippedPaths.join(", ")}`);
-			rlog().warn("push", `PushAll skipped ${skipped} files`);
-			new Notice(`Engram Sync: pushed ${pushed}/${toSync.length} files (${skipped} skipped)`);
-		} else {
-			new Notice(`Engram Sync: push complete (${pushed} files)`);
-		}
+		this.onSyncProgress?.({ phase: "complete", current: total, total, failed });
+
+		const skipped = total - pushed - failed;
+		devLog().log(
+			"push",
+			`pushAll done — pushed=${pushed}, skipped=${skipped}, failed=${failed}`,
+		);
+		rlog().info(
+			"push",
+			`PushAll done — pushed=${pushed}, skipped=${skipped}, failed=${failed}`,
+		);
 
 		// Post-push reconciliation
 		const reconcileResult = await this.reconcile();
@@ -1637,7 +1711,6 @@ export class SyncEngine {
 						await this.pushFile(file, true);
 					}
 				}
-				new Notice(`Engram Sync: reconciled ${toFix.length} files`);
 			}
 		}
 
