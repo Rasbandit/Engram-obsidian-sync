@@ -321,7 +321,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 							btn.setDisabled(false);
 							return;
 						}
-						const progressModal = this.openProgressModal();
+						const progressModal = await this.openProgressModal();
 						const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
 						const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
 						progressModal.update({
@@ -359,7 +359,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 								btn.setDisabled(false);
 								return;
 							}
-							this.openProgressModal();
+							await this.openProgressModal();
 							await this.plugin.syncEngine.pushAll();
 						} catch (e) {
 							new Notice(
@@ -403,11 +403,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 									btn.setDisabled(false);
 									return;
 								}
-								this.openProgressModal();
+								await this.openProgressModal();
 								await this.plugin.syncEngine.wipePullAll();
 								return;
 							}
-							this.openProgressModal();
+							await this.openProgressModal();
 							await this.plugin.syncEngine.pullAll();
 						} catch (e) {
 							new Notice(
@@ -421,7 +421,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 	}
 
 	/** Open a progress modal and wire it to the sync engine's progress callback. */
-	private openProgressModal(): SyncProgressModal {
+	private async openProgressModal(): Promise<SyncProgressModal> {
 		const modal = new SyncProgressModal(this.app);
 		const prevCallback = this.plugin.syncEngine.onSyncProgress;
 		this.plugin.syncEngine.onSyncProgress = (progress) => {
@@ -429,6 +429,8 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			prevCallback?.(progress);
 		};
 		modal.open();
+		// Yield to allow the modal to render before sync starts
+		await new Promise((resolve) => requestAnimationFrame(resolve));
 		return modal;
 	}
 

@@ -882,6 +882,10 @@ export class SyncEngine {
 					total: wipeTotal,
 					failed: wipeFailed,
 				});
+				// Yield to UI thread periodically so progress modal can repaint
+				if ((i + 1) % 20 === 0) {
+					await new Promise((resolve) => setTimeout(resolve, 0));
+				}
 			}
 			// Reset sync state — everything will be re-synced from server
 			this.syncState.clear();

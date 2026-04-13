@@ -3561,7 +3561,7 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
             btn.setDisabled(false);
             return;
           }
-          const progressModal = this.openProgressModal();
+          const progressModal = await this.openProgressModal();
           const { pulled, pushed } = await this.plugin.syncEngine.fullSync();
           const errors = (_b = (_a2 = this.plugin.syncEngine.syncLog) == null ? void 0 : _a2.errorCount()) != null ? _b : 0;
           progressModal.update({
@@ -3592,7 +3592,7 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
             btn.setDisabled(false);
             return;
           }
-          this.openProgressModal();
+          await this.openProgressModal();
           await this.plugin.syncEngine.pushAll();
         } catch (e) {
           new import_obsidian9.Notice(
@@ -3629,11 +3629,11 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
               btn.setDisabled(false);
               return;
             }
-            this.openProgressModal();
+            await this.openProgressModal();
             await this.plugin.syncEngine.wipePullAll();
             return;
           }
-          this.openProgressModal();
+          await this.openProgressModal();
           await this.plugin.syncEngine.pullAll();
         } catch (e) {
           new import_obsidian9.Notice(
@@ -3646,7 +3646,7 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
     );
   }
   /** Open a progress modal and wire it to the sync engine's progress callback. */
-  openProgressModal() {
+  async openProgressModal() {
     const modal = new SyncProgressModal(this.app);
     const prevCallback = this.plugin.syncEngine.onSyncProgress;
     this.plugin.syncEngine.onSyncProgress = (progress) => {
@@ -3654,6 +3654,7 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
       prevCallback == null ? void 0 : prevCallback(progress);
     };
     modal.open();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
     return modal;
   }
   async startDeviceFlow() {
@@ -4649,7 +4650,15 @@ var SyncEngine = class {
           const msg = e instanceof Error ? e.message : String(e);
           this.logEntry("delete", file.path, "error", msg);
         }
-        (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, { phase: "deleting", current: i + 1, total: wipeTotal, failed: wipeFailed });
+        (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, {
+          phase: "deleting",
+          current: i + 1,
+          total: wipeTotal,
+          failed: wipeFailed
+        });
+        if ((i + 1) % 20 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
       this.syncState.clear();
       this.lastSync = "";
