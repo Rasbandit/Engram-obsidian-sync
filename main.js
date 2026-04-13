@@ -4419,7 +4419,7 @@ var SyncEngine = class {
   /** Force-pull ALL notes and attachments from the server, overwriting local files.
    *  Ignores lastSync — fetches everything. Skips conflict detection. */
   async pullAll() {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     if (this.pulling) return 0;
     (_a = this.syncLog) == null ? void 0 : _a.clear();
     this.pulling = true;
@@ -4441,14 +4441,38 @@ var SyncEngine = class {
         "pull",
         `PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`
       );
+      const noteChanges = [];
+      for (const change of noteResp.changes) {
+        if (change.deleted || this.shouldIgnore(change.path)) {
+          noteChanges.push(change);
+          continue;
+        }
+        const existing = this.app.vault.getFileByPath((0, import_obsidian9.normalizePath)(change.path));
+        if (existing) {
+          const localContent = await this.app.vault.cachedRead(existing);
+          if (localContent === change.content) {
+            const normalized = (0, import_obsidian9.normalizePath)(change.path);
+            this.syncState.set(normalized, { hash: fnv1a(localContent), version: change.version });
+            if (change.version != null) {
+              (_b = this.baseStore) == null ? void 0 : _b.set(normalized, change.content, change.version);
+            }
+            continue;
+          }
+        }
+        noteChanges.push(change);
+      }
+      const attachChanges = attachResp.changes.filter((change) => {
+        if (change.deleted) return true;
+        return !this.app.vault.getFileByPath((0, import_obsidian9.normalizePath)(change.path));
+      });
       let applied = 0;
       let failed = 0;
-      const noteCount = noteResp.changes.length;
-      const attachCount = attachResp.changes.length;
+      const noteCount = noteChanges.length;
+      const attachCount = attachChanges.length;
       const total = noteCount + attachCount;
-      (_b = this.onSyncProgress) == null ? void 0 : _b.call(this, { phase: "pulling", current: 0, total, failed: 0 });
-      for (let i = 0; i < noteResp.changes.length; i++) {
-        const change = noteResp.changes[i];
+      (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, { phase: "pulling", current: 0, total, failed: 0 });
+      for (let i = 0; i < noteChanges.length; i++) {
+        const change = noteChanges[i];
         try {
           const ok = await this.applyChange(change, true);
           if (ok) {
@@ -4464,10 +4488,10 @@ var SyncEngine = class {
           rlog().error("pull", `Skipped note: ${change.path} \u2014 ${msg}`);
           this.logEntry("pull", change.path, "error", msg);
         }
-        (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, { phase: "pulling", current: i + 1, total, failed });
+        (_d = this.onSyncProgress) == null ? void 0 : _d.call(this, { phase: "pulling", current: i + 1, total, failed });
       }
-      for (let i = 0; i < attachResp.changes.length; i++) {
-        const change = attachResp.changes[i];
+      for (let i = 0; i < attachChanges.length; i++) {
+        const change = attachChanges[i];
         try {
           const ok = await this.applyAttachmentChange(change);
           if (ok) {
@@ -4483,14 +4507,14 @@ var SyncEngine = class {
           rlog().error("pull", `Skipped attachment: ${change.path} \u2014 ${msg}`);
           this.logEntry("pull", change.path, "error", msg);
         }
-        (_d = this.onSyncProgress) == null ? void 0 : _d.call(this, {
+        (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, {
           phase: "pulling",
           current: noteCount + i + 1,
           total,
           failed
         });
       }
-      (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, { phase: "complete", current: total, total, failed });
+      (_f = this.onSyncProgress) == null ? void 0 : _f.call(this, { phase: "complete", current: total, total, failed });
       const serverTime = noteResp.server_time > attachResp.server_time ? noteResp.server_time : attachResp.server_time;
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
@@ -5005,17 +5029,18 @@ var SyncEngine = class {
         continue;
       }
       if (localNoteSet.has(path)) {
-        const synced = this.syncState.get(path);
-        if ((synced == null ? void 0 : synced.hash) !== void 0) {
-          const file = this.app.vault.getFileByPath(path);
-          if (file) {
-            const content = await this.app.vault.cachedRead(file);
-            const localHash = fnv1a(content);
-            if (localHash !== synced.hash) {
-              conflictNotes.push(path);
-            } else {
-              toPullNotes.push(path);
-            }
+        const file = this.app.vault.getFileByPath(path);
+        if (file) {
+          const content = await this.app.vault.cachedRead(file);
+          const localHash = fnv1a(content);
+          const serverChange = noteResp.changes.find((c) => c.path === path);
+          const serverHash = serverChange ? fnv1a(serverChange.content) : void 0;
+          if (serverHash !== void 0 && localHash === serverHash) {
+            continue;
+          }
+          const synced = this.syncState.get(path);
+          if ((synced == null ? void 0 : synced.hash) !== void 0 && localHash !== synced.hash) {
+            conflictNotes.push(path);
           } else {
             toPullNotes.push(path);
           }

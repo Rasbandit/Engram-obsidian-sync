@@ -865,16 +865,48 @@ export class SyncEngine {
 				`PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
 			);
 
+			// Pre-filter: skip notes whose local content already matches server
+			const noteChanges: typeof noteResp.changes = [];
+			for (const change of noteResp.changes) {
+				if (change.deleted || this.shouldIgnore(change.path)) {
+					noteChanges.push(change);
+					continue;
+				}
+				const existing = this.app.vault.getFileByPath(normalizePath(change.path));
+				if (existing) {
+					const localContent = await this.app.vault.cachedRead(existing);
+					if (localContent === change.content) {
+						// Content identical — update sync state but skip the work
+						const normalized = normalizePath(change.path);
+						this.syncState.set(normalized, {
+							hash: fnv1a(localContent),
+							version: change.version,
+						});
+						if (change.version != null) {
+							this.baseStore?.set(normalized, change.content, change.version);
+						}
+						continue;
+					}
+				}
+				noteChanges.push(change);
+			}
+
+			// Pre-filter: skip attachments that already exist locally
+			const attachChanges = attachResp.changes.filter((change) => {
+				if (change.deleted) return true;
+				return !this.app.vault.getFileByPath(normalizePath(change.path));
+			});
+
 			let applied = 0;
 			let failed = 0;
-			const noteCount = noteResp.changes.length;
-			const attachCount = attachResp.changes.length;
+			const noteCount = noteChanges.length;
+			const attachCount = attachChanges.length;
 			const total = noteCount + attachCount;
 
 			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
 
-			for (let i = 0; i < noteResp.changes.length; i++) {
-				const change = noteResp.changes[i];
+			for (let i = 0; i < noteChanges.length; i++) {
+				const change = noteChanges[i];
 				try {
 					const ok = await this.applyChange(change, true);
 					if (ok) {
@@ -894,8 +926,8 @@ export class SyncEngine {
 				this.onSyncProgress?.({ phase: "pulling", current: i + 1, total, failed });
 			}
 
-			for (let i = 0; i < attachResp.changes.length; i++) {
-				const change = attachResp.changes[i];
+			for (let i = 0; i < attachChanges.length; i++) {
+				const change = attachChanges[i];
 				try {
 					const ok = await this.applyAttachmentChange(change);
 					if (ok) {
@@ -1568,26 +1600,30 @@ export class SyncEngine {
 				continue;
 			}
 			if (localNoteSet.has(path)) {
-				// Both sides have it — check if local was also modified (conflict)
-				const synced = this.syncState.get(path);
-				if (synced?.hash !== undefined) {
-					// Compare current local hash against last-synced hash
-					const file = this.app.vault.getFileByPath(path);
-					if (file) {
-						const content = await this.app.vault.cachedRead(file);
-						const localHash = fnv1a(content);
-						if (localHash !== synced.hash) {
-							// Local changed since last sync AND server changed — conflict
-							conflictNotes.push(path);
-						} else {
-							// Local unchanged — server update is a clean pull
-							toPullNotes.push(path);
-						}
+				// Both sides have it — compare content to see if pull is needed
+				const file = this.app.vault.getFileByPath(path);
+				if (file) {
+					const content = await this.app.vault.cachedRead(file);
+					const localHash = fnv1a(content);
+
+					// Check if server content actually differs from local
+					const serverChange = noteResp.changes.find((c) => c.path === path);
+					const serverHash = serverChange ? fnv1a(serverChange.content) : undefined;
+
+					if (serverHash !== undefined && localHash === serverHash) {
+						// Content identical — nothing to do, skip entirely
+						continue;
+					}
+
+					const synced = this.syncState.get(path);
+					if (synced?.hash !== undefined && localHash !== synced.hash) {
+						// Local changed since last sync AND server changed — conflict
+						conflictNotes.push(path);
 					} else {
+						// Local unchanged or never synced — server has new content
 						toPullNotes.push(path);
 					}
 				} else {
-					// Never synced locally — treat as toPull
 					toPullNotes.push(path);
 				}
 			} else {
