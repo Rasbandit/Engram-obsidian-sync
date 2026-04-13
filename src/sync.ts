@@ -1750,11 +1750,19 @@ export class SyncEngine {
 	/** DEBUG: Delete all local syncable files. Temporary test method. */
 	async debugWipeLocal(): Promise<number> {
 		const files = this.app.vault.getFiles() as TFile[];
+		// biome-ignore lint/suspicious/noConsole: debug method
+		console.log(`[engram-debug] getFiles() returned ${files.length} files`);
+		if (files.length > 0) {
+			for (const f of files.slice(0, 10)) {
+				// biome-ignore lint/suspicious/noConsole: debug method
+				console.log(
+					`[engram-debug]   path="${f.path}" ext="${f.extension}" isTFile=${f instanceof TFile} syncable=${this.isSyncable(f)} ignored=${this.shouldIgnore(f.path)}`,
+				);
+			}
+		}
 		const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
 		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(
-			`[engram-debug] wipeLocal: found ${syncable.length} syncable files out of ${files.length} total`,
-		);
+		console.log(`[engram-debug] syncable=${syncable.length} / total=${files.length}`);
 		let deleted = 0;
 		for (const file of syncable) {
 			try {
@@ -1768,7 +1776,7 @@ export class SyncEngine {
 			}
 		}
 		// biome-ignore lint/suspicious/noConsole: debug method
-		console.log(`[engram-debug] wipeLocal done: deleted ${deleted}/${syncable.length}`);
+		console.log(`[engram-debug] done: deleted ${deleted}/${syncable.length}`);
 		return deleted;
 	}
 

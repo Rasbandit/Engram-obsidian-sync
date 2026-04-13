@@ -5428,8 +5428,16 @@ var SyncEngine = class {
   /** DEBUG: Delete all local syncable files. Temporary test method. */
   async debugWipeLocal() {
     const files = this.app.vault.getFiles();
+    console.log(`[engram-debug] getFiles() returned ${files.length} files`);
+    if (files.length > 0) {
+      for (const f of files.slice(0, 10)) {
+        console.log(
+          `[engram-debug]   path="${f.path}" ext="${f.extension}" isTFile=${f instanceof import_obsidian10.TFile} syncable=${this.isSyncable(f)} ignored=${this.shouldIgnore(f.path)}`
+        );
+      }
+    }
     const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
-    console.log(`[engram-debug] wipeLocal: found ${syncable.length} syncable files out of ${files.length} total`);
+    console.log(`[engram-debug] syncable=${syncable.length} / total=${files.length}`);
     let deleted = 0;
     for (const file of syncable) {
       try {
@@ -5440,7 +5448,7 @@ var SyncEngine = class {
         console.error(`[engram-debug] failed to trash ${file.path}:`, e);
       }
     }
-    console.log(`[engram-debug] wipeLocal done: deleted ${deleted}/${syncable.length}`);
+    console.log(`[engram-debug] done: deleted ${deleted}/${syncable.length}`);
     return deleted;
   }
   /** Push ALL syncable files (initial import). */
