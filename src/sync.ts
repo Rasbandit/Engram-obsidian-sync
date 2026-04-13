@@ -981,8 +981,18 @@ export class SyncEngine {
 
 			for (let i = 0; i < noteChanges.length; i++) {
 				const change = noteChanges[i];
+				if (i < 3) {
+					// biome-ignore lint/suspicious/noConsole: temporary debug
+					console.log(
+						`[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${change.content?.length ?? "null"}`,
+					);
+				}
 				try {
 					const ok = await this.applyChange(change, true);
+					if (i < 3) {
+						// biome-ignore lint/suspicious/noConsole: temporary debug
+						console.log(`[engram-debug] pullAll applied[${i}]: ok=${ok}`);
+					}
 					if (ok) {
 						applied++;
 						this.logEntry("pull", change.path, "ok");
@@ -992,8 +1002,8 @@ export class SyncEngine {
 				} catch (e) {
 					failed++;
 					const msg = e instanceof Error ? e.message : String(e);
-					// biome-ignore lint/suspicious/noConsole: error boundary
-					console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
+					// biome-ignore lint/suspicious/noConsole: error boundary + debug
+					console.error(`[engram-debug] pullAll ERROR[${i}]: ${change.path}: ${msg}`);
 					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
 					this.logEntry("pull", change.path, "error", msg);
 				}
@@ -1036,6 +1046,10 @@ export class SyncEngine {
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`,
+			);
 			devLog().log(
 				"pull",
 				`pullAll: done — applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`,

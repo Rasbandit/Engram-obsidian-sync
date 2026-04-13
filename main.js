@@ -4696,7 +4696,7 @@ var SyncEngine = class {
     return this._pullAll(true);
   }
   async _pullAll(wipe) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     if (this.pulling) return 0;
     (_a = this.syncLog) == null ? void 0 : _a.clear();
     this.pulling = true;
@@ -4800,13 +4800,23 @@ var SyncEngine = class {
       const noteCount = noteChanges.length;
       const attachCount = attachChanges.length;
       const total = noteCount + attachCount;
-      console.log(`[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
-      console.log(`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`);
+      console.log(
+        `[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`
+      );
+      console.log(
+        `[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`
+      );
       (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, { phase: "pulling", current: 0, total, failed: 0 });
       for (let i = 0; i < noteChanges.length; i++) {
         const change = noteChanges[i];
+        if (i < 3) {
+          console.log(`[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${(_g = (_f = change.content) == null ? void 0 : _f.length) != null ? _g : "null"}`);
+        }
         try {
           const ok = await this.applyChange(change, true);
+          if (i < 3) {
+            console.log(`[engram-debug] pullAll applied[${i}]: ok=${ok}`);
+          }
           if (ok) {
             applied++;
             this.logEntry("pull", change.path, "ok");
@@ -4816,11 +4826,11 @@ var SyncEngine = class {
         } catch (e) {
           failed++;
           const msg = e instanceof Error ? e.message : String(e);
-          console.error(`Engram Sync: skipping note ${change.path}: ${msg}`);
+          console.error(`[engram-debug] pullAll ERROR[${i}]: ${change.path}: ${msg}`);
           rlog().error("pull", `Skipped note: ${change.path} \u2014 ${msg}`);
           this.logEntry("pull", change.path, "error", msg);
         }
-        (_f = this.onSyncProgress) == null ? void 0 : _f.call(this, { phase: "pulling", current: i + 1, total, failed });
+        (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, { phase: "pulling", current: i + 1, total, failed });
       }
       for (let i = 0; i < attachChanges.length; i++) {
         const change = attachChanges[i];
@@ -4839,17 +4849,18 @@ var SyncEngine = class {
           rlog().error("pull", `Skipped attachment: ${change.path} \u2014 ${msg}`);
           this.logEntry("pull", change.path, "error", msg);
         }
-        (_g = this.onSyncProgress) == null ? void 0 : _g.call(this, {
+        (_i = this.onSyncProgress) == null ? void 0 : _i.call(this, {
           phase: "pulling",
           current: noteCount + i + 1,
           total,
           failed
         });
       }
-      (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, { phase: "complete", current: total, total, failed });
+      (_j = this.onSyncProgress) == null ? void 0 : _j.call(this, { phase: "complete", current: total, total, failed });
       const serverTime = noteResp.server_time > attachResp.server_time ? noteResp.server_time : attachResp.server_time;
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
+      console.log(`[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`);
       devLog().log(
         "pull",
         `pullAll: done \u2014 applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`
