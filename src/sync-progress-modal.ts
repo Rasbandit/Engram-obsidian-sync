@@ -21,6 +21,7 @@ const TICK_INTERVAL_MS = 50;
 export class SyncProgressModal extends Modal {
 	private phaseEl!: HTMLElement;
 	private countEl!: HTMLElement;
+	private pathEl!: HTMLElement;
 	private barInner!: HTMLElement;
 	private failedEl!: HTMLElement;
 	private summaryEl!: HTMLElement;
@@ -56,9 +57,21 @@ export class SyncProgressModal extends Modal {
 			text: "",
 			cls: "engram-progress-count",
 		});
-		this.countEl.style.margin = "0 0 8px 0";
+		this.countEl.style.margin = "0 0 2px 0";
 		this.countEl.style.fontFamily = "var(--font-monospace)";
 		this.countEl.style.fontSize = "0.9em";
+
+		this.pathEl = contentEl.createEl("p", {
+			text: "",
+			cls: "engram-progress-path",
+		});
+		this.pathEl.style.margin = "0 0 8px 0";
+		this.pathEl.style.fontFamily = "var(--font-monospace)";
+		this.pathEl.style.fontSize = "0.8em";
+		this.pathEl.style.opacity = "0.6";
+		this.pathEl.style.overflow = "hidden";
+		this.pathEl.style.textOverflow = "ellipsis";
+		this.pathEl.style.whiteSpace = "nowrap";
 
 		const barOuter = contentEl.createDiv({ cls: "engram-progress-bar-outer" });
 		barOuter.style.height = "8px";
@@ -172,6 +185,7 @@ export class SyncProgressModal extends Modal {
 			}
 			this.phaseEl.setText("Sync complete");
 			this.countEl.setText("");
+			this.pathEl.setText("");
 			this.barInner.style.width = "100%";
 			this.barInner.style.background = "var(--text-success, var(--interactive-accent))";
 			this.bgBtn.style.display = "none";
@@ -194,6 +208,7 @@ export class SyncProgressModal extends Modal {
 
 		this.phaseEl.setText(label);
 		this.countEl.setText(`${progress.current} / ${progress.total}`);
+		this.pathEl.setText(progress.currentPath ?? "");
 		this.barInner.style.width = `${pct}%`;
 		this.barInner.style.background = "var(--interactive-accent)";
 

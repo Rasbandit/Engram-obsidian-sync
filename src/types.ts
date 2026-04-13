@@ -293,6 +293,8 @@ export interface SyncProgress {
 	current: number;
 	total: number;
 	failed: number;
+	/** Current file being processed (optional, for display). */
+	currentPath?: string;
 }
 
 /** 409 conflict response from the server when expected_version mismatches. */

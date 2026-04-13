@@ -3286,9 +3286,20 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
       text: "",
       cls: "engram-progress-count"
     });
-    this.countEl.style.margin = "0 0 8px 0";
+    this.countEl.style.margin = "0 0 2px 0";
     this.countEl.style.fontFamily = "var(--font-monospace)";
     this.countEl.style.fontSize = "0.9em";
+    this.pathEl = contentEl.createEl("p", {
+      text: "",
+      cls: "engram-progress-path"
+    });
+    this.pathEl.style.margin = "0 0 8px 0";
+    this.pathEl.style.fontFamily = "var(--font-monospace)";
+    this.pathEl.style.fontSize = "0.8em";
+    this.pathEl.style.opacity = "0.6";
+    this.pathEl.style.overflow = "hidden";
+    this.pathEl.style.textOverflow = "ellipsis";
+    this.pathEl.style.whiteSpace = "nowrap";
     const barOuter = contentEl.createDiv({ cls: "engram-progress-bar-outer" });
     barOuter.style.height = "8px";
     barOuter.style.background = "var(--background-modifier-border)";
@@ -3371,7 +3382,7 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
   }
   /** Render a progress state to the DOM. */
   renderProgress(progress) {
-    var _a;
+    var _a, _b;
     const label = (_a = PHASE_LABELS[progress.phase]) != null ? _a : progress.phase;
     const pct = progress.total > 0 ? Math.round(progress.current / progress.total * 100) : 0;
     if (progress.phase === "complete") {
@@ -3381,6 +3392,7 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
       }
       this.phaseEl.setText("Sync complete");
       this.countEl.setText("");
+      this.pathEl.setText("");
       this.barInner.style.width = "100%";
       this.barInner.style.background = "var(--text-success, var(--interactive-accent))";
       this.bgBtn.style.display = "none";
@@ -3400,6 +3412,7 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
     }
     this.phaseEl.setText(label);
     this.countEl.setText(`${progress.current} / ${progress.total}`);
+    this.pathEl.setText((_b = progress.currentPath) != null ? _b : "");
     this.barInner.style.width = `${pct}%`;
     this.barInner.style.background = "var(--interactive-accent)";
     if (progress.failed > 0) {
@@ -4699,7 +4712,7 @@ var SyncEngine = class {
     return this._pullAll(true);
   }
   async _pullAll(wipe) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     if (this.pulling) return 0;
     (_a = this.syncLog) == null ? void 0 : _a.clear();
     this.pulling = true;
@@ -4728,7 +4741,8 @@ var SyncEngine = class {
           phase: "deleting",
           current: i + 1,
           total: wipeTotal,
-          failed: wipeFailed
+          failed: wipeFailed,
+          currentPath: file.path
         });
         if ((i + 1) % 20 === 0) {
           await new Promise((resolve) => setTimeout(resolve, 0));
@@ -4812,58 +4826,73 @@ var SyncEngine = class {
         `[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`
       );
       (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, { phase: "pulling", current: 0, total, failed: 0 });
-      for (let i = 0; i < noteChanges.length; i++) {
-        const change = noteChanges[i];
-        if (i < 3) {
-          console.log(
-            `[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${(_g = (_f = change.content) == null ? void 0 : _f.length) != null ? _g : "null"}`
-          );
+      for (let i = 0; i < noteChanges.length; i += 10) {
+        const batch = noteChanges.slice(i, i + 10);
+        const lastPath = batch[batch.length - 1].path;
+        const results = await Promise.all(
+          batch.map(async (change) => {
+            try {
+              const ok = await this.applyChange(change, true);
+              if (ok) {
+                this.logEntry("pull", change.path, "ok");
+              } else {
+                this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
+              }
+              return ok ? "ok" : "skip";
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              rlog().error("pull", `Skipped note: ${change.path} \u2014 ${msg}`);
+              this.logEntry("pull", change.path, "error", msg);
+              return "error";
+            }
+          })
+        );
+        for (const r of results) {
+          if (r === "ok") applied++;
+          else if (r === "error") failed++;
         }
-        try {
-          const ok = await this.applyChange(change, true);
-          if (i < 3) {
-            console.log(`[engram-debug] pullAll applied[${i}]: ok=${ok}`);
-          }
-          if (ok) {
-            applied++;
-            this.logEntry("pull", change.path, "ok");
-          } else {
-            this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
-          }
-        } catch (e) {
-          failed++;
-          const msg = e instanceof Error ? e.message : String(e);
-          console.error(`[engram-debug] pullAll ERROR[${i}]: ${change.path}: ${msg}`);
-          rlog().error("pull", `Skipped note: ${change.path} \u2014 ${msg}`);
-          this.logEntry("pull", change.path, "error", msg);
-        }
-        (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, { phase: "pulling", current: i + 1, total, failed });
-      }
-      for (let i = 0; i < attachChanges.length; i++) {
-        const change = attachChanges[i];
-        try {
-          const ok = await this.applyAttachmentChange(change);
-          if (ok) {
-            applied++;
-            this.logEntry("pull", change.path, "ok");
-          } else {
-            this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
-          }
-        } catch (e) {
-          failed++;
-          const msg = e instanceof Error ? e.message : String(e);
-          console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
-          rlog().error("pull", `Skipped attachment: ${change.path} \u2014 ${msg}`);
-          this.logEntry("pull", change.path, "error", msg);
-        }
-        (_i = this.onSyncProgress) == null ? void 0 : _i.call(this, {
+        (_f = this.onSyncProgress) == null ? void 0 : _f.call(this, {
           phase: "pulling",
-          current: noteCount + i + 1,
+          current: Math.min(i + batch.length, noteChanges.length),
           total,
-          failed
+          failed,
+          currentPath: lastPath
         });
       }
-      (_j = this.onSyncProgress) == null ? void 0 : _j.call(this, { phase: "complete", current: total, total, failed });
+      for (let i = 0; i < attachChanges.length; i += 5) {
+        const batch = attachChanges.slice(i, i + 5);
+        const lastPath = batch[batch.length - 1].path;
+        const results = await Promise.all(
+          batch.map(async (change) => {
+            try {
+              const ok = await this.applyAttachmentChange(change);
+              if (ok) {
+                this.logEntry("pull", change.path, "ok");
+              } else {
+                this.logEntry("skip", change.path, "skipped", void 0, "unchanged");
+              }
+              return ok ? "ok" : "skip";
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              rlog().error("pull", `Skipped attachment: ${change.path} \u2014 ${msg}`);
+              this.logEntry("pull", change.path, "error", msg);
+              return "error";
+            }
+          })
+        );
+        for (const r of results) {
+          if (r === "ok") applied++;
+          else if (r === "error") failed++;
+        }
+        (_g = this.onSyncProgress) == null ? void 0 : _g.call(this, {
+          phase: "pulling",
+          current: noteCount + Math.min(i + batch.length, attachChanges.length),
+          total,
+          failed,
+          currentPath: lastPath
+        });
+      }
+      (_h = this.onSyncProgress) == null ? void 0 : _h.call(this, { phase: "complete", current: total, total, failed });
       const serverTime = noteResp.server_time > attachResp.server_time ? noteResp.server_time : attachResp.server_time;
       this.lastSync = serverTime;
       await this.saveData({ lastSync: this.lastSync });
@@ -5523,7 +5552,13 @@ var SyncEngine = class {
         })
       );
       pushed += results.filter(Boolean).length;
-      (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, { phase: "pushing", current: i + batch.length, total, failed });
+      (_c = this.onSyncProgress) == null ? void 0 : _c.call(this, {
+        phase: "pushing",
+        current: i + batch.length,
+        total,
+        failed,
+        currentPath: batch[batch.length - 1].path
+      });
     }
     (_d = this.onSyncProgress) == null ? void 0 : _d.call(this, { phase: "complete", current: total, total, failed });
     const skipped = total - pushed - failed;

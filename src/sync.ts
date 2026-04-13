@@ -887,6 +887,7 @@ export class SyncEngine {
 					current: i + 1,
 					total: wipeTotal,
 					failed: wipeFailed,
+					currentPath: file.path,
 				});
 				// Yield to UI thread periodically so progress modal can repaint
 				if ((i + 1) % 20 === 0) {
@@ -986,60 +987,85 @@ export class SyncEngine {
 
 			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
 
-			for (let i = 0; i < noteChanges.length; i++) {
-				const change = noteChanges[i];
-				if (i < 3) {
-					// biome-ignore lint/suspicious/noConsole: temporary debug
-					console.log(
-						`[engram-debug] pullAll applying[${i}]: path="${change.path}" deleted=${change.deleted} contentLen=${change.content?.length ?? "null"}`,
-					);
-				}
-				try {
-					const ok = await this.applyChange(change, true);
-					if (i < 3) {
-						// biome-ignore lint/suspicious/noConsole: temporary debug
-						console.log(`[engram-debug] pullAll applied[${i}]: ok=${ok}`);
-					}
-					if (ok) {
-						applied++;
-						this.logEntry("pull", change.path, "ok");
-					} else {
-						this.logEntry("skip", change.path, "skipped", undefined, "unchanged");
-					}
-				} catch (e) {
-					failed++;
-					const msg = e instanceof Error ? e.message : String(e);
-					// biome-ignore lint/suspicious/noConsole: error boundary + debug
-					console.error(`[engram-debug] pullAll ERROR[${i}]: ${change.path}: ${msg}`);
-					rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
-					this.logEntry("pull", change.path, "error", msg);
-				}
-				this.onSyncProgress?.({ phase: "pulling", current: i + 1, total, failed });
-			}
-
-			for (let i = 0; i < attachChanges.length; i++) {
-				const change = attachChanges[i];
-				try {
-					const ok = await this.applyAttachmentChange(change);
-					if (ok) {
-						applied++;
-						this.logEntry("pull", change.path, "ok");
-					} else {
-						this.logEntry("skip", change.path, "skipped", undefined, "unchanged");
-					}
-				} catch (e) {
-					failed++;
-					const msg = e instanceof Error ? e.message : String(e);
-					// biome-ignore lint/suspicious/noConsole: error boundary
-					console.error(`Engram Sync: skipping attachment ${change.path}: ${msg}`);
-					rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
-					this.logEntry("pull", change.path, "error", msg);
+			// Pull notes in batches of 10 for parallelism
+			for (let i = 0; i < noteChanges.length; i += 10) {
+				const batch = noteChanges.slice(i, i + 10);
+				const lastPath = batch[batch.length - 1].path;
+				const results = await Promise.all(
+					batch.map(async (change) => {
+						try {
+							const ok = await this.applyChange(change, true);
+							if (ok) {
+								this.logEntry("pull", change.path, "ok");
+							} else {
+								this.logEntry(
+									"skip",
+									change.path,
+									"skipped",
+									undefined,
+									"unchanged",
+								);
+							}
+							return ok ? ("ok" as const) : ("skip" as const);
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							rlog().error("pull", `Skipped note: ${change.path} — ${msg}`);
+							this.logEntry("pull", change.path, "error", msg);
+							return "error" as const;
+						}
+					}),
+				);
+				for (const r of results) {
+					if (r === "ok") applied++;
+					else if (r === "error") failed++;
 				}
 				this.onSyncProgress?.({
 					phase: "pulling",
-					current: noteCount + i + 1,
+					current: Math.min(i + batch.length, noteChanges.length),
 					total,
 					failed,
+					currentPath: lastPath,
+				});
+			}
+
+			// Pull attachments in batches of 5 (larger files)
+			for (let i = 0; i < attachChanges.length; i += 5) {
+				const batch = attachChanges.slice(i, i + 5);
+				const lastPath = batch[batch.length - 1].path;
+				const results = await Promise.all(
+					batch.map(async (change) => {
+						try {
+							const ok = await this.applyAttachmentChange(change);
+							if (ok) {
+								this.logEntry("pull", change.path, "ok");
+							} else {
+								this.logEntry(
+									"skip",
+									change.path,
+									"skipped",
+									undefined,
+									"unchanged",
+								);
+							}
+							return ok ? ("ok" as const) : ("skip" as const);
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							rlog().error("pull", `Skipped attachment: ${change.path} — ${msg}`);
+							this.logEntry("pull", change.path, "error", msg);
+							return "error" as const;
+						}
+					}),
+				);
+				for (const r of results) {
+					if (r === "ok") applied++;
+					else if (r === "error") failed++;
+				}
+				this.onSyncProgress?.({
+					phase: "pulling",
+					current: noteCount + Math.min(i + batch.length, attachChanges.length),
+					total,
+					failed,
+					currentPath: lastPath,
 				});
 			}
 
@@ -1874,7 +1900,13 @@ export class SyncEngine {
 				}),
 			);
 			pushed += results.filter(Boolean).length;
-			this.onSyncProgress?.({ phase: "pushing", current: i + batch.length, total, failed });
+			this.onSyncProgress?.({
+				phase: "pushing",
+				current: i + batch.length,
+				total,
+				failed,
+				currentPath: batch[batch.length - 1].path,
+			});
 		}
 
 		this.onSyncProgress?.({ phase: "complete", current: total, total, failed });
