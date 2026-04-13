@@ -3706,6 +3706,14 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
         }
       })
     );
+    new import_obsidian9.Setting(containerEl).setName("DEBUG: Wipe local vault").setDesc("Delete all syncable files locally. Check console for output.").addButton(
+      (btn) => btn.setButtonText("Wipe Local").setWarning().onClick(async () => {
+        btn.setDisabled(true);
+        const count = await this.plugin.syncEngine.debugWipeLocal();
+        new import_obsidian9.Notice(`DEBUG: deleted ${count} files. Check console.`);
+        btn.setDisabled(false);
+      })
+    );
   }
   /** Open a progress modal and wire it to the sync engine's progress callback. */
   async openProgressModal() {
@@ -5416,6 +5424,24 @@ var SyncEngine = class {
       toDeleteRemote: []
       // computed during execution (local deletes since last sync)
     };
+  }
+  /** DEBUG: Delete all local syncable files. Temporary test method. */
+  async debugWipeLocal() {
+    const files = this.app.vault.getFiles();
+    const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+    console.log(`[engram-debug] wipeLocal: found ${syncable.length} syncable files out of ${files.length} total`);
+    let deleted = 0;
+    for (const file of syncable) {
+      try {
+        console.log(`[engram-debug] trashing: ${file.path}`);
+        await this.app.vault.trash(file, true);
+        deleted++;
+      } catch (e) {
+        console.error(`[engram-debug] failed to trash ${file.path}:`, e);
+      }
+    }
+    console.log(`[engram-debug] wipeLocal done: deleted ${deleted}/${syncable.length}`);
+    return deleted;
   }
   /** Push ALL syncable files (initial import). */
   async pushAll() {
