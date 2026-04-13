@@ -3,6 +3,7 @@ import { TFile } from "obsidian";
 import type { EngramApi } from "../src/api";
 import { SyncEngine } from "../src/sync";
 import { DEFAULT_SETTINGS } from "../src/types";
+import type { SyncProgress } from "../src/types";
 
 // Mock the API — mirrors the pattern from sync.test.ts
 const mockApi = {
@@ -222,5 +223,52 @@ describe("SyncEngine.computeSyncPlan", () => {
 		expect(allPaths).not.toContain(".obsidian/config.json");
 		expect(allPaths).not.toContain(".obsidian/plugins/some-plugin/main.js");
 		expect(plan.toPush.notes).toContain("Notes/legit.md");
+	});
+});
+
+describe("SyncEngine.pushAll with progress", () => {
+	test("emits progress events during pushAll", async () => {
+		// Set up mock files
+		const file1 = makeTFile("notes/a.md");
+		const file2 = makeTFile("notes/b.md");
+		mockApp.vault.getFiles.mockReturnValue([file1, file2]);
+		mockApp.vault.cachedRead.mockResolvedValue("# Content");
+		(mockApi.pushNote as jest.Mock).mockResolvedValue({ note: {}, chunks_indexed: 1 });
+
+		const engine = createEngine();
+		const progressEvents: SyncProgress[] = [];
+		engine.onSyncProgress = (p) => progressEvents.push({ ...p });
+
+		const { SyncLog } = await import("../src/sync-log");
+		engine.syncLog = new SyncLog();
+
+		await engine.pushAll();
+
+		// Should have at least a start and complete event
+		expect(progressEvents.length).toBeGreaterThanOrEqual(2);
+		expect(progressEvents[0].phase).toBe("pushing");
+		expect(progressEvents[0].current).toBe(0);
+		expect(progressEvents[progressEvents.length - 1].phase).toBe("complete");
+
+		// SyncLog should have entries
+		expect(engine.syncLog.entries().length).toBeGreaterThan(0);
+	});
+
+	test("logs errors to syncLog when push fails", async () => {
+		const file = makeTFile("notes/fail.md");
+		mockApp.vault.getFiles.mockReturnValue([file]);
+		mockApp.vault.cachedRead.mockResolvedValue("# Content");
+		(mockApi.pushNote as jest.Mock).mockRejectedValue(new Error("500 Internal Server Error"));
+
+		const engine = createEngine();
+		const { SyncLog } = await import("../src/sync-log");
+		engine.syncLog = new SyncLog();
+
+		await engine.pushAll();
+
+		const errors = engine.syncLog.entries().filter((e) => e.result === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].path).toBe("notes/fail.md");
+		expect(errors[0].error).toContain("500");
 	});
 });

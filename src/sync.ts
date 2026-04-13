@@ -680,15 +680,14 @@ export class SyncEngine {
 		} catch (e) {
 			// biome-ignore lint/suspicious/noConsole: error boundary
 			console.error(`Engram Sync: failed to push ${file.path}`, e);
-			devLog().log(
-				"error",
-				`push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
-			);
+			const errMsg = e instanceof Error ? e.message : String(e);
+			devLog().log("error", `push failed: ${file.path} — ${errMsg}`);
 			rlog().error(
 				"push",
-				`Push failed: ${file.path} — ${e instanceof Error ? e.message : e}`,
+				`Push failed: ${file.path} — ${errMsg}`,
 				e instanceof Error ? e.stack : undefined,
 			);
+			this.logEntry("push", file.path, "error", errMsg);
 			// Queue for retry — content-free to avoid O(n²) serialization.
 			// Content will be re-read from vault when flushing.
 			await this.enqueueChange({
