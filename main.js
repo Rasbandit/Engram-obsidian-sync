@@ -3438,19 +3438,6 @@ var WipeConfirmModal = class extends import_obsidian8.Modal {
 function renderAccountTab(ctx) {
   var _a;
   const { containerEl, app, plugin, redisplay, startDeviceFlow, openProgressModal } = ctx;
-  new import_obsidian9.Setting(containerEl).setName("Connection").setHeading();
-  new import_obsidian9.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
-    (text) => text.setPlaceholder("http://localhost:8000").setValue(plugin.settings.apiUrl).onChange(async (value) => {
-      plugin.settings.apiUrl = value;
-      await plugin.saveSettings();
-    })
-  );
-  new import_obsidian9.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
-    (btn) => btn.setButtonText("Test").onClick(async () => {
-      const { ok, error } = await plugin.api.ping();
-      new import_obsidian9.Notice(ok ? "Engram: connected!" : `Engram: ${error}`);
-    })
-  );
   const isOAuth = !!plugin.settings.refreshToken;
   const hasApiKey = !!plugin.settings.apiKey;
   new import_obsidian9.Setting(containerEl).setName("Authentication").setHeading();
@@ -3491,6 +3478,19 @@ function renderAccountTab(ctx) {
       text.inputEl.style.fontFamily = "monospace";
     });
   }
+  new import_obsidian9.Setting(containerEl).setName("Connection").setHeading();
+  new import_obsidian9.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
+    (text) => text.setPlaceholder("http://localhost:8000").setValue(plugin.settings.apiUrl).onChange(async (value) => {
+      plugin.settings.apiUrl = value;
+      await plugin.saveSettings();
+    })
+  );
+  new import_obsidian9.Setting(containerEl).setName("Test connection").setDesc("Check if Engram is reachable and API key is valid").addButton(
+    (btn) => btn.setButtonText("Test").onClick(async () => {
+      const { ok, error } = await plugin.api.ping();
+      new import_obsidian9.Notice(ok ? "Engram: connected!" : `Engram: ${error}`);
+    })
+  );
   if (plugin.settings.apiKey || plugin.settings.refreshToken) {
     new import_obsidian9.Setting(containerEl).setName("Vault").setHeading();
     new import_obsidian9.Setting(containerEl).setName("Sync vault").setDesc("Select which vault this plugin syncs with").addDropdown((dropdown) => {
