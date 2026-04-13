@@ -273,6 +273,25 @@ export interface VaultInfo {
 	created_at: string;
 }
 
+export interface SyncPlan {
+	vaultName: string;
+	serverNoteCount: number;
+	localNoteCount: number;
+	localAttachmentCount: number;
+	toPush: { notes: string[]; attachments: string[] };
+	toPull: { notes: string[]; attachments: string[] };
+	conflicts: string[];
+	toDeleteLocal: string[];
+	toDeleteRemote: string[];
+}
+
+export interface SyncProgress {
+	phase: "pushing" | "pulling" | "attachments" | "complete";
+	current: number;
+	total: number;
+	failed: number;
+}
+
 /** 409 conflict response from the server when expected_version mismatches. */
 export interface VersionConflictResponse {
 	conflict: true;

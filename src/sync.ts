@@ -18,6 +18,7 @@ import type {
 	NoteStreamEvent,
 	QueueEntry,
 	ReconcileResult,
+	SyncPlan,
 	SyncStatus,
 	VersionConflictResponse,
 } from "./types";
@@ -1453,6 +1454,132 @@ export class SyncEngine {
 	/** Check if this is a first sync (no prior sync state). */
 	isFirstSync(): boolean {
 		return !this.lastSync;
+	}
+
+	/** Compute what a sync would do without executing it (dry-run preview).
+	 *
+	 *  mode:
+	 *  - "full"     — bidirectional: compute toPush, toPull, conflicts, deletions
+	 *  - "push-all" — push only: compute toPush, skip toPull
+	 *  - "pull-all" — pull only: compute toPull, skip toPush
+	 */
+	async computeSyncPlan(mode: "push-all" | "pull-all" | "full"): Promise<SyncPlan> {
+		const epoch = "1970-01-01T00:00:00Z";
+		const since = mode === "full" ? this.lastSync || epoch : epoch;
+
+		const [noteResp, attachResp] = await Promise.all([
+			this.api.getChanges(since),
+			this.api.getAttachmentChanges(since),
+		]);
+
+		// Build lookup sets from server state
+		const serverNotes = new Map<string, { deleted: boolean }>();
+		for (const c of noteResp.changes) {
+			serverNotes.set(c.path, { deleted: c.deleted });
+		}
+
+		const serverAttachments = new Map<string, { deleted: boolean }>();
+		for (const c of attachResp.changes) {
+			serverAttachments.set(c.path, { deleted: c.deleted });
+		}
+
+		// Enumerate local files
+		const allFiles = this.app.vault.getFiles() as TFile[];
+		const syncable = allFiles.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+
+		const localNotes: string[] = [];
+		const localAttachments: string[] = [];
+		for (const f of syncable) {
+			if (this.isBinaryFile(f)) {
+				localAttachments.push(f.path);
+			} else {
+				localNotes.push(f.path);
+			}
+		}
+
+		const localNoteSet = new Set(localNotes);
+		const localAttachSet = new Set(localAttachments);
+
+		// Categorise server note changes
+		const toPullNotes: string[] = [];
+		const conflictNotes: string[] = [];
+		const toDeleteLocal: string[] = [];
+
+		for (const [path, { deleted }] of serverNotes) {
+			if (deleted) {
+				// Server deleted — mark for local deletion if present
+				if (localNoteSet.has(path)) {
+					toDeleteLocal.push(path);
+				}
+				continue;
+			}
+			if (localNoteSet.has(path)) {
+				// Both sides have it — check for local modification (conflict candidate)
+				const synced = this.syncState.get(path);
+				if (synced !== undefined) {
+					// We have a prior sync hash — only a conflict if local was changed.
+					// We can't read file content here (dry-run), so conservatively mark
+					// as conflict only when we know we last synced it (version mismatch
+					// detection deferred to actual execution).
+					conflictNotes.push(path);
+				} else {
+					// Never synced locally — treat as toPull
+					toPullNotes.push(path);
+				}
+			} else {
+				// Only on server — need to pull
+				toPullNotes.push(path);
+			}
+		}
+
+		// Categorise server attachment changes
+		const toPullAttachments: string[] = [];
+		const toDeleteLocalAttach: string[] = [];
+
+		for (const [path, { deleted }] of serverAttachments) {
+			if (deleted) {
+				if (localAttachSet.has(path)) {
+					toDeleteLocalAttach.push(path);
+				}
+				continue;
+			}
+			if (!localAttachSet.has(path)) {
+				toPullAttachments.push(path);
+			}
+		}
+
+		// Files only local → need to push (not on server at all)
+		const toPushNotes: string[] = [];
+		for (const path of localNotes) {
+			if (!serverNotes.has(path)) {
+				toPushNotes.push(path);
+			}
+		}
+
+		const toPushAttachments: string[] = [];
+		for (const path of localAttachments) {
+			if (!serverAttachments.has(path)) {
+				toPushAttachments.push(path);
+			}
+		}
+
+		return {
+			vaultName: this.app.vault.getName(),
+			serverNoteCount: [...serverNotes.values()].filter((v) => !v.deleted).length,
+			localNoteCount: localNotes.length,
+			localAttachmentCount: localAttachments.length,
+			toPush: {
+				notes: mode === "pull-all" ? [] : toPushNotes,
+				attachments: mode === "pull-all" ? [] : toPushAttachments,
+			},
+			toPull: {
+				notes: mode === "push-all" ? [] : toPullNotes,
+				attachments: mode === "push-all" ? [] : toPullAttachments,
+			},
+			conflicts: mode === "push-all" || mode === "pull-all" ? [] : conflictNotes,
+			toDeleteLocal: [...toDeleteLocal, ...toDeleteLocalAttach],
+			toDeleteRemote: [], // computed during execution (local deletes since last sync)
+		};
 	}
 
 	/** Push ALL syncable files (initial import). */
