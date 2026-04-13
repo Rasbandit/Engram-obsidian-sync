@@ -136,13 +136,20 @@ export class PreSyncModal extends Modal {
 export class WipeConfirmModal extends Modal {
 	private localNoteCount: number;
 	private localAttachmentCount: number;
+	private serverNoteCount: number;
 	private resolved = false;
 	private resolve: (confirmed: boolean) => void = () => {};
 
-	constructor(app: App, localNoteCount: number, localAttachmentCount: number) {
+	constructor(
+		app: App,
+		localNoteCount: number,
+		localAttachmentCount: number,
+		serverNoteCount: number,
+	) {
 		super(app);
 		this.localNoteCount = localNoteCount;
 		this.localAttachmentCount = localAttachmentCount;
+		this.serverNoteCount = serverNoteCount;
 	}
 
 	onOpen(): void {
@@ -158,16 +165,17 @@ export class WipeConfirmModal extends Modal {
 		warning.style.fontSize = "1.05em";
 		warning.setText("This action cannot be undone.");
 
-		const details = contentEl.createEl("p");
-		const parts: string[] = [];
+		const deleteParts: string[] = [];
 		if (this.localNoteCount > 0) {
-			parts.push(`${this.localNoteCount} notes`);
+			deleteParts.push(`${this.localNoteCount} notes`);
 		}
 		if (this.localAttachmentCount > 0) {
-			parts.push(`${this.localAttachmentCount} attachments`);
+			deleteParts.push(`${this.localAttachmentCount} attachments`);
 		}
+
+		const details = contentEl.createEl("p");
 		details.setText(
-			`This will permanently delete all ${parts.join(" and ")} from your local vault, then pull everything fresh from the server.`,
+			`This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`,
 		);
 
 		const localOnly = contentEl.createEl("p");

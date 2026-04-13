@@ -3171,13 +3171,14 @@ var PreSyncModal = class extends import_obsidian7.Modal {
   }
 };
 var WipeConfirmModal = class extends import_obsidian7.Modal {
-  constructor(app, localNoteCount, localAttachmentCount) {
+  constructor(app, localNoteCount, localAttachmentCount, serverNoteCount) {
     super(app);
     this.resolved = false;
     this.resolve = () => {
     };
     this.localNoteCount = localNoteCount;
     this.localAttachmentCount = localAttachmentCount;
+    this.serverNoteCount = serverNoteCount;
   }
   onOpen() {
     const { contentEl } = this;
@@ -3189,16 +3190,16 @@ var WipeConfirmModal = class extends import_obsidian7.Modal {
     warning.style.fontWeight = "bold";
     warning.style.fontSize = "1.05em";
     warning.setText("This action cannot be undone.");
-    const details = contentEl.createEl("p");
-    const parts = [];
+    const deleteParts = [];
     if (this.localNoteCount > 0) {
-      parts.push(`${this.localNoteCount} notes`);
+      deleteParts.push(`${this.localNoteCount} notes`);
     }
     if (this.localAttachmentCount > 0) {
-      parts.push(`${this.localAttachmentCount} attachments`);
+      deleteParts.push(`${this.localAttachmentCount} attachments`);
     }
+    const details = contentEl.createEl("p");
     details.setText(
-      `This will permanently delete all ${parts.join(" and ")} from your local vault, then pull everything fresh from the server.`
+      `This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`
     );
     const localOnly = contentEl.createEl("p");
     localOnly.style.color = "var(--text-error)";
@@ -3683,7 +3684,8 @@ var EngramSyncSettingTab = class extends import_obsidian9.PluginSettingTab {
             const confirmed = await new WipeConfirmModal(
               this.app,
               plan.localNoteCount,
-              plan.localAttachmentCount
+              plan.localAttachmentCount,
+              plan.serverNoteCount
             ).awaitConfirmation();
             if (!confirmed) {
               btn.setDisabled(false);

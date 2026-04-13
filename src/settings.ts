@@ -398,6 +398,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 									this.app,
 									plan.localNoteCount,
 									plan.localAttachmentCount,
+									plan.serverNoteCount,
 								).awaitConfirmation();
 								if (!confirmed) {
 									btn.setDisabled(false);
