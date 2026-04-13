@@ -321,6 +321,55 @@ describe("SyncEngine.pushAll with progress", () => {
 		expect(engine.syncLog.entries().length).toBeGreaterThan(0);
 	});
 
+	test("wipePullAll deletes local files and resets sync state before pulling", async () => {
+		const file1 = makeTFile("notes/a.md");
+		const file2 = makeTFile("notes/b.md");
+		mockApp.vault.getFiles.mockReturnValue([file1, file2]);
+		mockApp.vault.cachedRead.mockResolvedValue("# Content");
+
+		// Server has one note to pull after wipe
+		(mockApi.getChanges as jest.Mock).mockResolvedValue({
+			changes: [
+				{
+					path: "notes/server.md",
+					title: "Server",
+					content: "# From Server",
+					folder: "notes",
+					tags: [],
+					mtime: Date.now() / 1000,
+					updated_at: new Date().toISOString(),
+					deleted: false,
+				},
+			],
+			server_time: "2026-01-01T00:00:00Z",
+		});
+		(mockApi.getAttachmentChanges as jest.Mock).mockResolvedValue({
+			changes: [],
+			server_time: "2026-01-01T00:00:00Z",
+		});
+		// After wipe, getFileByPath returns null (files deleted)
+		mockApp.vault.getFileByPath.mockReturnValue(null);
+
+		const engine = createEngine();
+		const { SyncLog } = await import("../src/sync-log");
+		engine.syncLog = new SyncLog();
+
+		// Seed some sync state that should be cleared
+		engine.importHashes({ "notes/a.md": 12345 });
+
+		await engine.wipePullAll();
+
+		// Both local files should have been trashed
+		expect(mockApp.vault.trash).toHaveBeenCalledTimes(2);
+
+		// Sync log should have delete entries for the wipe
+		const deleteEntries = engine.syncLog.entries().filter((e) => e.action === "delete");
+		expect(deleteEntries).toHaveLength(2);
+
+		// Server note should have been created (pulled)
+		expect(mockApp.vault.create).toHaveBeenCalled();
+	});
+
 	test("logs errors to syncLog when push fails", async () => {
 		const file = makeTFile("notes/fail.md");
 		mockApp.vault.getFiles.mockReturnValue([file]);

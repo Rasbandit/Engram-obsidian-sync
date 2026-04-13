@@ -842,14 +842,55 @@ export class SyncEngine {
 	/** Force-pull ALL notes and attachments from the server, overwriting local files.
 	 *  Ignores lastSync — fetches everything. Skips conflict detection. */
 	async pullAll(): Promise<number> {
+		return this._pullAll(false);
+	}
+
+	/** Wipe all local syncable files, reset sync state, then pull everything from server. */
+	async wipePullAll(): Promise<number> {
+		return this._pullAll(true);
+	}
+
+	private async _pullAll(wipe: boolean): Promise<number> {
 		if (this.pulling) return 0;
 
 		this.syncLog?.clear();
 		this.pulling = true;
 		this.lastError = "";
 		this.emitStatus();
-		devLog().log("pull", "pullAll: fetching everything from server");
-		rlog().info("pull", "PullAll started — fetching everything from epoch");
+
+		if (wipe) {
+			devLog().log("pull", "wipePullAll: deleting all local syncable files");
+			rlog().info("pull", "WipePullAll started — deleting local files");
+			const files = this.app.vault.getFiles() as TFile[];
+			const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+			for (const file of syncable) {
+				try {
+					await this.app.vault.trash(file, true);
+					this.logEntry("delete", file.path, "ok", undefined, "wipe");
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					this.logEntry("delete", file.path, "error", msg);
+				}
+			}
+			// Reset sync state — everything will be re-synced from server
+			this.syncState.clear();
+			this.lastSync = "";
+			await this.saveData({ lastSync: "" });
+			devLog().log(
+				"pull",
+				`wipePullAll: deleted ${syncable.length} local files, sync state reset`,
+			);
+			rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
+		}
+
+		devLog().log(
+			"pull",
+			`${wipe ? "wipePullAll" : "pullAll"}: fetching everything from server`,
+		);
+		rlog().info(
+			"pull",
+			`${wipe ? "WipePullAll" : "PullAll"} started — fetching everything from epoch`,
+		);
 		try {
 			const epoch = "1970-01-01T00:00:00Z";
 			const [noteResp, attachResp] = await Promise.all([

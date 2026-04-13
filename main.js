@@ -7,9 +7,6 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -26,111 +23,6 @@ var __copyProps = (to, from, except, desc) => {
   return to;
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-// src/pre-sync-modal.ts
-var pre_sync_modal_exports = {};
-__export(pre_sync_modal_exports, {
-  PreSyncModal: () => PreSyncModal,
-  formatPlanSummary: () => formatPlanSummary
-});
-function plural(count, singular) {
-  return count === 1 ? `${count} ${singular}` : `${count} ${singular}s`;
-}
-function formatPlanSummary(plan) {
-  const lines = [];
-  lines.push(`Vault: ${plan.vaultName}`);
-  lines.push(`Server: ${plan.serverNoteCount} notes \xB7 Local: ${plan.localNoteCount} notes`);
-  lines.push("");
-  lines.push(`\u2191  ${plural(plan.toPush.notes.length, "note")} to push`);
-  lines.push(`\u2193  ${plural(plan.toPull.notes.length, "note")} to pull`);
-  lines.push(`\u26A1  ${plural(plan.conflicts.length, "conflict")}`);
-  const totalDeletes = plan.toDeleteLocal.length + plan.toDeleteRemote.length;
-  lines.push(`\u2715  ${plural(totalDeletes, "deletion")}`);
-  if (plan.toPush.attachments.length > 0 || plan.toPull.attachments.length > 0) {
-    lines.push("");
-    if (plan.toPush.attachments.length > 0) {
-      lines.push(`\u2191  ${plural(plan.toPush.attachments.length, "attachment")} to push`);
-    }
-    if (plan.toPull.attachments.length > 0) {
-      lines.push(`\u2193  ${plural(plan.toPull.attachments.length, "attachment")} to pull`);
-    }
-  }
-  return lines.join("\n");
-}
-var import_obsidian7, PreSyncModal;
-var init_pre_sync_modal = __esm({
-  "src/pre-sync-modal.ts"() {
-    import_obsidian7 = require("obsidian");
-    PreSyncModal = class extends import_obsidian7.Modal {
-      constructor(app, plan) {
-        super(app);
-        this.resolved = false;
-        this.resolve = () => {
-        };
-        this.plan = plan;
-      }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.empty();
-        contentEl.addClass("engram-pre-sync-modal");
-        contentEl.createEl("h2", { text: "Sync Preview" });
-        const summary = contentEl.createEl("pre", {
-          text: formatPlanSummary(this.plan),
-          cls: "engram-sync-summary"
-        });
-        summary.style.whiteSpace = "pre-wrap";
-        summary.style.fontFamily = "var(--font-monospace)";
-        summary.style.fontSize = "0.9em";
-        summary.style.padding = "12px";
-        summary.style.background = "var(--background-secondary)";
-        summary.style.borderRadius = "6px";
-        if (this.plan.toDeleteLocal.length > 0) {
-          const warn = contentEl.createEl("p", {
-            cls: "engram-sync-warning"
-          });
-          warn.style.color = "var(--text-error)";
-          warn.style.marginTop = "8px";
-          warn.setText(
-            `${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`
-          );
-        }
-        const buttons = contentEl.createDiv({ cls: "engram-sync-buttons" });
-        buttons.style.display = "flex";
-        buttons.style.justifyContent = "flex-end";
-        buttons.style.gap = "8px";
-        buttons.style.marginTop = "16px";
-        const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-        cancelBtn.addEventListener("click", () => {
-          this.resolved = true;
-          this.resolve(false);
-          this.close();
-        });
-        const confirmBtn = buttons.createEl("button", {
-          text: "Start Sync",
-          cls: "mod-cta"
-        });
-        confirmBtn.addEventListener("click", () => {
-          this.resolved = true;
-          this.resolve(true);
-          this.close();
-        });
-      }
-      onClose() {
-        if (!this.resolved) {
-          this.resolve(false);
-        }
-        this.contentEl.empty();
-      }
-      /** Opens the modal and returns a promise that resolves when the user confirms or cancels. */
-      awaitConfirmation() {
-        return new Promise((resolve) => {
-          this.resolve = resolve;
-          this.open();
-        });
-      }
-    };
-  }
-});
 
 // node_modules/diff-match-patch/index.js
 var require_diff_match_patch = __commonJS({
@@ -3164,8 +3056,196 @@ var DeviceFlowModal = class extends import_obsidian6.Modal {
   }
 };
 
+// src/pre-sync-modal.ts
+var import_obsidian7 = require("obsidian");
+function plural(count, singular) {
+  return count === 1 ? `${count} ${singular}` : `${count} ${singular}s`;
+}
+function formatPlanSummary(plan) {
+  const lines = [];
+  lines.push(`Vault: ${plan.vaultName}`);
+  lines.push(`Server: ${plan.serverNoteCount} notes \xB7 Local: ${plan.localNoteCount} notes`);
+  lines.push("");
+  lines.push(`\u2191  ${plural(plan.toPush.notes.length, "note")} to push`);
+  lines.push(`\u2193  ${plural(plan.toPull.notes.length, "note")} to pull`);
+  lines.push(`\u26A1  ${plural(plan.conflicts.length, "conflict")}`);
+  const totalDeletes = plan.toDeleteLocal.length + plan.toDeleteRemote.length;
+  lines.push(`\u2715  ${plural(totalDeletes, "deletion")}`);
+  if (plan.toPush.attachments.length > 0 || plan.toPull.attachments.length > 0) {
+    lines.push("");
+    if (plan.toPush.attachments.length > 0) {
+      lines.push(`\u2191  ${plural(plan.toPush.attachments.length, "attachment")} to push`);
+    }
+    if (plan.toPull.attachments.length > 0) {
+      lines.push(`\u2193  ${plural(plan.toPull.attachments.length, "attachment")} to pull`);
+    }
+  }
+  return lines.join("\n");
+}
+var PreSyncModal = class extends import_obsidian7.Modal {
+  constructor(app, plan, showWipePull = false) {
+    super(app);
+    this.resolved = false;
+    this.resolve = () => {
+    };
+    this.plan = plan;
+    this.showWipePull = showWipePull;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("engram-pre-sync-modal");
+    contentEl.createEl("h2", { text: "Sync Preview" });
+    const summary = contentEl.createEl("pre", {
+      text: formatPlanSummary(this.plan),
+      cls: "engram-sync-summary"
+    });
+    summary.style.whiteSpace = "pre-wrap";
+    summary.style.fontFamily = "var(--font-monospace)";
+    summary.style.fontSize = "0.9em";
+    summary.style.padding = "12px";
+    summary.style.background = "var(--background-secondary)";
+    summary.style.borderRadius = "6px";
+    if (this.plan.toDeleteLocal.length > 0) {
+      const warn = contentEl.createEl("p", {
+        cls: "engram-sync-warning"
+      });
+      warn.style.color = "var(--text-error)";
+      warn.style.marginTop = "8px";
+      warn.setText(
+        `${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`
+      );
+    }
+    const buttons = contentEl.createDiv({ cls: "engram-sync-buttons" });
+    buttons.style.display = "flex";
+    buttons.style.justifyContent = "flex-end";
+    buttons.style.gap = "8px";
+    buttons.style.marginTop = "16px";
+    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => {
+      this.resolved = true;
+      this.resolve(this.showWipePull ? "cancel" : false);
+      this.close();
+    });
+    if (this.showWipePull) {
+      const wipeBtn = buttons.createEl("button", {
+        text: "Wipe & Pull"
+      });
+      wipeBtn.style.color = "var(--text-error)";
+      wipeBtn.style.borderColor = "var(--text-error)";
+      wipeBtn.addEventListener("click", () => {
+        this.resolved = true;
+        this.resolve("wipe-pull");
+        this.close();
+      });
+    }
+    const confirmBtn = buttons.createEl("button", {
+      text: "Start Sync",
+      cls: "mod-cta"
+    });
+    confirmBtn.addEventListener("click", () => {
+      this.resolved = true;
+      this.resolve(this.showWipePull ? "pull" : true);
+      this.close();
+    });
+  }
+  onClose() {
+    if (!this.resolved) {
+      this.resolve(this.showWipePull ? "cancel" : false);
+    }
+    this.contentEl.empty();
+  }
+  /** Opens the modal and returns a promise that resolves when the user confirms or cancels. */
+  awaitConfirmation() {
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.open();
+    });
+  }
+  /** Opens the modal and returns the chosen pull action. Only use when showWipePull is true. */
+  awaitPullAction() {
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.open();
+    });
+  }
+};
+var WipeConfirmModal = class extends import_obsidian7.Modal {
+  constructor(app, localNoteCount, localAttachmentCount) {
+    super(app);
+    this.resolved = false;
+    this.resolve = () => {
+    };
+    this.localNoteCount = localNoteCount;
+    this.localAttachmentCount = localAttachmentCount;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("engram-wipe-confirm-modal");
+    contentEl.createEl("h2", { text: "\u26A0 Confirm Wipe & Pull" });
+    const warning = contentEl.createEl("p");
+    warning.style.color = "var(--text-error)";
+    warning.style.fontWeight = "bold";
+    warning.style.fontSize = "1.05em";
+    warning.setText("This action cannot be undone.");
+    const details = contentEl.createEl("p");
+    const parts = [];
+    if (this.localNoteCount > 0) {
+      parts.push(`${this.localNoteCount} notes`);
+    }
+    if (this.localAttachmentCount > 0) {
+      parts.push(`${this.localAttachmentCount} attachments`);
+    }
+    details.setText(
+      `This will permanently delete all ${parts.join(" and ")} from your local vault, then pull everything fresh from the server.`
+    );
+    const localOnly = contentEl.createEl("p");
+    localOnly.style.color = "var(--text-error)";
+    localOnly.setText(
+      "Any notes that exist only locally and have not been pushed will be lost forever."
+    );
+    const buttons = contentEl.createDiv({ cls: "engram-wipe-buttons" });
+    buttons.style.display = "flex";
+    buttons.style.justifyContent = "flex-end";
+    buttons.style.gap = "8px";
+    buttons.style.marginTop = "16px";
+    const goBackBtn = buttons.createEl("button", {
+      text: "Go Back",
+      cls: "mod-cta"
+    });
+    goBackBtn.addEventListener("click", () => {
+      this.resolved = true;
+      this.resolve(false);
+      this.close();
+    });
+    const confirmBtn = buttons.createEl("button", {
+      text: "Delete Everything & Pull"
+    });
+    confirmBtn.style.background = "var(--text-error)";
+    confirmBtn.style.color = "var(--text-on-accent)";
+    confirmBtn.style.borderColor = "var(--text-error)";
+    confirmBtn.addEventListener("click", () => {
+      this.resolved = true;
+      this.resolve(true);
+      this.close();
+    });
+  }
+  onClose() {
+    if (!this.resolved) {
+      this.resolve(false);
+    }
+    this.contentEl.empty();
+  }
+  awaitConfirmation() {
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.open();
+    });
+  }
+};
+
 // src/settings.ts
-init_pre_sync_modal();
 var PROBLEMATIC_DIRS = [
   { pattern: "node_modules/", label: "node_modules", desc: "Node.js dependencies" },
   { pattern: ".venv/", label: ".venv", desc: "Python virtual environment" },
@@ -3394,8 +3474,7 @@ var EngramSyncSettingTab = class extends import_obsidian8.PluginSettingTab {
         try {
           btn.setDisabled(true);
           const plan = await this.plugin.syncEngine.computeSyncPlan("push-all");
-          const { PreSyncModal: PreSyncModal2 } = await Promise.resolve().then(() => (init_pre_sync_modal(), pre_sync_modal_exports));
-          const confirmed = await new PreSyncModal2(
+          const confirmed = await new PreSyncModal(
             this.app,
             plan
           ).awaitConfirmation();
@@ -3422,23 +3501,46 @@ var EngramSyncSettingTab = class extends import_obsidian8.PluginSettingTab {
         }
       })
     );
-    new import_obsidian8.Setting(containerEl).setName("Pull all from server").setDesc("Force-pull every note and attachment, overwriting local copies.").addButton(
+    new import_obsidian8.Setting(containerEl).setName("Pull all from server").setDesc("Pull every note and attachment from the server. Wipe & Pull deletes all local files first.").addButton(
       (btn) => btn.setButtonText("Pull All").setWarning().onClick(async () => {
-        var _a2, _b;
+        var _a2, _b, _c, _d;
         try {
           btn.setDisabled(true);
           const plan = await this.plugin.syncEngine.computeSyncPlan("pull-all");
-          const { PreSyncModal: PreSyncModal2 } = await Promise.resolve().then(() => (init_pre_sync_modal(), pre_sync_modal_exports));
-          const confirmed = await new PreSyncModal2(
+          const action = await new PreSyncModal(
             this.app,
-            plan
-          ).awaitConfirmation();
-          if (!confirmed) {
+            plan,
+            true
+          ).awaitPullAction();
+          if (action === "cancel") {
             btn.setDisabled(false);
             return;
           }
+          if (action === "wipe-pull") {
+            const confirmed = await new WipeConfirmModal(
+              this.app,
+              plan.localNoteCount,
+              plan.localAttachmentCount
+            ).awaitConfirmation();
+            if (!confirmed) {
+              btn.setDisabled(false);
+              return;
+            }
+            const count2 = await this.plugin.syncEngine.wipePullAll();
+            const errors2 = (_b = (_a2 = this.plugin.syncEngine.syncLog) == null ? void 0 : _a2.errorCount()) != null ? _b : 0;
+            if (errors2 > 0) {
+              new import_obsidian8.Notice(
+                `Wipe & pull complete: ${count2} pulled, ${errors2} failed \u2014 run "Engram: Show sync log" for details`,
+                1e4
+              );
+            } else {
+              new import_obsidian8.Notice(`Wipe & pull complete: ${count2} pulled`);
+            }
+            this.display();
+            return;
+          }
           const count = await this.plugin.syncEngine.pullAll();
-          const errors = (_b = (_a2 = this.plugin.syncEngine.syncLog) == null ? void 0 : _a2.errorCount()) != null ? _b : 0;
+          const errors = (_d = (_c = this.plugin.syncEngine.syncLog) == null ? void 0 : _c.errorCount()) != null ? _d : 0;
           if (errors > 0) {
             new import_obsidian8.Notice(
               `Sync complete: ${count} pulled, ${errors} failed \u2014 run "Engram: Show sync log" for details`,
@@ -4419,14 +4521,41 @@ var SyncEngine = class {
   /** Force-pull ALL notes and attachments from the server, overwriting local files.
    *  Ignores lastSync — fetches everything. Skips conflict detection. */
   async pullAll() {
+    return this._pullAll(false);
+  }
+  /** Wipe all local syncable files, reset sync state, then pull everything from server. */
+  async wipePullAll() {
+    return this._pullAll(true);
+  }
+  async _pullAll(wipe) {
     var _a, _b, _c, _d, _e, _f;
     if (this.pulling) return 0;
     (_a = this.syncLog) == null ? void 0 : _a.clear();
     this.pulling = true;
     this.lastError = "";
     this.emitStatus();
-    devLog().log("pull", "pullAll: fetching everything from server");
-    rlog().info("pull", "PullAll started \u2014 fetching everything from epoch");
+    if (wipe) {
+      devLog().log("pull", "wipePullAll: deleting all local syncable files");
+      rlog().info("pull", "WipePullAll started \u2014 deleting local files");
+      const files = this.app.vault.getFiles();
+      const syncable = files.filter((f) => this.isSyncable(f) && !this.shouldIgnore(f.path));
+      for (const file of syncable) {
+        try {
+          await this.app.vault.trash(file, true);
+          this.logEntry("delete", file.path, "ok", void 0, "wipe");
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          this.logEntry("delete", file.path, "error", msg);
+        }
+      }
+      this.syncState.clear();
+      this.lastSync = "";
+      await this.saveData({ lastSync: "" });
+      devLog().log("pull", `wipePullAll: deleted ${syncable.length} local files, sync state reset`);
+      rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
+    }
+    devLog().log("pull", `${wipe ? "wipePullAll" : "pullAll"}: fetching everything from server`);
+    rlog().info("pull", `${wipe ? "WipePullAll" : "PullAll"} started \u2014 fetching everything from epoch`);
     try {
       const epoch = "1970-01-01T00:00:00Z";
       const [noteResp, attachResp] = await Promise.all([
@@ -4452,7 +4581,10 @@ var SyncEngine = class {
           const localContent = await this.app.vault.cachedRead(existing);
           if (localContent === change.content) {
             const normalized = (0, import_obsidian9.normalizePath)(change.path);
-            this.syncState.set(normalized, { hash: fnv1a(localContent), version: change.version });
+            this.syncState.set(normalized, {
+              hash: fnv1a(localContent),
+              version: change.version
+            });
             if (change.version != null) {
               (_b = this.baseStore) == null ? void 0 : _b.set(normalized, change.content, change.version);
             }

@@ -4,7 +4,7 @@
 import { type App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { DeviceFlowModal } from "./device-flow-modal";
 import type EngramSyncPlugin from "./main";
-import { PreSyncModal } from "./pre-sync-modal";
+import { PreSyncModal, WipeConfirmModal } from "./pre-sync-modal";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
 const PROBLEMATIC_DIRS = [
@@ -349,7 +349,6 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						try {
 							btn.setDisabled(true);
 							const plan = await this.plugin.syncEngine.computeSyncPlan("push-all");
-							const { PreSyncModal } = await import("./pre-sync-modal");
 							const confirmed = await new PreSyncModal(
 								this.app,
 								plan,
@@ -380,7 +379,9 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Pull all from server")
-			.setDesc("Force-pull every note and attachment, overwriting local copies.")
+			.setDesc(
+				"Pull every note and attachment from the server. Wipe & Pull deletes all local files first.",
+			)
 			.addButton((btn) =>
 				btn
 					.setButtonText("Pull All")
@@ -389,13 +390,36 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 						try {
 							btn.setDisabled(true);
 							const plan = await this.plugin.syncEngine.computeSyncPlan("pull-all");
-							const { PreSyncModal } = await import("./pre-sync-modal");
-							const confirmed = await new PreSyncModal(
+							const action = await new PreSyncModal(
 								this.app,
 								plan,
-							).awaitConfirmation();
-							if (!confirmed) {
+								true,
+							).awaitPullAction();
+							if (action === "cancel") {
 								btn.setDisabled(false);
+								return;
+							}
+							if (action === "wipe-pull") {
+								const confirmed = await new WipeConfirmModal(
+									this.app,
+									plan.localNoteCount,
+									plan.localAttachmentCount,
+								).awaitConfirmation();
+								if (!confirmed) {
+									btn.setDisabled(false);
+									return;
+								}
+								const count = await this.plugin.syncEngine.wipePullAll();
+								const errors = this.plugin.syncEngine.syncLog?.errorCount() ?? 0;
+								if (errors > 0) {
+									new Notice(
+										`Wipe & pull complete: ${count} pulled, ${errors} failed — run "Engram: Show sync log" for details`,
+										10000,
+									);
+								} else {
+									new Notice(`Wipe & pull complete: ${count} pulled`);
+								}
+								this.display();
 								return;
 							}
 							const count = await this.plugin.syncEngine.pullAll();
