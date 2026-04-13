@@ -4756,7 +4756,6 @@ var SyncEngine = class {
         `wipePullAll: deleted ${syncable.length} local files, sync state reset`
       );
       rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
-      this.suppressDeletes = false;
     }
     devLog().log(
       "pull",
@@ -4938,6 +4937,7 @@ var SyncEngine = class {
       return 0;
     } finally {
       this.pulling = false;
+      this.suppressDeletes = false;
       this.emitStatus();
       await this.flushPostPullPushes();
     }
@@ -5191,7 +5191,9 @@ var SyncEngine = class {
         rlog().info("pull", `Unchanged: ${change.path}`);
         return false;
       }
-      console.log(`[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`);
+      console.log(
+        `[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`
+      );
       await this.modifyFile(existing, change.content);
       this.syncState.set(normalized, {
         hash: fnv1a(change.content),
@@ -5206,7 +5208,9 @@ var SyncEngine = class {
       );
       return true;
     }
-    console.log(`[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`);
+    console.log(
+      `[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`
+    );
     try {
       await this.createFileWithFolders(normalized, change.content);
     } catch (createErr) {

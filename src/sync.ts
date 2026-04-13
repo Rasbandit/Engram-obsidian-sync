@@ -903,7 +903,9 @@ export class SyncEngine {
 				`wipePullAll: deleted ${syncable.length} local files, sync state reset`,
 			);
 			rlog().info("pull", `WipePullAll deleted ${syncable.length} local files`);
-			this.suppressDeletes = false;
+			// NOTE: suppressDeletes stays true until the entire pull completes.
+			// Obsidian's delete events fire asynchronously — resetting here would
+			// allow queued events to leak through and soft-delete server data.
 		}
 
 		devLog().log(
@@ -1116,6 +1118,7 @@ export class SyncEngine {
 			return 0;
 		} finally {
 			this.pulling = false;
+			this.suppressDeletes = false;
 			this.emitStatus();
 			await this.flushPostPullPushes();
 		}
