@@ -264,6 +264,15 @@ export interface SyncLogEntry {
 	details?: string;
 }
 
+/** Vault information returned by GET /vaults */
+export interface VaultInfo {
+	id: number;
+	name: string;
+	slug: string;
+	is_default: boolean;
+	created_at: string;
+}
+
 /** 409 conflict response from the server when expected_version mismatches. */
 export interface VersionConflictResponse {
 	conflict: true;
