@@ -4751,33 +4751,40 @@ var SyncEngine = class {
         "pull",
         `PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`
       );
-      const noteChanges = [];
-      for (const change of noteResp.changes) {
-        if (change.deleted || this.shouldIgnore(change.path)) {
-          noteChanges.push(change);
-          continue;
-        }
-        const existing = this.app.vault.getFileByPath((0, import_obsidian10.normalizePath)(change.path));
-        if (existing) {
-          const localContent = await this.app.vault.cachedRead(existing);
-          if (localContent === change.content) {
-            const normalized = (0, import_obsidian10.normalizePath)(change.path);
-            this.syncState.set(normalized, {
-              hash: fnv1a(localContent),
-              version: change.version
-            });
-            if (change.version != null) {
-              (_d = this.baseStore) == null ? void 0 : _d.set(normalized, change.content, change.version);
-            }
+      let noteChanges;
+      let attachChanges;
+      if (wipe) {
+        noteChanges = noteResp.changes;
+        attachChanges = attachResp.changes;
+      } else {
+        noteChanges = [];
+        for (const change of noteResp.changes) {
+          if (change.deleted || this.shouldIgnore(change.path)) {
+            noteChanges.push(change);
             continue;
           }
+          const existing = this.app.vault.getFileByPath((0, import_obsidian10.normalizePath)(change.path));
+          if (existing) {
+            const localContent = await this.app.vault.cachedRead(existing);
+            if (localContent === change.content) {
+              const normalized = (0, import_obsidian10.normalizePath)(change.path);
+              this.syncState.set(normalized, {
+                hash: fnv1a(localContent),
+                version: change.version
+              });
+              if (change.version != null) {
+                (_d = this.baseStore) == null ? void 0 : _d.set(normalized, change.content, change.version);
+              }
+              continue;
+            }
+          }
+          noteChanges.push(change);
         }
-        noteChanges.push(change);
+        attachChanges = attachResp.changes.filter((change) => {
+          if (change.deleted) return true;
+          return !this.app.vault.getFileByPath((0, import_obsidian10.normalizePath)(change.path));
+        });
       }
-      const attachChanges = attachResp.changes.filter((change) => {
-        if (change.deleted) return true;
-        return !this.app.vault.getFileByPath((0, import_obsidian10.normalizePath)(change.path));
-      });
       let applied = 0;
       let failed = 0;
       const noteCount = noteChanges.length;

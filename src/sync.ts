@@ -921,37 +921,46 @@ export class SyncEngine {
 				`PullAll fetched ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
 			);
 
-			// Pre-filter: skip notes whose local content already matches server
-			const noteChanges: typeof noteResp.changes = [];
-			for (const change of noteResp.changes) {
-				if (change.deleted || this.shouldIgnore(change.path)) {
-					noteChanges.push(change);
-					continue;
-				}
-				const existing = this.app.vault.getFileByPath(normalizePath(change.path));
-				if (existing) {
-					const localContent = await this.app.vault.cachedRead(existing);
-					if (localContent === change.content) {
-						// Content identical — update sync state but skip the work
-						const normalized = normalizePath(change.path);
-						this.syncState.set(normalized, {
-							hash: fnv1a(localContent),
-							version: change.version,
-						});
-						if (change.version != null) {
-							this.baseStore?.set(normalized, change.content, change.version);
-						}
+			// Pre-filter: skip notes whose local content already matches server.
+			// Skip filtering after a wipe — nothing local to compare against, and
+			// Obsidian's file cache may still return stale data for trashed files.
+			let noteChanges: typeof noteResp.changes;
+			let attachChanges: typeof attachResp.changes;
+
+			if (wipe) {
+				noteChanges = noteResp.changes;
+				attachChanges = attachResp.changes;
+			} else {
+				noteChanges = [];
+				for (const change of noteResp.changes) {
+					if (change.deleted || this.shouldIgnore(change.path)) {
+						noteChanges.push(change);
 						continue;
 					}
+					const existing = this.app.vault.getFileByPath(normalizePath(change.path));
+					if (existing) {
+						const localContent = await this.app.vault.cachedRead(existing);
+						if (localContent === change.content) {
+							// Content identical — update sync state but skip the work
+							const normalized = normalizePath(change.path);
+							this.syncState.set(normalized, {
+								hash: fnv1a(localContent),
+								version: change.version,
+							});
+							if (change.version != null) {
+								this.baseStore?.set(normalized, change.content, change.version);
+							}
+							continue;
+						}
+					}
+					noteChanges.push(change);
 				}
-				noteChanges.push(change);
-			}
 
-			// Pre-filter: skip attachments that already exist locally
-			const attachChanges = attachResp.changes.filter((change) => {
-				if (change.deleted) return true;
-				return !this.app.vault.getFileByPath(normalizePath(change.path));
-			});
+				attachChanges = attachResp.changes.filter((change) => {
+					if (change.deleted) return true;
+					return !this.app.vault.getFileByPath(normalizePath(change.path));
+				});
+			}
 
 			let applied = 0;
 			let failed = 0;
