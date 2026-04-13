@@ -3660,6 +3660,8 @@ function renderAdvancedTab(ctx) {
     text.inputEl.rows = 6;
     text.inputEl.style.width = "100%";
     text.inputEl.style.boxSizing = "border-box";
+    text.inputEl.style.resize = "none";
+    text.inputEl.style.overflow = "auto";
   });
   ignoreSetting.settingEl.style.flexDirection = "column";
   ignoreSetting.settingEl.style.alignItems = "stretch";
