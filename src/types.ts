@@ -254,6 +254,16 @@ export interface FileSyncState {
 	version?: number;
 }
 
+/** A single entry in the sync log ring buffer. */
+export interface SyncLogEntry {
+	timestamp: Date;
+	action: "push" | "pull" | "delete" | "conflict" | "skip" | "error";
+	path: string;
+	result: "ok" | "error" | "skipped";
+	error?: string;
+	details?: string;
+}
+
 /** 409 conflict response from the server when expected_version mismatches. */
 export interface VersionConflictResponse {
 	conflict: true;
