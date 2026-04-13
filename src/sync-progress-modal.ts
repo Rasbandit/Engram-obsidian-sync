@@ -9,7 +9,15 @@ const PHASE_LABELS: Record<SyncProgress["phase"], string> = {
 	complete: "Complete",
 };
 
-/** Modal that stays open during sync, showing live progress with phase transitions. */
+/** Minimum ms to display each phase before transitioning to the next. */
+const MIN_PHASE_MS = 800;
+
+/** How often to update the count/bar within a phase (ms). */
+const TICK_INTERVAL_MS = 50;
+
+/** Modal that stays open during sync, showing live progress with phase transitions.
+ *  Updates are buffered so each phase is visible for at least MIN_PHASE_MS,
+ *  even if the underlying operation completes faster. */
 export class SyncProgressModal extends Modal {
 	private phaseEl!: HTMLElement;
 	private countEl!: HTMLElement;
@@ -18,7 +26,17 @@ export class SyncProgressModal extends Modal {
 	private summaryEl!: HTMLElement;
 	private bgBtn!: HTMLButtonElement;
 	private closeBtn!: HTMLButtonElement;
-	private done = false;
+
+	/** Latest progress update received from the sync engine (may be ahead of display). */
+	private latest: SyncProgress | null = null;
+	/** Currently displayed phase. */
+	private displayedPhase: SyncProgress["phase"] | null = null;
+	/** Timestamp when the current phase started displaying. */
+	private phaseStartTime = 0;
+	/** Interval for ticking the display forward. */
+	private tickTimer: number | null = null;
+	/** Queue of phase-changing updates waiting for min display time. */
+	private pendingPhaseChange: SyncProgress | null = null;
 
 	onOpen(): void {
 		const { contentEl } = this;
@@ -84,17 +102,74 @@ export class SyncProgressModal extends Modal {
 		});
 		this.closeBtn.style.display = "none";
 		this.closeBtn.addEventListener("click", () => this.close());
+
+		// Start the display tick loop
+		this.tickTimer = window.setInterval(() => this.tick(), TICK_INTERVAL_MS);
 	}
 
-	/** Call this from the onSyncProgress callback to update the modal. */
+	/** Called by the sync engine's progress callback. Buffers the update. */
 	update(progress: SyncProgress): void {
-		if (!this.phaseEl) return;
+		this.latest = progress;
+	}
 
+	/** Periodic tick: apply buffered updates with minimum phase display time. */
+	private tick(): void {
+		if (!this.latest || !this.phaseEl) return;
+
+		const now = Date.now();
+
+		// If a phase change is pending, check if enough time has passed
+		if (this.pendingPhaseChange) {
+			const elapsed = now - this.phaseStartTime;
+			if (elapsed < MIN_PHASE_MS) {
+				// Still showing the old phase — update its final count (show 100%)
+				this.renderProgress({
+					...this.pendingPhaseChange,
+					phase: this.displayedPhase ?? this.pendingPhaseChange.phase,
+				});
+				return;
+			}
+			// Enough time passed — apply the phase change
+			this.displayedPhase = this.pendingPhaseChange.phase;
+			this.phaseStartTime = now;
+			this.pendingPhaseChange = null;
+		}
+
+		// Check if the latest update is a new phase
+		if (this.displayedPhase !== null && this.latest.phase !== this.displayedPhase) {
+			const elapsed = now - this.phaseStartTime;
+			if (elapsed < MIN_PHASE_MS) {
+				// Queue the phase change — keep showing current phase at 100%
+				this.pendingPhaseChange = { ...this.latest };
+				this.renderProgress({
+					phase: this.displayedPhase,
+					current: this.latest.total || 1,
+					total: this.latest.total || 1,
+					failed: this.latest.failed,
+				});
+				return;
+			}
+		}
+
+		// Apply the update directly
+		if (this.displayedPhase !== this.latest.phase) {
+			this.displayedPhase = this.latest.phase;
+			this.phaseStartTime = now;
+			this.barInner.style.width = "0%";
+		}
+		this.renderProgress(this.latest);
+	}
+
+	/** Render a progress state to the DOM. */
+	private renderProgress(progress: SyncProgress): void {
 		const label = PHASE_LABELS[progress.phase] ?? progress.phase;
 		const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
 		if (progress.phase === "complete") {
-			this.done = true;
+			if (this.tickTimer) {
+				window.clearInterval(this.tickTimer);
+				this.tickTimer = null;
+			}
 			this.phaseEl.setText("Sync complete");
 			this.countEl.setText("");
 			this.barInner.style.width = "100%";
@@ -120,8 +195,6 @@ export class SyncProgressModal extends Modal {
 		this.phaseEl.setText(label);
 		this.countEl.setText(`${progress.current} / ${progress.total}`);
 		this.barInner.style.width = `${pct}%`;
-
-		// Reset bar color on phase change (in case prior phase was complete/error)
 		this.barInner.style.background = "var(--interactive-accent)";
 
 		if (progress.failed > 0) {
@@ -133,6 +206,10 @@ export class SyncProgressModal extends Modal {
 	}
 
 	onClose(): void {
+		if (this.tickTimer) {
+			window.clearInterval(this.tickTimer);
+			this.tickTimer = null;
+		}
 		this.contentEl.empty();
 	}
 }

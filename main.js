@@ -3254,10 +3254,21 @@ var PHASE_LABELS = {
   attachments: "Syncing attachments",
   complete: "Complete"
 };
+var MIN_PHASE_MS = 800;
+var TICK_INTERVAL_MS = 50;
 var SyncProgressModal = class extends import_obsidian8.Modal {
   constructor() {
     super(...arguments);
-    this.done = false;
+    /** Latest progress update received from the sync engine (may be ahead of display). */
+    this.latest = null;
+    /** Currently displayed phase. */
+    this.displayedPhase = null;
+    /** Timestamp when the current phase started displaying. */
+    this.phaseStartTime = 0;
+    /** Interval for ticking the display forward. */
+    this.tickTimer = null;
+    /** Queue of phase-changing updates waiting for min display time. */
+    this.pendingPhaseChange = null;
   }
   onOpen() {
     const { contentEl } = this;
@@ -3313,15 +3324,60 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
     });
     this.closeBtn.style.display = "none";
     this.closeBtn.addEventListener("click", () => this.close());
+    this.tickTimer = window.setInterval(() => this.tick(), TICK_INTERVAL_MS);
   }
-  /** Call this from the onSyncProgress callback to update the modal. */
+  /** Called by the sync engine's progress callback. Buffers the update. */
   update(progress) {
+    this.latest = progress;
+  }
+  /** Periodic tick: apply buffered updates with minimum phase display time. */
+  tick() {
     var _a;
-    if (!this.phaseEl) return;
+    if (!this.latest || !this.phaseEl) return;
+    const now = Date.now();
+    if (this.pendingPhaseChange) {
+      const elapsed = now - this.phaseStartTime;
+      if (elapsed < MIN_PHASE_MS) {
+        this.renderProgress({
+          ...this.pendingPhaseChange,
+          phase: (_a = this.displayedPhase) != null ? _a : this.pendingPhaseChange.phase
+        });
+        return;
+      }
+      this.displayedPhase = this.pendingPhaseChange.phase;
+      this.phaseStartTime = now;
+      this.pendingPhaseChange = null;
+    }
+    if (this.displayedPhase !== null && this.latest.phase !== this.displayedPhase) {
+      const elapsed = now - this.phaseStartTime;
+      if (elapsed < MIN_PHASE_MS) {
+        this.pendingPhaseChange = { ...this.latest };
+        this.renderProgress({
+          phase: this.displayedPhase,
+          current: this.latest.total || 1,
+          total: this.latest.total || 1,
+          failed: this.latest.failed
+        });
+        return;
+      }
+    }
+    if (this.displayedPhase !== this.latest.phase) {
+      this.displayedPhase = this.latest.phase;
+      this.phaseStartTime = now;
+      this.barInner.style.width = "0%";
+    }
+    this.renderProgress(this.latest);
+  }
+  /** Render a progress state to the DOM. */
+  renderProgress(progress) {
+    var _a;
     const label = (_a = PHASE_LABELS[progress.phase]) != null ? _a : progress.phase;
     const pct = progress.total > 0 ? Math.round(progress.current / progress.total * 100) : 0;
     if (progress.phase === "complete") {
-      this.done = true;
+      if (this.tickTimer) {
+        window.clearInterval(this.tickTimer);
+        this.tickTimer = null;
+      }
       this.phaseEl.setText("Sync complete");
       this.countEl.setText("");
       this.barInner.style.width = "100%";
@@ -3353,6 +3409,10 @@ var SyncProgressModal = class extends import_obsidian8.Modal {
     }
   }
   onClose() {
+    if (this.tickTimer) {
+      window.clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
     this.contentEl.empty();
   }
 };
