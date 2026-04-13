@@ -4800,6 +4800,8 @@ var SyncEngine = class {
       const noteCount = noteChanges.length;
       const attachCount = attachChanges.length;
       const total = noteCount + attachCount;
+      console.log(`[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`);
+      console.log(`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`);
       (_e = this.onSyncProgress) == null ? void 0 : _e.call(this, { phase: "pulling", current: 0, total, failed: 0 });
       for (let i = 0; i < noteChanges.length; i++) {
         const change = noteChanges[i];
@@ -5455,7 +5457,9 @@ var SyncEngine = class {
         console.error(`[engram-debug] failed to trash folder ${folder.path}:`, e);
       }
     }
-    console.log(`[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`);
+    console.log(
+      `[engram-debug] done: deleted ${deletedFiles} files + ${deletedFolders} folders`
+    );
     return deletedFiles + deletedFolders;
   }
   /** Push ALL syncable files (initial import). */

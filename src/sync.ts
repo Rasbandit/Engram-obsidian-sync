@@ -968,6 +968,15 @@ export class SyncEngine {
 			const attachCount = attachChanges.length;
 			const total = noteCount + attachCount;
 
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			);
+			// biome-ignore lint/suspicious/noConsole: temporary debug
+			console.log(
+				`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`,
+			);
+
 			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
 
 			for (let i = 0; i < noteChanges.length; i++) {
