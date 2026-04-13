@@ -24,6 +24,8 @@ import {
 import { BaseStore } from "./base-store";
 import { destroyDevLog, devLog, initDevLog } from "./dev-log";
 import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
+import { SyncLog } from "./sync-log";
+import { SyncLogModal } from "./sync-log-modal";
 import type { QueueEntry } from "./types";
 
 /** Generate a stable client ID for vault registration.
@@ -57,6 +59,7 @@ export default class EngramSyncPlugin extends Plugin {
 	authProvider: AuthProvider | null = null;
 	// biome-ignore lint/style/noNonNullAssertion: assigned in onload before any usage
 	syncEngine: SyncEngine = null!;
+	syncLog: SyncLog = new SyncLog();
 	private syncInterval: number | null = null;
 	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
@@ -100,6 +103,9 @@ export default class EngramSyncPlugin extends Plugin {
 		this.syncEngine = new SyncEngine(this.app, this.api, this.settings, async (data) => {
 			await this.savePluginData(data.lastSync);
 		});
+
+		this.syncLog = new SyncLog();
+		this.syncEngine.syncLog = this.syncLog;
 
 		// Base content store for 3-way merge (lazy-loaded after layout ready)
 		const basesPath = `${this.manifest.dir}/sync-bases.json`;
@@ -224,6 +230,14 @@ export default class EngramSyncPlugin extends Plugin {
 				new Notice("Engram Sync: pulling all from server...");
 				const count = await this.syncEngine.pullAll();
 				new Notice(`Engram Sync: pulled ${count} files from server`);
+			},
+		});
+
+		this.addCommand({
+			id: "engram-show-sync-log",
+			name: "Show sync log",
+			callback: () => {
+				new SyncLogModal(this.app, this.syncLog).open();
 			},
 		});
 
@@ -634,6 +648,11 @@ export default class EngramSyncPlugin extends Plugin {
 		} else {
 			text = "Engram: ready";
 			tooltip = "Click to sync";
+		}
+
+		const errorCount = this.syncLog?.errorCount() ?? 0;
+		if (errorCount > 0 && status.state === "idle") {
+			text = `Engram: ⚠ ${errorCount} sync errors`;
 		}
 
 		if (status.lastSync) {
