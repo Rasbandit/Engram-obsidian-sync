@@ -4,6 +4,7 @@
 import { type App, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { DeviceFlowModal } from "./device-flow-modal";
 import type EngramSyncPlugin from "./main";
+import { PreSyncModal } from "./pre-sync-modal";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
 const PROBLEMATIC_DIRS = [
@@ -309,7 +310,6 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 					try {
 						btn.setDisabled(true);
 						const plan = await this.plugin.syncEngine.computeSyncPlan("full");
-						const { PreSyncModal } = await import("./pre-sync-modal");
 						const confirmed = await new PreSyncModal(
 							this.app,
 							plan,

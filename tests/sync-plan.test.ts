@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { TFile } from "obsidian";
 import type { EngramApi } from "../src/api";
-import { SyncEngine } from "../src/sync";
+import { SyncEngine, fnv1a } from "../src/sync";
 import { DEFAULT_SETTINGS } from "../src/types";
 import type { SyncProgress } from "../src/types";
 
@@ -201,6 +201,73 @@ describe("SyncEngine.computeSyncPlan", () => {
 		expect(plan.toPull.notes).toEqual([]);
 		expect(plan.toPull.attachments).toEqual([]);
 		expect(plan.toPush.notes).toContain("Notes/local.md");
+	});
+
+	test("file changed both locally and on server is a conflict", async () => {
+		const engine = createEngine();
+		const originalContent = "# Original";
+		const localContent = "# Modified locally";
+		const file = makeTFile("Notes/both-changed.md");
+		mockApp.vault.getFiles.mockReturnValue([file]);
+		mockApp.vault.getFileByPath.mockReturnValue(file);
+		mockApp.vault.cachedRead.mockResolvedValue(localContent);
+
+		// Simulate prior sync with original content hash
+		engine.importHashes({ "Notes/both-changed.md": fnv1a(originalContent) });
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValue({
+			changes: [
+				{
+					path: "Notes/both-changed.md",
+					title: "Both",
+					content: "# Modified on server",
+					folder: "Notes",
+					tags: [],
+					mtime: Date.now() / 1000,
+					updated_at: new Date().toISOString(),
+					deleted: false,
+				},
+			],
+			server_time: "2026-01-01T00:00:00Z",
+		});
+
+		const plan = await engine.computeSyncPlan("full");
+
+		expect(plan.conflicts).toContain("Notes/both-changed.md");
+		expect(plan.toPull.notes).not.toContain("Notes/both-changed.md");
+	});
+
+	test("file changed only on server (local unchanged) is a pull, not conflict", async () => {
+		const engine = createEngine();
+		const content = "# Original";
+		const file = makeTFile("Notes/server-updated.md");
+		mockApp.vault.getFiles.mockReturnValue([file]);
+		mockApp.vault.getFileByPath.mockReturnValue(file);
+		mockApp.vault.cachedRead.mockResolvedValue(content);
+
+		// Simulate prior sync with same content hash
+		engine.importHashes({ "Notes/server-updated.md": fnv1a(content) });
+
+		(mockApi.getChanges as jest.Mock).mockResolvedValue({
+			changes: [
+				{
+					path: "Notes/server-updated.md",
+					title: "Updated",
+					content: "# New server content",
+					folder: "Notes",
+					tags: [],
+					mtime: Date.now() / 1000,
+					updated_at: new Date().toISOString(),
+					deleted: false,
+				},
+			],
+			server_time: "2026-01-01T00:00:00Z",
+		});
+
+		const plan = await engine.computeSyncPlan("full");
+
+		expect(plan.toPull.notes).toContain("Notes/server-updated.md");
+		expect(plan.conflicts).not.toContain("Notes/server-updated.md");
 	});
 
 	test("ignored files (.obsidian/) are excluded from plan", async () => {

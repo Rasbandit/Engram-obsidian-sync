@@ -844,6 +844,7 @@ export class SyncEngine {
 	async pullAll(): Promise<number> {
 		if (this.pulling) return 0;
 
+		this.syncLog?.clear();
 		this.pulling = true;
 		this.lastError = "";
 		this.emitStatus();
@@ -1567,14 +1568,24 @@ export class SyncEngine {
 				continue;
 			}
 			if (localNoteSet.has(path)) {
-				// Both sides have it — check for local modification (conflict candidate)
+				// Both sides have it — check if local was also modified (conflict)
 				const synced = this.syncState.get(path);
-				if (synced !== undefined) {
-					// We have a prior sync hash — only a conflict if local was changed.
-					// We can't read file content here (dry-run), so conservatively mark
-					// as conflict only when we know we last synced it (version mismatch
-					// detection deferred to actual execution).
-					conflictNotes.push(path);
+				if (synced?.hash !== undefined) {
+					// Compare current local hash against last-synced hash
+					const file = this.app.vault.getFileByPath(path);
+					if (file) {
+						const content = await this.app.vault.cachedRead(file);
+						const localHash = fnv1a(content);
+						if (localHash !== synced.hash) {
+							// Local changed since last sync AND server changed — conflict
+							conflictNotes.push(path);
+						} else {
+							// Local unchanged — server update is a clean pull
+							toPullNotes.push(path);
+						}
+					} else {
+						toPullNotes.push(path);
+					}
 				} else {
 					// Never synced locally — treat as toPull
 					toPullNotes.push(path);
@@ -1637,6 +1648,8 @@ export class SyncEngine {
 
 	/** Push ALL syncable files (initial import). */
 	async pushAll(): Promise<number> {
+		this.syncLog?.clear();
+
 		// Verify auth before pushing to give a clear error on bad API key
 		const { ok, error } = await this.api.ping();
 		if (!ok) {
