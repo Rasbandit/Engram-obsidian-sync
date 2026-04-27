@@ -4,7 +4,7 @@
  * Pushes vault changes to Engram for indexing/search.
  * Pulls MCP-created notes and changes from other devices.
  */
-import { Notice, Platform, Plugin } from "obsidian";
+import { Notice, Platform, Plugin, requestUrl } from "obsidian";
 import { EngramApi } from "./api";
 import { ApiKeyAuth, type AuthProvider, OAuthAuth, type RefreshFn } from "./auth";
 import { NoteChannel } from "./channel";
@@ -448,13 +448,17 @@ export default class EngramSyncPlugin extends Plugin {
 			const refreshFn: RefreshFn = async (token) => {
 				const base = this.settings.apiUrl.replace(/\/+$/, "");
 				const apiUrl = base.endsWith("/api") ? base : `${base}/api`;
-				const resp = await fetch(`${apiUrl}/auth/token/refresh`, {
+				const resp = await requestUrl({
+					url: `${apiUrl}/auth/token/refresh`,
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ refresh_token: token }),
+					throw: false,
 				});
-				if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
-				return resp.json();
+				if (resp.status < 200 || resp.status >= 300) {
+					throw new Error(`Refresh failed: ${resp.status}`);
+				}
+				return resp.json;
 			};
 			return new OAuthAuth(
 				this.settings.refreshToken,

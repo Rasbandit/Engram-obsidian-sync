@@ -2963,13 +2963,17 @@ var DeviceFlowModal = class extends import_obsidian6.Modal {
   async startDeviceFlow() {
     const baseUrl = this.plugin.settings.apiUrl.replace(/\/+$/, "");
     const apiUrl = baseUrl.endsWith("/api") ? baseUrl : `${baseUrl}/api`;
-    const resp = await fetch(`${apiUrl}/auth/device`, {
+    const resp = await (0, import_obsidian6.requestUrl)({
+      url: `${apiUrl}/auth/device`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: this.plugin.settings.clientId })
+      body: JSON.stringify({ client_id: this.plugin.settings.clientId }),
+      throw: false
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return resp.json();
+    if (resp.status < 200 || resp.status >= 300) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    return resp.json;
   }
   renderCodeScreen(contentEl, resp) {
     contentEl.empty();
@@ -3014,15 +3018,17 @@ var DeviceFlowModal = class extends import_obsidian6.Modal {
         return;
       }
       try {
-        const resp = await fetch(`${apiUrl}/auth/device/token`, {
+        const resp = await (0, import_obsidian6.requestUrl)({
+          url: `${apiUrl}/auth/device/token`,
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ device_code: deviceCode })
+          body: JSON.stringify({ device_code: deviceCode }),
+          throw: false
         });
         if (resp.status === 428) return;
-        if (resp.ok) {
+        if (resp.status >= 200 && resp.status < 300) {
           if (this.pollInterval) clearInterval(this.pollInterval);
-          const result = await resp.json();
+          const result = resp.json;
           this.resolve(result);
           this.resolve = () => {
           };
@@ -6355,13 +6361,17 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian15.Plugin
       const refreshFn = async (token) => {
         const base = this.settings.apiUrl.replace(/\/+$/, "");
         const apiUrl = base.endsWith("/api") ? base : `${base}/api`;
-        const resp = await fetch(`${apiUrl}/auth/token/refresh`, {
+        const resp = await (0, import_obsidian15.requestUrl)({
+          url: `${apiUrl}/auth/token/refresh`,
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: token })
+          body: JSON.stringify({ refresh_token: token }),
+          throw: false
         });
-        if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
-        return resp.json();
+        if (resp.status < 200 || resp.status >= 300) {
+          throw new Error(`Refresh failed: ${resp.status}`);
+        }
+        return resp.json;
       };
       return new OAuthAuth(
         this.settings.refreshToken,

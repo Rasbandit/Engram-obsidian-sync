@@ -1,4 +1,4 @@
-import { type App, Modal, Notice } from "obsidian";
+import { type App, Modal, Notice, requestUrl } from "obsidian";
 import type EngramSyncPlugin from "./main";
 
 export interface DeviceFlowResult {
@@ -60,13 +60,17 @@ export class DeviceFlowModal extends Modal {
 	}> {
 		const baseUrl = this.plugin.settings.apiUrl.replace(/\/+$/, "");
 		const apiUrl = baseUrl.endsWith("/api") ? baseUrl : `${baseUrl}/api`;
-		const resp = await fetch(`${apiUrl}/auth/device`, {
+		const resp = await requestUrl({
+			url: `${apiUrl}/auth/device`,
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ client_id: this.plugin.settings.clientId }),
+			throw: false,
 		});
-		if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-		return resp.json();
+		if (resp.status < 200 || resp.status >= 300) {
+			throw new Error(`HTTP ${resp.status}`);
+		}
+		return resp.json;
 	}
 
 	private renderCodeScreen(
@@ -124,17 +128,19 @@ export class DeviceFlowModal extends Modal {
 			}
 
 			try {
-				const resp = await fetch(`${apiUrl}/auth/device/token`, {
+				const resp = await requestUrl({
+					url: `${apiUrl}/auth/device/token`,
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ device_code: deviceCode }),
+					throw: false,
 				});
 
 				if (resp.status === 428) return;
 
-				if (resp.ok) {
+				if (resp.status >= 200 && resp.status < 300) {
 					if (this.pollInterval) clearInterval(this.pollInterval);
-					const result: DeviceFlowResult = await resp.json();
+					const result = resp.json as DeviceFlowResult;
 					this.resolve(result);
 					this.resolve = () => {};
 					this.close();
