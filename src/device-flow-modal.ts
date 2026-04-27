@@ -87,7 +87,7 @@ export class DeviceFlowModal extends Modal {
 		});
 		codeEl.title = "Click to copy";
 		codeEl.addEventListener("click", () => {
-			navigator.clipboard.writeText(resp.user_code);
+			void navigator.clipboard.writeText(resp.user_code);
 			new Notice("Code copied!");
 		});
 
