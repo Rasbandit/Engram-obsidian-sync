@@ -24,10 +24,7 @@ export class FirstSyncModal extends Modal {
 			text: `Your vault has ${this.localCount} markdown files. How would you like to sync?`,
 		});
 
-		const btnContainer = contentEl.createDiv({ cls: "engram-sync-modal-buttons" });
-		btnContainer.style.display = "flex";
-		btnContainer.style.gap = "8px";
-		btnContainer.style.marginTop = "16px";
+		const btnContainer = contentEl.createDiv({ cls: "engram-button-row-start" });
 
 		const pushBtn = btnContainer.createEl("button", { text: "Push All", cls: "mod-warning" });
 		pushBtn.addEventListener("click", () => {

@@ -1487,8 +1487,8 @@ var import_obsidian3 = require("obsidian"), FirstSyncModal = class extends impor
     contentEl.empty(), contentEl.createEl("h2", { text: "Engram Sync \u2014 First Sync" }), contentEl.createEl("p", {
       text: `Your vault has ${this.localCount} markdown files. How would you like to sync?`
     });
-    let btnContainer = contentEl.createDiv({ cls: "engram-sync-modal-buttons" });
-    btnContainer.style.display = "flex", btnContainer.style.gap = "8px", btnContainer.style.marginTop = "16px", btnContainer.createEl("button", { text: "Push All", cls: "mod-warning" }).addEventListener("click", () => {
+    let btnContainer = contentEl.createDiv({ cls: "engram-button-row-start" });
+    btnContainer.createEl("button", { text: "Push All", cls: "mod-warning" }).addEventListener("click", () => {
       this.resolve("push-all"), this.close();
     }), btnContainer.createEl("button", { text: "Pull Only" }).addEventListener("click", () => {
       this.resolve("pull-only"), this.close();
@@ -1765,16 +1765,18 @@ var import_obsidian6 = require("obsidian"), DeviceFlowModal = class extends impo
   }
   renderCodeScreen(contentEl, resp) {
     contentEl.empty(), contentEl.createEl("h2", { text: "Link Obsidian to Engram" }), contentEl.createEl("p", { text: "Your code:" });
-    let codeEl = contentEl.createEl("code", { text: resp.user_code });
-    codeEl.style.display = "block", codeEl.style.fontSize = "2rem", codeEl.style.fontFamily = "monospace", codeEl.style.textAlign = "center", codeEl.style.padding = "1rem", codeEl.style.margin = "1rem 0", codeEl.style.letterSpacing = "0.15em", codeEl.style.cursor = "pointer", codeEl.title = "Click to copy", codeEl.addEventListener("click", () => {
+    let codeEl = contentEl.createEl("code", {
+      text: resp.user_code,
+      cls: "engram-device-code"
+    });
+    codeEl.title = "Click to copy", codeEl.addEventListener("click", () => {
       navigator.clipboard.writeText(resp.user_code), new import_obsidian6.Notice("Code copied!");
     }), contentEl.createEl("p", {
       text: "A browser window has opened. Sign in and enter this code to link your vault."
-    });
-    let waitEl = contentEl.createEl("p", { text: "Waiting for authorization..." });
-    waitEl.style.fontStyle = "italic";
-    let btnContainer = contentEl.createDiv();
-    btnContainer.style.marginTop = "1rem", btnContainer.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close()), window.open(resp.verification_url);
+    }), contentEl.createEl("p", {
+      text: "Waiting for authorization...",
+      cls: "engram-device-waiting"
+    }), contentEl.createDiv({ cls: "engram-device-buttons" }).createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close()), window.open(resp.verification_url);
   }
   startPolling(deviceCode) {
     let base = this.plugin.settings.apiUrl.replace(/\/+$/, ""), apiUrl = base.endsWith("/api") ? base : `${base}/api`, elapsed = 0, maxSeconds = 300;
@@ -1812,12 +1814,10 @@ var import_obsidian6 = require("obsidian"), DeviceFlowModal = class extends impo
   renderExpired() {
     let contentEl = this.contentEl;
     contentEl.empty(), contentEl.createEl("h2", { text: "Link Obsidian to Engram" }), contentEl.createEl("p", { text: "Code expired. Please try again." });
-    let btnContainer = contentEl.createDiv();
-    btnContainer.style.marginTop = "1rem", btnContainer.createEl("button", { text: "Try Again", cls: "mod-cta" }).addEventListener("click", () => {
+    let btnContainer = contentEl.createDiv({ cls: "engram-device-buttons" });
+    btnContainer.createEl("button", { text: "Try Again", cls: "mod-cta" }).addEventListener("click", () => {
       this.aborted = !1, this.onOpen();
-    });
-    let closeBtn = btnContainer.createEl("button", { text: "Close" });
-    closeBtn.style.marginLeft = "8px", closeBtn.addEventListener("click", () => this.close());
+    }), btnContainer.createEl("button", { text: "Close" }).addEventListener("click", () => this.close());
   }
 };
 
@@ -1847,26 +1847,20 @@ var import_obsidian7 = require("obsidian"), PHASE_LABELS = {
     contentEl.empty(), contentEl.addClass("engram-sync-progress-modal"), contentEl.createEl("h2", { text: "Syncing..." }), this.phaseEl = contentEl.createEl("p", {
       text: "Preparing...",
       cls: "engram-progress-phase"
-    }), this.phaseEl.style.fontWeight = "bold", this.phaseEl.style.margin = "8px 0 4px 0", this.countEl = contentEl.createEl("p", {
-      text: "",
-      cls: "engram-progress-count"
-    }), this.countEl.style.margin = "0 0 2px 0", this.countEl.style.fontFamily = "var(--font-monospace)", this.countEl.style.fontSize = "0.9em", this.pathEl = contentEl.createEl("p", {
-      text: "",
-      cls: "engram-progress-path"
-    }), this.pathEl.style.margin = "0 0 8px 0", this.pathEl.style.fontFamily = "var(--font-monospace)", this.pathEl.style.fontSize = "0.8em", this.pathEl.style.opacity = "0.6", this.pathEl.style.overflow = "hidden", this.pathEl.style.textOverflow = "ellipsis", this.pathEl.style.whiteSpace = "nowrap";
+    }), this.countEl = contentEl.createEl("p", { text: "", cls: "engram-progress-count" }), this.pathEl = contentEl.createEl("p", { text: "", cls: "engram-progress-path" });
     let barOuter = contentEl.createDiv({ cls: "engram-progress-bar-outer" });
-    barOuter.style.height = "8px", barOuter.style.background = "var(--background-modifier-border)", barOuter.style.borderRadius = "4px", barOuter.style.overflow = "hidden", this.barInner = barOuter.createDiv({ cls: "engram-progress-bar-inner" }), this.barInner.style.height = "100%", this.barInner.style.width = "0%", this.barInner.style.background = "var(--interactive-accent)", this.barInner.style.transition = "width 0.15s ease", this.failedEl = contentEl.createEl("p", {
+    this.barInner = barOuter.createDiv({ cls: "engram-progress-bar-inner" }), this.failedEl = contentEl.createEl("p", {
       text: "",
-      cls: "engram-progress-failed"
-    }), this.failedEl.style.color = "var(--text-error)", this.failedEl.style.margin = "8px 0 0 0", this.failedEl.style.display = "none", this.summaryEl = contentEl.createEl("p", {
+      cls: "engram-progress-failed engram-hidden"
+    }), this.summaryEl = contentEl.createEl("p", {
       text: "",
-      cls: "engram-progress-summary"
-    }), this.summaryEl.style.margin = "12px 0 0 0", this.summaryEl.style.display = "none";
+      cls: "engram-progress-summary engram-hidden"
+    });
     let buttons = contentEl.createDiv({ cls: "engram-progress-buttons" });
-    buttons.style.display = "flex", buttons.style.justifyContent = "flex-end", buttons.style.gap = "8px", buttons.style.marginTop = "16px", this.bgBtn = buttons.createEl("button", { text: "Run in Background" }), this.bgBtn.addEventListener("click", () => this.close()), this.closeBtn = buttons.createEl("button", {
+    this.bgBtn = buttons.createEl("button", { text: "Run in Background" }), this.bgBtn.addEventListener("click", () => this.close()), this.closeBtn = buttons.createEl("button", {
       text: "Done",
-      cls: "mod-cta"
-    }), this.closeBtn.style.display = "none", this.closeBtn.addEventListener("click", () => this.close()), this.tickTimer = window.setInterval(() => this.tick(), TICK_INTERVAL_MS);
+      cls: "mod-cta engram-hidden"
+    }), this.closeBtn.addEventListener("click", () => this.close()), this.tickTimer = window.setInterval(() => this.tick(), TICK_INTERVAL_MS);
   }
   /** Called by the sync engine's progress callback. Buffers the update. */
   update(progress) {
@@ -1903,14 +1897,14 @@ var import_obsidian7 = require("obsidian"), PHASE_LABELS = {
     var _a, _b;
     let label = (_a = PHASE_LABELS[progress.phase]) != null ? _a : progress.phase, pct = progress.total > 0 ? Math.round(progress.current / progress.total * 100) : 0;
     if (progress.phase === "complete") {
-      this.tickTimer && (window.clearInterval(this.tickTimer), this.tickTimer = null), this.phaseEl.setText("Sync complete"), this.countEl.setText(""), this.pathEl.setText(""), this.barInner.style.width = "100%", this.barInner.style.background = "var(--text-success, var(--interactive-accent))", this.bgBtn.style.display = "none", this.closeBtn.style.display = "block";
+      this.tickTimer && (window.clearInterval(this.tickTimer), this.tickTimer = null), this.phaseEl.setText("Sync complete"), this.countEl.setText(""), this.pathEl.setText(""), this.barInner.style.width = "100%", this.barInner.addClass("is-complete"), this.bgBtn.addClass("engram-hidden"), this.closeBtn.removeClass("engram-hidden");
       let parts = [];
-      progress.current > 0 && parts.push(`${progress.current} synced`), progress.failed > 0 && parts.push(`${progress.failed} failed`), this.summaryEl.setText(parts.join(", ")), this.summaryEl.style.display = "block", progress.failed > 0 && (this.failedEl.setText(
+      progress.current > 0 && parts.push(`${progress.current} synced`), progress.failed > 0 && parts.push(`${progress.failed} failed`), this.summaryEl.setText(parts.join(", ")), this.summaryEl.removeClass("engram-hidden"), progress.failed > 0 && (this.failedEl.setText(
         `${progress.failed} failed \u2014 run "Engram: Show sync log" for details`
-      ), this.failedEl.style.display = "block");
+      ), this.failedEl.removeClass("engram-hidden"));
       return;
     }
-    this.phaseEl.setText(label), this.countEl.setText(`${progress.current} / ${progress.total}`), this.pathEl.setText((_b = progress.currentPath) != null ? _b : ""), this.barInner.style.width = `${pct}%`, this.barInner.style.background = "var(--interactive-accent)", progress.failed > 0 ? (this.failedEl.setText(`${progress.failed} failed so far`), this.failedEl.style.display = "block") : this.failedEl.style.display = "none";
+    this.phaseEl.setText(label), this.countEl.setText(`${progress.current} / ${progress.total}`), this.pathEl.setText((_b = progress.currentPath) != null ? _b : ""), this.barInner.style.width = `${pct}%`, this.barInner.removeClass("is-complete"), progress.failed > 0 ? (this.failedEl.setText(`${progress.failed} failed so far`), this.failedEl.removeClass("engram-hidden")) : this.failedEl.addClass("engram-hidden");
   }
   onClose() {
     this.tickTimer && (window.clearInterval(this.tickTimer), this.tickTimer = null), this.contentEl.empty();
@@ -1942,31 +1936,22 @@ var PreSyncModal = class extends import_obsidian8.Modal {
   }
   onOpen() {
     let { contentEl } = this;
-    contentEl.empty(), contentEl.addClass("engram-pre-sync-modal"), contentEl.createEl("h2", { text: "Sync Preview" });
-    let summary = contentEl.createEl("pre", {
+    contentEl.empty(), contentEl.addClass("engram-pre-sync-modal"), contentEl.createEl("h2", { text: "Sync Preview" }), contentEl.createEl("pre", {
       text: formatPlanSummary(this.plan),
       cls: "engram-sync-summary"
+    }), this.plan.toDeleteLocal.length > 0 && contentEl.createEl("p", {
+      cls: "engram-sync-warning",
+      text: `${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`
     });
-    if (summary.style.whiteSpace = "pre-wrap", summary.style.fontFamily = "var(--font-monospace)", summary.style.fontSize = "0.9em", summary.style.padding = "12px", summary.style.background = "var(--background-secondary)", summary.style.borderRadius = "6px", this.plan.toDeleteLocal.length > 0) {
-      let warn = contentEl.createEl("p", {
-        cls: "engram-sync-warning"
-      });
-      warn.style.color = "var(--text-error)", warn.style.marginTop = "8px", warn.setText(
-        `${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`
-      );
-    }
-    let buttons = contentEl.createDiv({ cls: "engram-sync-buttons" });
-    if (buttons.style.display = "flex", buttons.style.justifyContent = "flex-end", buttons.style.gap = "8px", buttons.style.marginTop = "16px", buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
+    let buttons = contentEl.createDiv({ cls: "engram-button-row" });
+    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
       this.resolved = !0, this.resolve(this.showWipePull ? "cancel" : !1), this.close();
-    }), this.showWipePull) {
-      let wipeBtn = buttons.createEl("button", {
-        text: "Wipe & Pull"
-      });
-      wipeBtn.style.color = "var(--text-error)", wipeBtn.style.borderColor = "var(--text-error)", wipeBtn.addEventListener("click", () => {
-        this.resolved = !0, this.resolve("wipe-pull"), this.close();
-      });
-    }
-    buttons.createEl("button", {
+    }), this.showWipePull && buttons.createEl("button", {
+      text: "Wipe & Pull",
+      cls: "engram-btn-danger-outline"
+    }).addEventListener("click", () => {
+      this.resolved = !0, this.resolve("wipe-pull"), this.close();
+    }), buttons.createEl("button", {
       text: "Start Sync",
       cls: "mod-cta"
     }).addEventListener("click", () => {
@@ -1998,28 +1983,27 @@ var PreSyncModal = class extends import_obsidian8.Modal {
   }
   onOpen() {
     let { contentEl } = this;
-    contentEl.empty(), contentEl.addClass("engram-wipe-confirm-modal"), contentEl.createEl("h2", { text: "\u26A0 Confirm Wipe & Pull" });
-    let warning = contentEl.createEl("p");
-    warning.style.color = "var(--text-error)", warning.style.fontWeight = "bold", warning.style.fontSize = "1.05em", warning.setText("This action cannot be undone.");
+    contentEl.empty(), contentEl.addClass("engram-wipe-confirm-modal"), contentEl.createEl("h2", { text: "\u26A0 Confirm Wipe & Pull" }), contentEl.createEl("p", {
+      cls: "engram-wipe-warning-strong",
+      text: "This action cannot be undone."
+    });
     let deleteParts = [];
-    this.localNoteCount > 0 && deleteParts.push(`${this.localNoteCount} notes`), this.localAttachmentCount > 0 && deleteParts.push(`${this.localAttachmentCount} attachments`), contentEl.createEl("p").setText(
-      `This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`
-    );
-    let localOnly = contentEl.createEl("p");
-    localOnly.style.color = "var(--text-error)", localOnly.setText(
-      "Any notes that exist only locally and have not been pushed will be lost forever."
-    );
-    let buttons = contentEl.createDiv({ cls: "engram-wipe-buttons" });
-    buttons.style.display = "flex", buttons.style.justifyContent = "flex-end", buttons.style.gap = "8px", buttons.style.marginTop = "16px", buttons.createEl("button", {
+    this.localNoteCount > 0 && deleteParts.push(`${this.localNoteCount} notes`), this.localAttachmentCount > 0 && deleteParts.push(`${this.localAttachmentCount} attachments`), contentEl.createEl("p", {
+      text: `This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`
+    }), contentEl.createEl("p", {
+      cls: "engram-wipe-warning",
+      text: "Any notes that exist only locally and have not been pushed will be lost forever."
+    });
+    let buttons = contentEl.createDiv({ cls: "engram-button-row" });
+    buttons.createEl("button", {
       text: "Go Back",
       cls: "mod-cta"
     }).addEventListener("click", () => {
       this.resolved = !0, this.resolve(!1), this.close();
-    });
-    let confirmBtn = buttons.createEl("button", {
-      text: "Delete Everything & Pull"
-    });
-    confirmBtn.style.background = "var(--text-error)", confirmBtn.style.color = "var(--text-on-accent)", confirmBtn.style.borderColor = "var(--text-error)", confirmBtn.addEventListener("click", () => {
+    }), buttons.createEl("button", {
+      text: "Delete Everything & Pull",
+      cls: "engram-btn-danger-solid"
+    }).addEventListener("click", () => {
       this.resolved = !0, this.resolve(!0), this.close();
     });
   }
@@ -2057,11 +2041,11 @@ function renderAccountTab(ctx) {
     new import_obsidian9.Setting(containerEl).setName("Sign in with Engram").setDesc("Links your Obsidian vault to your Engram account. Opens a browser window.").addButton(
       (btn) => btn.setButtonText("Sign In").setCta().onClick(() => startDeviceFlow())
     );
-    let details = containerEl.createEl("details");
-    details.style.marginTop = "8px", details.createEl("summary", { text: "Use API key instead" }).style.cursor = "pointer", new import_obsidian9.Setting(details).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
+    let details = containerEl.createEl("details", { cls: "engram-api-key-toggle" });
+    details.createEl("summary", { text: "Use API key instead" }), new import_obsidian9.Setting(details).setName("API Key").setDesc("Bearer token from Engram (starts with engram_)").addText((text) => {
       text.setPlaceholder("engram_abc123...").setValue(plugin.settings.apiKey).onChange(async (value) => {
         plugin.settings.apiKey = value, await plugin.saveSettings();
-      }), text.inputEl.type = "password", text.inputEl.style.fontFamily = "monospace";
+      }), text.inputEl.type = "password", text.inputEl.addClass("engram-api-key-input");
     });
   }
   new import_obsidian9.Setting(containerEl).setName("Connection").setHeading(), new import_obsidian9.Setting(containerEl).setName("Engram URL").setDesc("Full URL to your Engram instance (e.g. http://10.0.20.214:8000)").addText(
@@ -2193,16 +2177,14 @@ function renderAdvancedTab(ctx) {
       let num = Number.parseInt(value, 10);
       !Number.isNaN(num) && num >= 100 && (plugin.settings.debounceMs = num, await plugin.saveSettings());
     })
-  ), new import_obsidian10.Setting(containerEl).setName("Ignore patterns").setHeading(), renderIgnoreWarnings(containerEl, app, plugin, redisplay);
-  let ignoreSetting = new import_obsidian10.Setting(containerEl).setName("Custom patterns").setDesc(
+  ), new import_obsidian10.Setting(containerEl).setName("Ignore patterns").setHeading(), renderIgnoreWarnings(containerEl, app, plugin, redisplay), new import_obsidian10.Setting(containerEl).setName("Custom patterns").setDesc(
     "Paths to skip (one per line). Folder patterns end with /. Built-in: .obsidian/, .trash/, .git/"
   ).addTextArea((text) => {
     text.setPlaceholder(`drafts/
 secret.md`).setValue(plugin.settings.ignorePatterns).onChange(async (value) => {
       plugin.settings.ignorePatterns = value, await plugin.saveSettings();
-    }), text.inputEl.rows = 6, text.inputEl.style.width = "100%", text.inputEl.style.boxSizing = "border-box", text.inputEl.style.resize = "none", text.inputEl.style.overflow = "auto";
-  });
-  ignoreSetting.settingEl.style.flexDirection = "column", ignoreSetting.settingEl.style.alignItems = "stretch", ignoreSetting.settingEl.style.gap = "8px", new import_obsidian10.Setting(containerEl).setName("Diagnostics").setHeading(), new import_obsidian10.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
+    }), text.inputEl.rows = 6, text.inputEl.addClass("engram-ignore-textarea");
+  }).settingEl.addClass("engram-ignore-setting"), new import_obsidian10.Setting(containerEl).setName("Diagnostics").setHeading(), new import_obsidian10.Setting(containerEl).setName("Remote logging").setDesc("Send sync events to the server for remote debugging.").addToggle(
     (toggle) => toggle.setValue(plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
       plugin.settings.remoteLoggingEnabled = value, await plugin.saveSettings();
     })
@@ -2251,22 +2233,16 @@ var EngramSyncSettingTab = class extends import_obsidian12.PluginSettingTab {
   display() {
     let { containerEl } = this;
     containerEl.empty(), this.renderStatus(containerEl);
-    let progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" });
-    progressContainer.style.display = "none", progressContainer.style.padding = "12px 0";
-    let progressLabel = progressContainer.createEl("p", {
+    let progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" }), progressLabel = progressContainer.createEl("p", {
       text: "Syncing...",
       cls: "engram-progress-label"
-    });
-    progressLabel.style.margin = "0 0 4px 0";
-    let progressBarOuter = progressContainer.createDiv({ cls: "engram-progress-bar-outer" });
-    progressBarOuter.style.height = "6px", progressBarOuter.style.background = "var(--background-modifier-border)", progressBarOuter.style.borderRadius = "3px", progressBarOuter.style.overflow = "hidden";
-    let progressBarInner = progressBarOuter.createDiv({ cls: "engram-progress-bar-inner" });
-    progressBarInner.style.height = "100%", progressBarInner.style.width = "0%", progressBarInner.style.background = "var(--interactive-accent)", progressBarInner.style.transition = "width 0.2s ease", this.plugin.syncEngine.onSyncProgress = (progress) => {
+    }), progressBarInner = progressContainer.createDiv({ cls: "engram-progress-bar-outer" }).createDiv({ cls: "engram-progress-bar-inner" });
+    this.plugin.syncEngine.onSyncProgress = (progress) => {
       if (progress.phase === "complete") {
-        progressContainer.style.display = "none";
+        progressContainer.removeClass("is-active");
         return;
       }
-      progressContainer.style.display = "block";
+      progressContainer.addClass("is-active");
       let pct = progress.total > 0 ? Math.round(progress.current / progress.total * 100) : 0, phaseLabel = progress.phase === "deleting" ? "Deleting local files" : progress.phase === "pushing" ? "Pushing notes" : progress.phase === "pulling" ? "Pulling notes" : "Syncing attachments";
       progressLabel.setText(
         `${phaseLabel}... ${progress.current}/${progress.total}${progress.failed > 0 ? ` (${progress.failed} failed)` : ""}`
@@ -2319,10 +2295,8 @@ var EngramSyncSettingTab = class extends import_obsidian12.PluginSettingTab {
   }
   /** Render connection status indicator at the top of settings. */
   renderStatus(containerEl) {
-    let statusEl = containerEl.createDiv({ cls: "engram-status-bar" }), status = this.plugin.syncEngine.getStatus(), live = this.plugin.isLiveConnected(), dotColor, label;
-    status.state === "offline" ? (dotColor = "#e03e3e", label = "Disconnected") : status.state === "error" ? (dotColor = "#e03e3e", label = `Error: ${status.error || "unknown"}`) : live ? (dotColor = "#28a745", label = "Connected \u2014 live sync active") : this.plugin.settings.apiUrl && (this.plugin.settings.apiKey || this.plugin.settings.refreshToken) ? (dotColor = "#e5a100", label = "Connected \u2014 polling") : (dotColor = "#888", label = "Not configured"), statusEl.addClasses(["engram-status-container"]);
-    let dot = statusEl.createSpan({ cls: "engram-status-dot" });
-    if (dot.style.backgroundColor = dotColor, statusEl.createSpan({ text: label }), status.lastSync) {
+    let statusEl = containerEl.createDiv({ cls: "engram-status-bar" }), status = this.plugin.syncEngine.getStatus(), live = this.plugin.isLiveConnected(), dotState, label;
+    if (status.state === "offline" ? (dotState = "is-error", label = "Disconnected") : status.state === "error" ? (dotState = "is-error", label = `Error: ${status.error || "unknown"}`) : live ? (dotState = "is-connected", label = "Connected \u2014 live sync active") : this.plugin.settings.apiUrl && (this.plugin.settings.apiKey || this.plugin.settings.refreshToken) ? (dotState = "is-polling", label = "Connected \u2014 polling") : (dotState = "is-idle", label = "Not configured"), statusEl.addClasses(["engram-status-container"]), statusEl.createSpan({ cls: `engram-status-dot ${dotState}` }), statusEl.createSpan({ text: label }), status.lastSync) {
       let date = new Date(status.lastSync);
       statusEl.createDiv({ cls: "engram-status-time" }).setText(`Last sync: ${date.toLocaleString()}`);
     }
@@ -3862,28 +3836,19 @@ var import_obsidian14 = require("obsidian"), ACTION_ICONS = {
       entries.length === 0 ? "No sync activity this session." : `Showing ${entries.length} entries${errorCount > 0 ? ` (${errorCount} errors)` : ""}`
     ), entries.length === 0) return;
     let list = contentEl.createEl("div", { cls: "engram-sync-log-list" });
-    list.style.maxHeight = "400px", list.style.overflowY = "auto", list.style.fontFamily = "var(--font-monospace)", list.style.fontSize = "0.85em";
     for (let entry of entries) {
-      let row = list.createEl("div", { cls: "engram-sync-log-entry" });
-      row.style.padding = "2px 0";
-      let time = entry.timestamp.toLocaleTimeString([], {
+      let row = list.createEl("div", { cls: "engram-sync-log-entry" }), time = entry.timestamp.toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit"
       }), icon = (_a = ACTION_ICONS[entry.action]) != null ? _a : "?", status = entry.result === "ok" ? "\u2713" : entry.result === "error" ? "\u2717" : "\u23ED", line = `${time}  ${icon} ${entry.action.padEnd(8)} ${entry.path}  ${status}`, span = row.createEl("span", { text: line });
-      if (entry.result === "error" && (span.style.color = "var(--text-error)", entry.error)) {
-        let errLine = row.createEl("div", {
-          text: `         \u2514 ${entry.error}`,
-          cls: "engram-sync-log-error"
-        });
-        errLine.style.color = "var(--text-error)", errLine.style.opacity = "0.8";
-      }
-      if (entry.details) {
-        let detailLine = row.createEl("div", {
-          text: `         \u2514 ${entry.details}`
-        });
-        detailLine.style.opacity = "0.7";
-      }
+      entry.result === "error" && (span.addClass("engram-sync-log-entry-error"), entry.error && row.createEl("div", {
+        text: `         \u2514 ${entry.error}`,
+        cls: "engram-sync-log-error"
+      })), entry.details && row.createEl("div", {
+        text: `         \u2514 ${entry.details}`,
+        cls: "engram-sync-log-detail"
+      });
     }
   }
   onClose() {

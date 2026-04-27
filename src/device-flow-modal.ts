@@ -81,15 +81,10 @@ export class DeviceFlowModal extends Modal {
 		contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
 		contentEl.createEl("p", { text: "Your code:" });
 
-		const codeEl = contentEl.createEl("code", { text: resp.user_code });
-		codeEl.style.display = "block";
-		codeEl.style.fontSize = "2rem";
-		codeEl.style.fontFamily = "monospace";
-		codeEl.style.textAlign = "center";
-		codeEl.style.padding = "1rem";
-		codeEl.style.margin = "1rem 0";
-		codeEl.style.letterSpacing = "0.15em";
-		codeEl.style.cursor = "pointer";
+		const codeEl = contentEl.createEl("code", {
+			text: resp.user_code,
+			cls: "engram-device-code",
+		});
 		codeEl.title = "Click to copy";
 		codeEl.addEventListener("click", () => {
 			navigator.clipboard.writeText(resp.user_code);
@@ -100,11 +95,12 @@ export class DeviceFlowModal extends Modal {
 			text: "A browser window has opened. Sign in and enter this code to link your vault.",
 		});
 
-		const waitEl = contentEl.createEl("p", { text: "Waiting for authorization..." });
-		waitEl.style.fontStyle = "italic";
+		contentEl.createEl("p", {
+			text: "Waiting for authorization...",
+			cls: "engram-device-waiting",
+		});
 
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = "1rem";
+		const btnContainer = contentEl.createDiv({ cls: "engram-device-buttons" });
 		const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
 		cancelBtn.addEventListener("click", () => this.close());
 
@@ -164,8 +160,7 @@ export class DeviceFlowModal extends Modal {
 		contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
 		contentEl.createEl("p", { text: "Code expired. Please try again." });
 
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = "1rem";
+		const btnContainer = contentEl.createDiv({ cls: "engram-device-buttons" });
 
 		const retryBtn = btnContainer.createEl("button", { text: "Try Again", cls: "mod-cta" });
 		retryBtn.addEventListener("click", () => {
@@ -174,7 +169,6 @@ export class DeviceFlowModal extends Modal {
 		});
 
 		const closeBtn = btnContainer.createEl("button", { text: "Close" });
-		closeBtn.style.marginLeft = "8px";
 		closeBtn.addEventListener("click", () => this.close());
 	}
 }

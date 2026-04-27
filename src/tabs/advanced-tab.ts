@@ -75,14 +75,9 @@ export function renderAdvancedTab(ctx: TabContext): void {
 					await plugin.saveSettings();
 				});
 			text.inputEl.rows = 6;
-			text.inputEl.style.width = "100%";
-			text.inputEl.style.boxSizing = "border-box";
-			text.inputEl.style.resize = "none";
-			text.inputEl.style.overflow = "auto";
+			text.inputEl.addClass("engram-ignore-textarea");
 		});
-	ignoreSetting.settingEl.style.flexDirection = "column";
-	ignoreSetting.settingEl.style.alignItems = "stretch";
-	ignoreSetting.settingEl.style.gap = "8px";
+	ignoreSetting.settingEl.addClass("engram-ignore-setting");
 
 	// ── Diagnostics ──
 	new Setting(containerEl).setName("Diagnostics").setHeading();

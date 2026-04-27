@@ -40,14 +40,9 @@ export class SyncLogModal extends Modal {
 		if (entries.length === 0) return;
 
 		const list = contentEl.createEl("div", { cls: "engram-sync-log-list" });
-		list.style.maxHeight = "400px";
-		list.style.overflowY = "auto";
-		list.style.fontFamily = "var(--font-monospace)";
-		list.style.fontSize = "0.85em";
 
 		for (const entry of entries) {
 			const row = list.createEl("div", { cls: "engram-sync-log-entry" });
-			row.style.padding = "2px 0";
 
 			const time = entry.timestamp.toLocaleTimeString([], {
 				hour: "2-digit",
@@ -61,22 +56,20 @@ export class SyncLogModal extends Modal {
 			const span = row.createEl("span", { text: line });
 
 			if (entry.result === "error") {
-				span.style.color = "var(--text-error)";
+				span.addClass("engram-sync-log-entry-error");
 				if (entry.error) {
-					const errLine = row.createEl("div", {
+					row.createEl("div", {
 						text: `         └ ${entry.error}`,
 						cls: "engram-sync-log-error",
 					});
-					errLine.style.color = "var(--text-error)";
-					errLine.style.opacity = "0.8";
 				}
 			}
 
 			if (entry.details) {
-				const detailLine = row.createEl("div", {
+				row.createEl("div", {
 					text: `         └ ${entry.details}`,
+					cls: "engram-sync-log-detail",
 				});
-				detailLine.style.opacity = "0.7";
 			}
 		}
 	}
