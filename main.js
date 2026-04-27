@@ -6019,8 +6019,8 @@ var SyncLogModal = class extends import_obsidian14.Modal {
 
 // src/main.ts
 async function generateClientId(app) {
-  var _a, _b;
-  const basePath = (_b = (_a = app.vault.adapter).getBasePath) == null ? void 0 : _b.call(_a);
+  const adapter = app.vault.adapter;
+  const basePath = adapter instanceof import_obsidian15.FileSystemAdapter ? adapter.getBasePath() : void 0;
   const input = basePath || app.vault.getName();
   const encoder = new TextEncoder();
   const data = encoder.encode(input);

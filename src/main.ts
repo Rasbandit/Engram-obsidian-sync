@@ -4,7 +4,7 @@
  * Pushes vault changes to Engram for indexing/search.
  * Pulls MCP-created notes and changes from other devices.
  */
-import { Notice, Platform, Plugin, requestUrl } from "obsidian";
+import { FileSystemAdapter, Notice, Platform, Plugin, requestUrl } from "obsidian";
 import { EngramApi } from "./api";
 import { ApiKeyAuth, type AuthProvider, OAuthAuth, type RefreshFn } from "./auth";
 import { NoteChannel } from "./channel";
@@ -31,8 +31,8 @@ import type { QueueEntry } from "./types";
 /** Generate a stable client ID for vault registration.
  *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
 async function generateClientId(app: import("obsidian").App): Promise<string> {
-	// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal API not in type definitions
-	const basePath = (app.vault.adapter as any).getBasePath?.() as string | undefined;
+	const adapter = app.vault.adapter;
+	const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined;
 	const input = basePath || app.vault.getName();
 	const encoder = new TextEncoder();
 	const data = encoder.encode(input);
