@@ -528,5 +528,67 @@ describe("EngramApi", () => {
 			const opts = mockRequestUrl.mock.calls[0][0] as any;
 			expect(opts.headers.Authorization).toBe(`Bearer ${TEST_KEY}`);
 		});
+
+		test("on 401, invalidates access token and retries once with refreshed token", async () => {
+			let callCount = 0;
+			const invalidate = mock(() => {});
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve(`token-${++callCount}`)),
+				getVaultId: mock(() => null),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+				invalidateAccessToken: invalidate,
+			};
+			api.setAuthProvider(provider);
+
+			mockRequestUrl.mockRejectedValueOnce({ status: 401 }).mockResolvedValueOnce({
+				status: 200,
+				json: { user: { id: 1, email: "test@example.com" } },
+			} as any);
+
+			const result = await api.getMe();
+			expect(result.id).toBe(1);
+			expect(invalidate).toHaveBeenCalledTimes(1);
+			expect(mockRequestUrl).toHaveBeenCalledTimes(2);
+			const firstAuth = (mockRequestUrl.mock.calls[0][0] as any).headers.Authorization;
+			const secondAuth = (mockRequestUrl.mock.calls[1][0] as any).headers.Authorization;
+			expect(firstAuth).toBe("Bearer token-1");
+			expect(secondAuth).toBe("Bearer token-2");
+		});
+
+		test("does not retry on 401 if provider has no invalidateAccessToken (e.g. API key)", async () => {
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve("static-key")),
+				getVaultId: mock(() => null),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+			};
+			api.setAuthProvider(provider);
+
+			mockRequestUrl.mockRejectedValueOnce({ status: 401 });
+
+			await expect(api.getMe()).rejects.toMatchObject({ status: 401 });
+			expect(mockRequestUrl).toHaveBeenCalledTimes(1);
+		});
+
+		test("does not infinite-loop if 401 persists after refresh", async () => {
+			const invalidate = mock(() => {});
+			const provider: AuthProvider = {
+				getToken: mock(() => Promise.resolve("t")),
+				getVaultId: mock(() => null),
+				isAuthenticated: mock(() => true),
+				signOut: mock(() => {}),
+				invalidateAccessToken: invalidate,
+			};
+			api.setAuthProvider(provider);
+
+			mockRequestUrl
+				.mockRejectedValueOnce({ status: 401 })
+				.mockRejectedValueOnce({ status: 401 });
+
+			await expect(api.getMe()).rejects.toMatchObject({ status: 401 });
+			expect(mockRequestUrl).toHaveBeenCalledTimes(2);
+			expect(invalidate).toHaveBeenCalledTimes(1);
+		});
 	});
 });

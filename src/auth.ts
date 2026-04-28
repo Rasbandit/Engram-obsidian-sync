@@ -8,6 +8,12 @@ export interface AuthProvider {
 	getVaultId(): string | null;
 	isAuthenticated(): boolean;
 	signOut(): void;
+	/**
+	 * Drop any cached access token so the next getToken() forces a refresh.
+	 * Optional — providers without a refreshable access token (e.g. static API keys)
+	 * leave this undefined; callers should treat its absence as "no recovery possible".
+	 */
+	invalidateAccessToken?(): void;
 }
 
 export type RefreshFn = (refreshToken: string) => Promise<{
@@ -118,6 +124,11 @@ export class OAuthAuth implements AuthProvider {
 
 	getRefreshToken(): string {
 		return this.refreshToken;
+	}
+
+	invalidateAccessToken(): void {
+		this.accessToken = null;
+		this.expiresAt = 0;
 	}
 
 	isAuthenticated(): boolean {

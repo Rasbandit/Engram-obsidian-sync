@@ -69,6 +69,27 @@ export class EngramApi {
 		path: string,
 		body?: unknown,
 	): Promise<RequestUrlResponse> {
+		try {
+			return await this.sendRequest(method, path, body);
+		} catch (e) {
+			// On 401, the cached access token may be stale (e.g. server-side TTL
+			// shorter than the expires_in we trusted). Invalidate and retry once
+			// with a freshly-refreshed token. Static-key providers have no
+			// recovery path, so retry only when invalidateAccessToken is supported.
+			const status = (e as { status?: number }).status;
+			if (status === 401 && this.authProvider?.invalidateAccessToken) {
+				this.authProvider.invalidateAccessToken();
+				return this.sendRequest(method, path, body);
+			}
+			throw e;
+		}
+	}
+
+	private async sendRequest(
+		method: string,
+		path: string,
+		body?: unknown,
+	): Promise<RequestUrlResponse> {
 		const token = await this.getAuthToken();
 		const headers: Record<string, string> = {
 			Authorization: `Bearer ${token}`,
