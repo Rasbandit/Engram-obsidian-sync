@@ -757,6 +757,16 @@ var import_obsidian = require("obsidian"), EngramApi = class _EngramApi {
     this.baseUrl = _EngramApi.normalizeBaseUrl(baseUrl), this.apiKey = apiKey;
   }
   async request(method, path, body) {
+    var _a;
+    try {
+      return await this.sendRequest(method, path, body);
+    } catch (e) {
+      if (e.status === 401 && ((_a = this.authProvider) != null && _a.invalidateAccessToken))
+        return this.authProvider.invalidateAccessToken(), this.sendRequest(method, path, body);
+      throw e;
+    }
+  }
+  async sendRequest(method, path, body) {
     let headers = {
       Authorization: `Bearer ${await this.getAuthToken()}`
     };
@@ -960,6 +970,9 @@ var ApiKeyAuth = class {
   }
   getRefreshToken() {
     return this.refreshToken;
+  }
+  invalidateAccessToken() {
+    this.accessToken = null, this.expiresAt = 0;
   }
   isAuthenticated() {
     return this.authenticated;

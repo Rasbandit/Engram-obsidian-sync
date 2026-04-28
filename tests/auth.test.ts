@@ -190,6 +190,28 @@ describe("OAuthAuth", () => {
 		expect(onRotated).not.toHaveBeenCalled();
 	});
 
+	it("invalidateAccessToken forces next getToken to refresh", async () => {
+		mockRefreshFn
+			.mockResolvedValueOnce({
+				access_token: "jwt_first",
+				refresh_token: "engram_rt_second",
+				expires_in: 3600,
+			})
+			.mockResolvedValueOnce({
+				access_token: "jwt_second",
+				refresh_token: "engram_rt_third",
+				expires_in: 3600,
+			});
+
+		const auth = new OAuthAuth("engram_rt_old", "vault-1", "user@test.com", mockRefreshFn);
+		expect(await auth.getToken()).toBe("jwt_first");
+
+		auth.invalidateAccessToken();
+
+		expect(await auth.getToken()).toBe("jwt_second");
+		expect(mockRefreshFn).toHaveBeenCalledTimes(2);
+	});
+
 	it("retries refresh after a failed attempt (not permanently stuck)", async () => {
 		mockRefreshFn.mockRejectedValueOnce(new Error("network error")).mockResolvedValueOnce({
 			access_token: "jwt_recovered",
