@@ -1,12 +1,18 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
+
+# Skip entirely in CI — pushes from github-actions (e.g. RC tag creation) don't
+# need local checks and would fail under dash anyway.
+if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+  exit 0
+fi
 
 # 1. Tests must pass.
 bun test
 
 # 2. Refuse to push branches whose package.json/manifest.json version still
 #    matches origin/main. Bypass with: git push --no-verify
-current_branch="$(git rev-parse --abbrev-ref HEAD)"
+current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$current_branch" = "main" ] || [ "$current_branch" = "HEAD" ]; then
   exit 0
 fi
@@ -21,13 +27,13 @@ extract_version() {
 
 extract_main_version() {
   git show "origin/main:$1" 2>/dev/null \
-    | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{console.log(JSON.parse(s).version)}catch{}})" \
+    | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{console.log(JSON.parse(s).version)}catch(_){}})" \
     || true
 }
 
 for file in package.json manifest.json; do
-  branch_v="$(extract_version "$file")"
-  main_v="$(extract_main_version "$file")"
+  branch_v=$(extract_version "$file")
+  main_v=$(extract_main_version "$file")
   if [ -n "$branch_v" ] && [ -n "$main_v" ] && [ "$branch_v" = "$main_v" ]; then
     cat >&2 <<EOF
 ✖ pre-push: $file version ($branch_v) has not been bumped from main.
