@@ -85,6 +85,12 @@ export async function requestUrl(_opts: any): Promise<any> {
 	return { status: 200, json: {} };
 }
 
+export class FileSystemAdapter {
+	getBasePath(): string {
+		return "/mock/vault";
+	}
+}
+
 export class Modal {
 	app: any;
 	contentEl: any = {

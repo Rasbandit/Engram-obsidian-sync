@@ -50,70 +50,31 @@ export class SyncProgressModal extends Modal {
 			text: "Preparing...",
 			cls: "engram-progress-phase",
 		});
-		this.phaseEl.style.fontWeight = "bold";
-		this.phaseEl.style.margin = "8px 0 4px 0";
 
-		this.countEl = contentEl.createEl("p", {
-			text: "",
-			cls: "engram-progress-count",
-		});
-		this.countEl.style.margin = "0 0 2px 0";
-		this.countEl.style.fontFamily = "var(--font-monospace)";
-		this.countEl.style.fontSize = "0.9em";
-
-		this.pathEl = contentEl.createEl("p", {
-			text: "",
-			cls: "engram-progress-path",
-		});
-		this.pathEl.style.margin = "0 0 8px 0";
-		this.pathEl.style.fontFamily = "var(--font-monospace)";
-		this.pathEl.style.fontSize = "0.8em";
-		this.pathEl.style.opacity = "0.6";
-		this.pathEl.style.overflow = "hidden";
-		this.pathEl.style.textOverflow = "ellipsis";
-		this.pathEl.style.whiteSpace = "nowrap";
+		this.countEl = contentEl.createEl("p", { text: "", cls: "engram-progress-count" });
+		this.pathEl = contentEl.createEl("p", { text: "", cls: "engram-progress-path" });
 
 		const barOuter = contentEl.createDiv({ cls: "engram-progress-bar-outer" });
-		barOuter.style.height = "8px";
-		barOuter.style.background = "var(--background-modifier-border)";
-		barOuter.style.borderRadius = "4px";
-		barOuter.style.overflow = "hidden";
-
 		this.barInner = barOuter.createDiv({ cls: "engram-progress-bar-inner" });
-		this.barInner.style.height = "100%";
-		this.barInner.style.width = "0%";
-		this.barInner.style.background = "var(--interactive-accent)";
-		this.barInner.style.transition = "width 0.15s ease";
 
 		this.failedEl = contentEl.createEl("p", {
 			text: "",
-			cls: "engram-progress-failed",
+			cls: "engram-progress-failed engram-hidden",
 		});
-		this.failedEl.style.color = "var(--text-error)";
-		this.failedEl.style.margin = "8px 0 0 0";
-		this.failedEl.style.display = "none";
 
 		this.summaryEl = contentEl.createEl("p", {
 			text: "",
-			cls: "engram-progress-summary",
+			cls: "engram-progress-summary engram-hidden",
 		});
-		this.summaryEl.style.margin = "12px 0 0 0";
-		this.summaryEl.style.display = "none";
 
 		const buttons = contentEl.createDiv({ cls: "engram-progress-buttons" });
-		buttons.style.display = "flex";
-		buttons.style.justifyContent = "flex-end";
-		buttons.style.gap = "8px";
-		buttons.style.marginTop = "16px";
-
 		this.bgBtn = buttons.createEl("button", { text: "Run in Background" });
 		this.bgBtn.addEventListener("click", () => this.close());
 
 		this.closeBtn = buttons.createEl("button", {
 			text: "Done",
-			cls: "mod-cta",
+			cls: "mod-cta engram-hidden",
 		});
-		this.closeBtn.style.display = "none";
 		this.closeBtn.addEventListener("click", () => this.close());
 
 		// Start the display tick loop
@@ -187,21 +148,21 @@ export class SyncProgressModal extends Modal {
 			this.countEl.setText("");
 			this.pathEl.setText("");
 			this.barInner.style.width = "100%";
-			this.barInner.style.background = "var(--text-success, var(--interactive-accent))";
-			this.bgBtn.style.display = "none";
-			this.closeBtn.style.display = "block";
+			this.barInner.addClass("is-complete");
+			this.bgBtn.addClass("engram-hidden");
+			this.closeBtn.removeClass("engram-hidden");
 
 			const parts: string[] = [];
 			if (progress.current > 0) parts.push(`${progress.current} synced`);
 			if (progress.failed > 0) parts.push(`${progress.failed} failed`);
 			this.summaryEl.setText(parts.join(", "));
-			this.summaryEl.style.display = "block";
+			this.summaryEl.removeClass("engram-hidden");
 
 			if (progress.failed > 0) {
 				this.failedEl.setText(
 					`${progress.failed} failed — run "Engram: Show sync log" for details`,
 				);
-				this.failedEl.style.display = "block";
+				this.failedEl.removeClass("engram-hidden");
 			}
 			return;
 		}
@@ -210,13 +171,13 @@ export class SyncProgressModal extends Modal {
 		this.countEl.setText(`${progress.current} / ${progress.total}`);
 		this.pathEl.setText(progress.currentPath ?? "");
 		this.barInner.style.width = `${pct}%`;
-		this.barInner.style.background = "var(--interactive-accent)";
+		this.barInner.removeClass("is-complete");
 
 		if (progress.failed > 0) {
 			this.failedEl.setText(`${progress.failed} failed so far`);
-			this.failedEl.style.display = "block";
+			this.failedEl.removeClass("engram-hidden");
 		} else {
-			this.failedEl.style.display = "none";
+			this.failedEl.addClass("engram-hidden");
 		}
 	}
 

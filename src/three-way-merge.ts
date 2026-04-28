@@ -8,10 +8,9 @@
  * 3. If no overlaps → apply both edit sets to produce merged output
  * 4. If overlaps → report conflict regions
  */
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const DiffMatchPatch = require("diff-match-patch");
+import { diff_match_patch } from "diff-match-patch";
 
-const dmp = new DiffMatchPatch() as InstanceType<typeof import("diff-match-patch")>;
+const dmp = new diff_match_patch();
 
 export interface ConflictRegion {
 	/** Character offset in base where the conflict starts. */

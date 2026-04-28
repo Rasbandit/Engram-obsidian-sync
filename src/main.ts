@@ -4,7 +4,7 @@
  * Pushes vault changes to Engram for indexing/search.
  * Pulls MCP-created notes and changes from other devices.
  */
-import { Notice, Platform, Plugin } from "obsidian";
+import { FileSystemAdapter, Notice, Platform, Plugin, requestUrl } from "obsidian";
 import { EngramApi } from "./api";
 import { ApiKeyAuth, type AuthProvider, OAuthAuth, type RefreshFn } from "./auth";
 import { NoteChannel } from "./channel";
@@ -31,8 +31,8 @@ import type { QueueEntry } from "./types";
 /** Generate a stable client ID for vault registration.
  *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
 async function generateClientId(app: import("obsidian").App): Promise<string> {
-	// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal API not in type definitions
-	const basePath = (app.vault.adapter as any).getBasePath?.() as string | undefined;
+	const adapter = app.vault.adapter;
+	const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined;
 	const input = basePath || app.vault.getName();
 	const encoder = new TextEncoder();
 	const data = encoder.encode(input);
@@ -159,12 +159,12 @@ export default class EngramSyncPlugin extends Plugin {
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
-				this.syncEngine.handleDelete(file);
+				void this.syncEngine.handleDelete(file);
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
-				this.syncEngine.handleRename(file, oldPath);
+				void this.syncEngine.handleRename(file, oldPath);
 			}),
 		);
 
@@ -172,7 +172,7 @@ export default class EngramSyncPlugin extends Plugin {
 		this.registerDomEvent(document, "visibilitychange", () => {
 			if (document.visibilityState === "hidden") {
 				rlog().flush();
-				this.savePluginData(this.syncEngine.getLastSync());
+				void this.savePluginData(this.syncEngine.getLastSync());
 				this.baseStore?.save();
 			}
 		});
@@ -347,7 +347,7 @@ export default class EngramSyncPlugin extends Plugin {
 		devLog().log("lifecycle", "plugin unloading");
 		rlog().info("lifecycle", "Plugin unloading");
 		// Best-effort save before teardown — hashes must be exported before destroy
-		this.savePluginData(this.syncEngine.getLastSync());
+		void this.savePluginData(this.syncEngine.getLastSync());
 		this.baseStore?.prune();
 		this.baseStore?.save();
 		this.syncEngine?.destroy();
@@ -448,13 +448,17 @@ export default class EngramSyncPlugin extends Plugin {
 			const refreshFn: RefreshFn = async (token) => {
 				const base = this.settings.apiUrl.replace(/\/+$/, "");
 				const apiUrl = base.endsWith("/api") ? base : `${base}/api`;
-				const resp = await fetch(`${apiUrl}/auth/token/refresh`, {
+				const resp = await requestUrl({
+					url: `${apiUrl}/auth/token/refresh`,
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ refresh_token: token }),
+					throw: false,
 				});
-				if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
-				return resp.json();
+				if (resp.status < 200 || resp.status >= 300) {
+					throw new Error(`Refresh failed: ${resp.status}`);
+				}
+				return resp.json;
 			};
 			return new OAuthAuth(
 				this.settings.refreshToken,
@@ -535,7 +539,7 @@ export default class EngramSyncPlugin extends Plugin {
 				);
 
 				channel.onEvent = (event) => {
-					this.syncEngine.handleStreamEvent(event);
+					void this.syncEngine.handleStreamEvent(event);
 				};
 
 				channel.onStatusChange = (connected) => {
@@ -560,7 +564,7 @@ export default class EngramSyncPlugin extends Plugin {
 					this.settings.vaultId = null;
 					this.api.setVaultId(null);
 					// Use savePluginData instead of saveSettings to avoid triggering re-registration
-					this.savePluginData(this.syncEngine.getLastSync());
+					void this.savePluginData(this.syncEngine.getLastSync());
 					this.noteStream?.disconnect();
 				};
 

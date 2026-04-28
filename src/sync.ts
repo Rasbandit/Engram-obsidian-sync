@@ -978,26 +978,13 @@ export class SyncEngine {
 			const attachCount = attachChanges.length;
 			const total = noteCount + attachCount;
 
-			// biome-ignore lint/suspicious/noConsole: temporary debug
-			console.log(
-				`[engram-debug] pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
+			devLog().log(
+				"pull",
+				`pullAll: server returned ${noteResp.changes.length} notes, ${attachResp.changes.length} attachments`,
 			);
-			// biome-ignore lint/suspicious/noConsole: temporary debug
-			console.log(
-				`[engram-debug] pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`,
-			);
-			// Show first 5 notes to check deleted flag + content presence
-			for (const n of noteResp.changes.slice(0, 5)) {
-				// biome-ignore lint/suspicious/noConsole: diagnostic
-				console.log(
-					`[engram-debug] sample note: path=${n.path} deleted=${n.deleted} hasContent=${n.content != null} contentLen=${n.content?.length ?? 0}`,
-				);
-			}
-			// Count how many are deleted
-			const deletedCount = noteResp.changes.filter((n) => n.deleted).length;
-			// biome-ignore lint/suspicious/noConsole: diagnostic
-			console.log(
-				`[engram-debug] pullAll: ${deletedCount}/${noteResp.changes.length} notes have deleted=true`,
+			devLog().log(
+				"pull",
+				`pullAll: after filter: ${noteCount} notes, ${attachCount} attachments to apply (wipe=${wipe})`,
 			);
 
 			this.onSyncProgress?.({ phase: "pulling", current: 0, total, failed: 0 });
@@ -1094,13 +1081,9 @@ export class SyncEngine {
 			this.lastSync = serverTime;
 			await this.saveData({ lastSync: this.lastSync });
 
-			// biome-ignore lint/suspicious/noConsole: temporary debug
-			console.log(
-				`[engram-debug] pullAll DONE: applied=${applied}, failed=${failed}, total=${total}`,
-			);
 			devLog().log(
 				"pull",
-				`pullAll: done — applied=${applied}, failed=${failed}, lastSync=${this.lastSync}`,
+				`pullAll: done — applied=${applied}, failed=${failed}, total=${total}, lastSync=${this.lastSync}`,
 			);
 			rlog().info("pull", `PullAll done — applied=${applied}, failed=${failed}`);
 			return applied;
@@ -1207,16 +1190,14 @@ export class SyncEngine {
 	 *  When forceOverwrite is true, skip conflict detection and always apply. */
 	async applyChange(change: NoteChange, forceOverwrite = false): Promise<boolean> {
 		if (this.shouldIgnore(change.path)) {
-			// biome-ignore lint/suspicious/noConsole: diagnostic
-			console.log(`[engram-debug] applyChange SKIP (ignored): ${change.path}`);
+			devLog().log("pull", `applyChange SKIP (ignored): ${change.path}`);
 			return false;
 		}
 
 		const normalized = normalizePath(change.path);
 
 		if (change.deleted) {
-			// biome-ignore lint/suspicious/noConsole: diagnostic
-			console.log(`[engram-debug] applyChange DELETE: ${change.path}`);
+			devLog().log("pull", `applyChange DELETE: ${change.path}`);
 
 			// Delete local file if it exists
 			const existing = this.app.vault.getFileByPath(normalized);
@@ -1415,8 +1396,7 @@ export class SyncEngine {
 				rlog().info("conflict", `Resolved: ${change.path} → keep-remote`);
 			} else if (localContent === change.content) {
 				// Content identical — nothing to do
-				// biome-ignore lint/suspicious/noConsole: diagnostic
-				console.log(`[engram-debug] applyChange SKIP (identical): ${change.path}`);
+				devLog().log("pull", `applyChange SKIP (identical): ${change.path}`);
 				this.syncState.set(normalized, { hash: localHash, version: change.version });
 				if (change.version != null) {
 					this.baseStore?.set(normalized, change.content, change.version);
@@ -1426,9 +1406,9 @@ export class SyncEngine {
 			}
 
 			// Apply remote change (no conflict, or keep-remote chosen)
-			// biome-ignore lint/suspicious/noConsole: diagnostic
-			console.log(
-				`[engram-debug] applyChange OVERWRITE: ${change.path} (len=${change.content.length})`,
+			devLog().log(
+				"pull",
+				`applyChange OVERWRITE: ${change.path} (len=${change.content.length})`,
 			);
 			await this.modifyFile(existing, change.content);
 			this.syncState.set(normalized, {
@@ -1445,15 +1425,15 @@ export class SyncEngine {
 			return true;
 		}
 		// New file — create it
-		// biome-ignore lint/suspicious/noConsole: diagnostic
-		console.log(
-			`[engram-debug] applyChange CREATE: ${normalized} (len=${change.content.length})`,
-		);
+		devLog().log("pull", `applyChange CREATE: ${normalized} (len=${change.content.length})`);
 		try {
 			await this.createFileWithFolders(normalized, change.content);
 		} catch (createErr) {
-			// biome-ignore lint/suspicious/noConsole: diagnostic
-			console.error(`[engram-debug] applyChange CREATE FAILED: ${normalized}`, createErr);
+			rlog().error(
+				"pull",
+				`applyChange CREATE FAILED: ${normalized}`,
+				createErr instanceof Error ? createErr.stack : undefined,
+			);
 			throw createErr;
 		}
 		this.syncState.set(normalized, {

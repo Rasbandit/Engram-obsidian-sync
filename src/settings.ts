@@ -28,33 +28,21 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 
 		// ── Progress bar (hidden until sync is active, persists across tabs) ──
 		const progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" });
-		progressContainer.style.display = "none";
-		progressContainer.style.padding = "12px 0";
 
 		const progressLabel = progressContainer.createEl("p", {
 			text: "Syncing...",
 			cls: "engram-progress-label",
 		});
-		progressLabel.style.margin = "0 0 4px 0";
 
 		const progressBarOuter = progressContainer.createDiv({ cls: "engram-progress-bar-outer" });
-		progressBarOuter.style.height = "6px";
-		progressBarOuter.style.background = "var(--background-modifier-border)";
-		progressBarOuter.style.borderRadius = "3px";
-		progressBarOuter.style.overflow = "hidden";
-
 		const progressBarInner = progressBarOuter.createDiv({ cls: "engram-progress-bar-inner" });
-		progressBarInner.style.height = "100%";
-		progressBarInner.style.width = "0%";
-		progressBarInner.style.background = "var(--interactive-accent)";
-		progressBarInner.style.transition = "width 0.2s ease";
 
 		this.plugin.syncEngine.onSyncProgress = (progress) => {
 			if (progress.phase === "complete") {
-				progressContainer.style.display = "none";
+				progressContainer.removeClass("is-active");
 				return;
 			}
-			progressContainer.style.display = "block";
+			progressContainer.addClass("is-active");
 			const pct =
 				progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 			const phaseLabel =
@@ -150,33 +138,32 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		const status = this.plugin.syncEngine.getStatus();
 		const live = this.plugin.isLiveConnected();
 
-		let dotColor: string;
+		let dotState: "is-error" | "is-connected" | "is-polling" | "is-idle";
 		let label: string;
 
 		if (status.state === "offline") {
-			dotColor = "#e03e3e";
+			dotState = "is-error";
 			label = "Disconnected";
 		} else if (status.state === "error") {
-			dotColor = "#e03e3e";
+			dotState = "is-error";
 			label = `Error: ${status.error || "unknown"}`;
 		} else if (live) {
-			dotColor = "#28a745";
+			dotState = "is-connected";
 			label = "Connected — live sync active";
 		} else if (
 			this.plugin.settings.apiUrl &&
 			(this.plugin.settings.apiKey || this.plugin.settings.refreshToken)
 		) {
-			dotColor = "#e5a100";
+			dotState = "is-polling";
 			label = "Connected — polling";
 		} else {
-			dotColor = "#888";
+			dotState = "is-idle";
 			label = "Not configured";
 		}
 
 		statusEl.addClasses(["engram-status-container"]);
 
-		const dot = statusEl.createSpan({ cls: "engram-status-dot" });
-		dot.style.backgroundColor = dotColor;
+		statusEl.createSpan({ cls: `engram-status-dot ${dotState}` });
 
 		statusEl.createSpan({ text: label });
 

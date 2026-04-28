@@ -56,9 +56,8 @@ export function renderAccountTab(ctx: TabContext): void {
 					.onClick(() => startDeviceFlow()),
 			);
 
-		const details = containerEl.createEl("details");
-		details.style.marginTop = "8px";
-		details.createEl("summary", { text: "Use API key instead" }).style.cursor = "pointer";
+		const details = containerEl.createEl("details", { cls: "engram-api-key-toggle" });
+		details.createEl("summary", { text: "Use API key instead" });
 
 		new Setting(details)
 			.setName("API Key")
@@ -71,7 +70,7 @@ export function renderAccountTab(ctx: TabContext): void {
 						await plugin.saveSettings();
 					});
 				text.inputEl.type = "password";
-				text.inputEl.style.fontFamily = "monospace";
+				text.inputEl.addClass("engram-api-key-input");
 			});
 	}
 

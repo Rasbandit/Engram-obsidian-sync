@@ -35,6 +35,7 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
+	minifySyntax: prod,
 	outfile: "main.js",
 	define: {
 		"DEV_MODE": prod ? "false" : "true",

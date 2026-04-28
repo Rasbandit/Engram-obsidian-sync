@@ -417,6 +417,116 @@
 	height: 8px;
 	border-radius: 50%;
 	margin-right: 8px;
+	background-color: #888;
+}
+
+.engram-status-dot.is-error {
+	background-color: var(--text-error, #e03e3e);
+}
+
+.engram-status-dot.is-connected {
+	background-color: var(--text-success, #28a745);
+}
+
+.engram-status-dot.is-polling {
+	background-color: var(--text-warning, #e5a100);
+}
+
+.engram-status-dot.is-idle {
+	background-color: var(--text-muted, #888);
+}
+
+.engram-sync-progress {
+	display: none;
+	padding: 12px 0;
+}
+
+.engram-sync-progress.is-active {
+	display: block;
+}
+
+.engram-progress-label {
+	margin: 0 0 4px;
+}
+
+/* ── Device flow modal ───────────────────────────────────────── */
+
+.engram-device-code {
+	display: block;
+	font-size: 2rem;
+	font-family: var(--font-monospace);
+	text-align: center;
+	padding: 1rem;
+	margin: 1rem 0;
+	letter-spacing: 0.15em;
+	cursor: pointer;
+}
+
+.engram-device-waiting {
+	font-style: italic;
+}
+
+.engram-device-buttons {
+	margin-top: 1rem;
+}
+
+.engram-device-buttons button + button {
+	margin-left: 8px;
+}
+
+/* ── Sync log modal ──────────────────────────────────────────── */
+
+.engram-sync-log-list {
+	max-height: 400px;
+	overflow-y: auto;
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+}
+
+.engram-sync-log-entry {
+	padding: 2px 0;
+}
+
+.engram-sync-log-entry-error {
+	color: var(--text-error);
+}
+
+.engram-sync-log-error {
+	color: var(--text-error);
+	opacity: 0.8;
+}
+
+.engram-sync-log-detail {
+	opacity: 0.7;
+}
+
+/* ── Advanced tab ────────────────────────────────────────────── */
+
+.engram-ignore-textarea {
+	width: 100%;
+	box-sizing: border-box;
+	resize: none;
+	overflow: auto;
+}
+
+.engram-ignore-setting {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+}
+
+/* ── Account tab ─────────────────────────────────────────────── */
+
+.engram-api-key-toggle {
+	margin-top: 8px;
+}
+
+.engram-api-key-toggle summary {
+	cursor: pointer;
+}
+
+.engram-api-key-input {
+	font-family: var(--font-monospace);
 }
 
 .engram-status-time {
@@ -457,4 +567,117 @@
 .engram-tab.is-active {
 	color: var(--text-normal);
 	border-bottom-color: var(--interactive-accent);
+}
+
+/* ── Generic helpers ─────────────────────────────────────────── */
+
+.engram-hidden {
+	display: none !important;
+}
+
+/* ── Sync progress modal ─────────────────────────────────────── */
+
+.engram-progress-phase {
+	font-weight: bold;
+	margin: 8px 0 4px;
+}
+
+.engram-progress-count {
+	margin: 0 0 2px;
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+}
+
+.engram-progress-path {
+	margin: 0 0 8px;
+	font-family: var(--font-monospace);
+	font-size: 0.8em;
+	opacity: 0.6;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.engram-progress-bar-outer {
+	height: 8px;
+	background: var(--background-modifier-border);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.engram-progress-bar-inner {
+	height: 100%;
+	width: 0%;
+	background: var(--interactive-accent);
+	transition: width 0.15s ease;
+}
+
+.engram-progress-bar-inner.is-complete {
+	background: var(--text-success, var(--interactive-accent));
+}
+
+.engram-progress-failed {
+	color: var(--text-error);
+	margin: 8px 0 0;
+}
+
+.engram-progress-summary {
+	margin: 12px 0 0;
+}
+
+.engram-progress-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+/* ── Pre-sync + wipe modals ──────────────────────────────────── */
+
+.engram-sync-summary {
+	white-space: pre-wrap;
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	padding: 12px;
+	background: var(--background-secondary);
+	border-radius: 6px;
+}
+
+.engram-sync-warning {
+	color: var(--text-error);
+	margin-top: 8px;
+}
+
+.engram-button-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.engram-button-row-start {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.engram-btn-danger-outline {
+	color: var(--text-error);
+	border-color: var(--text-error);
+}
+
+.engram-btn-danger-solid {
+	background: var(--text-error);
+	color: var(--text-on-accent);
+	border-color: var(--text-error);
+}
+
+.engram-wipe-warning-strong {
+	color: var(--text-error);
+	font-weight: bold;
+	font-size: 1.05em;
+}
+
+.engram-wipe-warning {
+	color: var(--text-error);
 }

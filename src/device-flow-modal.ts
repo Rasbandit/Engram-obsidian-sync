@@ -1,4 +1,4 @@
-import { type App, Modal, Notice } from "obsidian";
+import { type App, Modal, Notice, requestUrl } from "obsidian";
 import type EngramSyncPlugin from "./main";
 
 export interface DeviceFlowResult {
@@ -60,13 +60,17 @@ export class DeviceFlowModal extends Modal {
 	}> {
 		const baseUrl = this.plugin.settings.apiUrl.replace(/\/+$/, "");
 		const apiUrl = baseUrl.endsWith("/api") ? baseUrl : `${baseUrl}/api`;
-		const resp = await fetch(`${apiUrl}/auth/device`, {
+		const resp = await requestUrl({
+			url: `${apiUrl}/auth/device`,
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ client_id: this.plugin.settings.clientId }),
+			throw: false,
 		});
-		if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-		return resp.json();
+		if (resp.status < 200 || resp.status >= 300) {
+			throw new Error(`HTTP ${resp.status}`);
+		}
+		return resp.json;
 	}
 
 	private renderCodeScreen(
@@ -77,18 +81,13 @@ export class DeviceFlowModal extends Modal {
 		contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
 		contentEl.createEl("p", { text: "Your code:" });
 
-		const codeEl = contentEl.createEl("code", { text: resp.user_code });
-		codeEl.style.display = "block";
-		codeEl.style.fontSize = "2rem";
-		codeEl.style.fontFamily = "monospace";
-		codeEl.style.textAlign = "center";
-		codeEl.style.padding = "1rem";
-		codeEl.style.margin = "1rem 0";
-		codeEl.style.letterSpacing = "0.15em";
-		codeEl.style.cursor = "pointer";
+		const codeEl = contentEl.createEl("code", {
+			text: resp.user_code,
+			cls: "engram-device-code",
+		});
 		codeEl.title = "Click to copy";
 		codeEl.addEventListener("click", () => {
-			navigator.clipboard.writeText(resp.user_code);
+			void navigator.clipboard.writeText(resp.user_code);
 			new Notice("Code copied!");
 		});
 
@@ -96,11 +95,12 @@ export class DeviceFlowModal extends Modal {
 			text: "A browser window has opened. Sign in and enter this code to link your vault.",
 		});
 
-		const waitEl = contentEl.createEl("p", { text: "Waiting for authorization..." });
-		waitEl.style.fontStyle = "italic";
+		contentEl.createEl("p", {
+			text: "Waiting for authorization...",
+			cls: "engram-device-waiting",
+		});
 
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = "1rem";
+		const btnContainer = contentEl.createDiv({ cls: "engram-device-buttons" });
 		const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
 		cancelBtn.addEventListener("click", () => this.close());
 
@@ -124,17 +124,19 @@ export class DeviceFlowModal extends Modal {
 			}
 
 			try {
-				const resp = await fetch(`${apiUrl}/auth/device/token`, {
+				const resp = await requestUrl({
+					url: `${apiUrl}/auth/device/token`,
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ device_code: deviceCode }),
+					throw: false,
 				});
 
 				if (resp.status === 428) return;
 
-				if (resp.ok) {
+				if (resp.status >= 200 && resp.status < 300) {
 					if (this.pollInterval) clearInterval(this.pollInterval);
-					const result: DeviceFlowResult = await resp.json();
+					const result = resp.json as DeviceFlowResult;
 					this.resolve(result);
 					this.resolve = () => {};
 					this.close();
@@ -158,8 +160,7 @@ export class DeviceFlowModal extends Modal {
 		contentEl.createEl("h2", { text: "Link Obsidian to Engram" });
 		contentEl.createEl("p", { text: "Code expired. Please try again." });
 
-		const btnContainer = contentEl.createDiv();
-		btnContainer.style.marginTop = "1rem";
+		const btnContainer = contentEl.createDiv({ cls: "engram-device-buttons" });
 
 		const retryBtn = btnContainer.createEl("button", { text: "Try Again", cls: "mod-cta" });
 		retryBtn.addEventListener("click", () => {
@@ -168,7 +169,6 @@ export class DeviceFlowModal extends Modal {
 		});
 
 		const closeBtn = btnContainer.createEl("button", { text: "Close" });
-		closeBtn.style.marginLeft = "8px";
 		closeBtn.addEventListener("click", () => this.close());
 	}
 }

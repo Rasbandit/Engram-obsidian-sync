@@ -49,33 +49,19 @@ export class PreSyncModal extends Modal {
 
 		contentEl.createEl("h2", { text: "Sync Preview" });
 
-		const summary = contentEl.createEl("pre", {
+		contentEl.createEl("pre", {
 			text: formatPlanSummary(this.plan),
 			cls: "engram-sync-summary",
 		});
-		summary.style.whiteSpace = "pre-wrap";
-		summary.style.fontFamily = "var(--font-monospace)";
-		summary.style.fontSize = "0.9em";
-		summary.style.padding = "12px";
-		summary.style.background = "var(--background-secondary)";
-		summary.style.borderRadius = "6px";
 
 		if (this.plan.toDeleteLocal.length > 0) {
-			const warn = contentEl.createEl("p", {
+			contentEl.createEl("p", {
 				cls: "engram-sync-warning",
+				text: `${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`,
 			});
-			warn.style.color = "var(--text-error)";
-			warn.style.marginTop = "8px";
-			warn.setText(
-				`${this.plan.toDeleteLocal.length} notes deleted on server will be removed locally.`,
-			);
 		}
 
-		const buttons = contentEl.createDiv({ cls: "engram-sync-buttons" });
-		buttons.style.display = "flex";
-		buttons.style.justifyContent = "flex-end";
-		buttons.style.gap = "8px";
-		buttons.style.marginTop = "16px";
+		const buttons = contentEl.createDiv({ cls: "engram-button-row" });
 
 		const cancelBtn = buttons.createEl("button", { text: "Cancel" });
 		cancelBtn.addEventListener("click", () => {
@@ -87,9 +73,8 @@ export class PreSyncModal extends Modal {
 		if (this.showWipePull) {
 			const wipeBtn = buttons.createEl("button", {
 				text: "Wipe & Pull",
+				cls: "engram-btn-danger-outline",
 			});
-			wipeBtn.style.color = "var(--text-error)";
-			wipeBtn.style.borderColor = "var(--text-error)";
 			wipeBtn.addEventListener("click", () => {
 				this.resolved = true;
 				this.resolve("wipe-pull");
@@ -159,11 +144,10 @@ export class WipeConfirmModal extends Modal {
 
 		contentEl.createEl("h2", { text: "⚠ Confirm Wipe & Pull" });
 
-		const warning = contentEl.createEl("p");
-		warning.style.color = "var(--text-error)";
-		warning.style.fontWeight = "bold";
-		warning.style.fontSize = "1.05em";
-		warning.setText("This action cannot be undone.");
+		contentEl.createEl("p", {
+			cls: "engram-wipe-warning-strong",
+			text: "This action cannot be undone.",
+		});
 
 		const deleteParts: string[] = [];
 		if (this.localNoteCount > 0) {
@@ -173,22 +157,16 @@ export class WipeConfirmModal extends Modal {
 			deleteParts.push(`${this.localAttachmentCount} attachments`);
 		}
 
-		const details = contentEl.createEl("p");
-		details.setText(
-			`This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`,
-		);
+		contentEl.createEl("p", {
+			text: `This will permanently delete all ${deleteParts.join(" and ")} from your local vault, then pull ${this.serverNoteCount} notes fresh from the server.`,
+		});
 
-		const localOnly = contentEl.createEl("p");
-		localOnly.style.color = "var(--text-error)";
-		localOnly.setText(
-			"Any notes that exist only locally and have not been pushed will be lost forever.",
-		);
+		contentEl.createEl("p", {
+			cls: "engram-wipe-warning",
+			text: "Any notes that exist only locally and have not been pushed will be lost forever.",
+		});
 
-		const buttons = contentEl.createDiv({ cls: "engram-wipe-buttons" });
-		buttons.style.display = "flex";
-		buttons.style.justifyContent = "flex-end";
-		buttons.style.gap = "8px";
-		buttons.style.marginTop = "16px";
+		const buttons = contentEl.createDiv({ cls: "engram-button-row" });
 
 		const goBackBtn = buttons.createEl("button", {
 			text: "Go Back",
@@ -202,10 +180,8 @@ export class WipeConfirmModal extends Modal {
 
 		const confirmBtn = buttons.createEl("button", {
 			text: "Delete Everything & Pull",
+			cls: "engram-btn-danger-solid",
 		});
-		confirmBtn.style.background = "var(--text-error)";
-		confirmBtn.style.color = "var(--text-on-accent)";
-		confirmBtn.style.borderColor = "var(--text-error)";
 		confirmBtn.addEventListener("click", () => {
 			this.resolved = true;
 			this.resolve(true);
