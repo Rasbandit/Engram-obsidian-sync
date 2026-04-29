@@ -2,8 +2,9 @@
 	"id": "engram-sync",
 	"name": "Engram Sync",
 	"version": "0.10.2",
-	"minAppVersion": "1.0.0",
-	"description": "Bidirectional sync with Engram — push notes for AI search, pull MCP-created notes back.",
+	"minAppVersion": "1.5.0",
+	"description": "Bidirectional sync between your vault and an Engram server for AI-powered semantic search.",
 	"author": "Rasbandit",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"fundingUrl": "https://ko-fi.com/rasbandit"
 }
