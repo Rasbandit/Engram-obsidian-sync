@@ -1,4 +1,4 @@
-import { Notice, Setting } from "obsidian";
+import { Notice, Setting, setIcon } from "obsidian";
 import type { TabContext } from "./types";
 
 export function renderSelfHostedTab(ctx: TabContext): void {
@@ -146,4 +146,20 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 				});
 			});
 	}
+
+	// ── Support development ──
+	new Setting(containerEl).setName("Support development").setHeading();
+
+	const supportSetting = new Setting(containerEl).setDesc(
+		"If this plugin saves you time, consider supporting development. Optional and appreciated.",
+	);
+
+	const kofiLink = supportSetting.controlEl.createEl("a", {
+		cls: "engram-kofi-button",
+		href: "https://ko-fi.com/rasbandit",
+		attr: { target: "_blank", rel: "noopener" },
+	});
+	const iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
+	setIcon(iconSpan, "coffee");
+	kofiLink.createSpan({ text: "Support on Ko-fi" });
 }
