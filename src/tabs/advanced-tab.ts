@@ -1,4 +1,5 @@
 import { Notice, Setting, TFolder } from "obsidian";
+import { PreSyncModal, WipeConfirmModal } from "../pre-sync-modal";
 import type { TabContext } from "./types";
 
 /** Directories that should never be synced — detect and warn if found in vault. */
@@ -20,9 +21,115 @@ const PROBLEMATIC_DIRS = [
 ];
 
 export function renderAdvancedTab(ctx: TabContext): void {
-	const { containerEl, app, plugin, redisplay } = ctx;
+	const { containerEl, app, plugin, redisplay, openProgressModal } = ctx;
 
-	// ── Sync Behavior ──
+	// ── Actions ──
+	new Setting(containerEl).setName("Actions").setHeading();
+
+	new Setting(containerEl)
+		.setName("Sync now")
+		.setDesc("Pull remote changes and push local changes.")
+		.addButton((btn) =>
+			btn.setButtonText("Sync").onClick(async () => {
+				try {
+					btn.setDisabled(true);
+					const plan = await plugin.syncEngine.computeSyncPlan("full");
+					const confirmed = await new PreSyncModal(app, plan).awaitConfirmation();
+					if (!confirmed) {
+						btn.setDisabled(false);
+						return;
+					}
+					const progressModal = await openProgressModal();
+					const { pulled, pushed } = await plugin.syncEngine.fullSync();
+					const errors = plugin.syncEngine.syncLog?.errorCount() ?? 0;
+					progressModal.update({
+						phase: "complete",
+						current: pulled + pushed,
+						total: pulled + pushed,
+						failed: errors,
+					});
+				} catch (e) {
+					new Notice(`Engram Sync: ${e instanceof Error ? e.message : "sync failed"}`);
+				} finally {
+					btn.setDisabled(false);
+				}
+			}),
+		);
+
+	new Setting(containerEl)
+		.setName("Push entire vault")
+		.setDesc("Push all syncable files to Engram. Only needed for initial import.")
+		.addButton((btn) =>
+			btn
+				.setButtonText("Push all")
+				.setWarning()
+				.onClick(async () => {
+					try {
+						btn.setDisabled(true);
+						const plan = await plugin.syncEngine.computeSyncPlan("push-all");
+						const confirmed = await new PreSyncModal(app, plan).awaitConfirmation();
+						if (!confirmed) {
+							btn.setDisabled(false);
+							return;
+						}
+						await openProgressModal();
+						await plugin.syncEngine.pushAll();
+					} catch (e) {
+						new Notice(
+							`Engram Sync: ${e instanceof Error ? e.message : "push failed"}`,
+						);
+					} finally {
+						btn.setDisabled(false);
+					}
+				}),
+		);
+
+	new Setting(containerEl)
+		.setName("Pull all from server")
+		.setDesc(
+			"Pull every note and attachment from the server. Wipe & pull deletes all local files first.",
+		)
+		.addButton((btn) =>
+			btn
+				.setButtonText("Pull all")
+				.setWarning()
+				.onClick(async () => {
+					try {
+						btn.setDisabled(true);
+						const plan = await plugin.syncEngine.computeSyncPlan("pull-all");
+						const action = await new PreSyncModal(app, plan, true).awaitPullAction();
+						if (action === "cancel") {
+							btn.setDisabled(false);
+							return;
+						}
+						if (action === "wipe-pull") {
+							const confirmed = await new WipeConfirmModal(
+								app,
+								plan.localNoteCount,
+								plan.localAttachmentCount,
+								plan.serverNoteCount,
+							).awaitConfirmation();
+							if (!confirmed) {
+								btn.setDisabled(false);
+								return;
+							}
+							await openProgressModal();
+							await plugin.syncEngine.wipePullAll();
+							return;
+						}
+						await openProgressModal();
+						await plugin.syncEngine.pullAll();
+					} catch (e) {
+						new Notice(
+							`Engram Sync: ${e instanceof Error ? e.message : "pull failed"}`,
+						);
+					} finally {
+						btn.setDisabled(false);
+					}
+				}),
+		);
+
+	// ── Sync behavior ──
 	new Setting(containerEl).setName("Sync behavior").setHeading();
 
 	new Setting(containerEl)
@@ -57,7 +164,7 @@ export function renderAdvancedTab(ctx: TabContext): void {
 				}),
 		);
 
-	// ── Ignore Patterns ──
+	// ── Ignore patterns ──
 	new Setting(containerEl).setName("Ignore patterns").setHeading();
 
 	renderIgnoreWarnings(containerEl, app, plugin, redisplay);
@@ -91,6 +198,25 @@ export function renderAdvancedTab(ctx: TabContext): void {
 				await plugin.saveSettings();
 			}),
 		);
+
+	// ── About ──
+	new Setting(containerEl).setName("About").setHeading();
+
+	const aboutList = containerEl.createEl("ul", { cls: "engram-about-list" });
+
+	const versionItem = aboutList.createEl("li");
+	versionItem.createSpan({ text: "Version: " });
+	versionItem.createSpan({ text: plugin.manifest.version });
+
+	const repoItem = aboutList.createEl("li");
+	repoItem.createSpan({ text: "Source: " });
+	repoItem.createEl("a", {
+		text: "github.com/Rasbandit/Engram-obsidian-sync",
+		href: "https://github.com/Rasbandit/Engram-obsidian-sync",
+	});
+
+	const licenseItem = aboutList.createEl("li");
+	licenseItem.createSpan({ text: "License: MIT" });
 }
 
 /** Scan vault for problematic directories and render warnings with add-to-ignore buttons. */

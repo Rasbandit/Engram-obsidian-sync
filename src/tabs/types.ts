@@ -9,6 +9,7 @@ export interface TabContext {
 	redisplay: () => void;
 	startDeviceFlow: () => Promise<void>;
 	openProgressModal: () => Promise<SyncProgressModal>;
+	switchToTab: (tabId: string) => void;
 }
 
 export type TabRenderer = (ctx: TabContext) => void;

@@ -62,21 +62,12 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		// ── Tab bar ──
 		const tabs = [
 			{ id: "account" as const, label: "Account", render: renderAccountTab },
-			{ id: "self-hosted" as const, label: "Self-Hosted", render: renderSelfHostedTab },
+			{ id: "self-hosted" as const, label: "Self-hosted", render: renderSelfHostedTab },
 			{ id: "advanced" as const, label: "Advanced", render: renderAdvancedTab },
 		];
 
 		const tabBar = containerEl.createEl("nav", { cls: "engram-tab-bar" });
 		const contentEl = containerEl.createEl("section", { cls: "engram-tab-content" });
-
-		const ctx: TabContext = {
-			containerEl: contentEl,
-			app: this.app,
-			plugin: this.plugin,
-			redisplay: () => this.display(),
-			startDeviceFlow: () => this.startDeviceFlow(),
-			openProgressModal: () => this.openProgressModal(),
-		};
 
 		const activateTab = (tabId: string) => {
 			this.activeTab = tabId;
@@ -88,6 +79,16 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			const btn = tabBar.querySelector<HTMLElement>(`[data-tab="${tab.id}"]`);
 			btn?.addClass("is-active");
 			tab.render({ ...ctx, containerEl: contentEl });
+		};
+
+		const ctx: TabContext = {
+			containerEl: contentEl,
+			app: this.app,
+			plugin: this.plugin,
+			redisplay: () => this.display(),
+			startDeviceFlow: () => this.startDeviceFlow(),
+			openProgressModal: () => this.openProgressModal(),
+			switchToTab: (id) => activateTab(id),
 		};
 
 		for (const tab of tabs) {
