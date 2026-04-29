@@ -681,3 +681,52 @@
 .engram-wipe-warning {
 	color: var(--text-error);
 }
+
+/* About section */
+.engram-about-list {
+	list-style: none;
+	padding-left: 0;
+	margin: 8px 0 16px 0;
+}
+
+.engram-about-list li {
+	padding: 4px 0;
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.engram-about-list a {
+	color: var(--text-accent);
+}
+
+/* Ko-fi support button */
+.engram-kofi-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 16px;
+	background: linear-gradient(135deg, #ff5e5b 0%, #ff8d6b 100%);
+	color: #ffffff !important;
+	border-radius: 8px;
+	text-decoration: none !important;
+	font-weight: 600;
+	font-size: 0.95em;
+	box-shadow: 0 2px 6px rgba(255, 94, 91, 0.25);
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.engram-kofi-button:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 4px 14px rgba(255, 94, 91, 0.4);
+}
+
+.engram-kofi-button .engram-kofi-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.engram-kofi-button .engram-kofi-icon svg {
+	width: 18px;
+	height: 18px;
+	stroke: #ffffff;
+}

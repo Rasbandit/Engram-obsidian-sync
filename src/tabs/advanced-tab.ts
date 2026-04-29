@@ -1,4 +1,4 @@
-import { Notice, Setting, TFolder } from "obsidian";
+import { Notice, Setting, TFolder, setIcon } from "obsidian";
 import { PreSyncModal, WipeConfirmModal } from "../pre-sync-modal";
 import type { TabContext } from "./types";
 
@@ -198,6 +198,40 @@ export function renderAdvancedTab(ctx: TabContext): void {
 				await plugin.saveSettings();
 			}),
 		);
+
+	// ── About ──
+	new Setting(containerEl).setName("About").setHeading();
+
+	const aboutList = containerEl.createEl("ul", { cls: "engram-about-list" });
+
+	const versionItem = aboutList.createEl("li");
+	versionItem.createSpan({ text: "Version: " });
+	versionItem.createSpan({ text: plugin.manifest.version });
+
+	const repoItem = aboutList.createEl("li");
+	repoItem.createSpan({ text: "Source: " });
+	repoItem.createEl("a", {
+		text: "github.com/Rasbandit/Engram-obsidian-sync",
+		href: "https://github.com/Rasbandit/Engram-obsidian-sync",
+	});
+
+	const licenseItem = aboutList.createEl("li");
+	licenseItem.createSpan({ text: "License: MIT" });
+
+	const supportSetting = new Setting(containerEl)
+		.setName("Support development")
+		.setDesc(
+			"If this plugin saves you time, consider supporting development. Optional and appreciated.",
+		);
+
+	const kofiLink = supportSetting.controlEl.createEl("a", {
+		cls: "engram-kofi-button",
+		href: "https://ko-fi.com/rasbandit",
+		attr: { target: "_blank", rel: "noopener" },
+	});
+	const iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
+	setIcon(iconSpan, "coffee");
+	kofiLink.createSpan({ text: "Support on Ko-fi" });
 }
 
 /** Scan vault for problematic directories and render warnings with add-to-ignore buttons. */

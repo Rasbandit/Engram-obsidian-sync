@@ -2166,7 +2166,22 @@ secret.md`).setValue(plugin.settings.ignorePatterns).onChange(async (value) => {
     (toggle) => toggle.setValue(plugin.settings.remoteLoggingEnabled).onChange(async (value) => {
       plugin.settings.remoteLoggingEnabled = value, await plugin.saveSettings();
     })
-  );
+  ), new import_obsidian10.Setting(containerEl).setName("About").setHeading();
+  let aboutList = containerEl.createEl("ul", { cls: "engram-about-list" }), versionItem = aboutList.createEl("li");
+  versionItem.createSpan({ text: "Version: " }), versionItem.createSpan({ text: plugin.manifest.version });
+  let repoItem = aboutList.createEl("li");
+  repoItem.createSpan({ text: "Source: " }), repoItem.createEl("a", {
+    text: "github.com/Rasbandit/Engram-obsidian-sync",
+    href: "https://github.com/Rasbandit/Engram-obsidian-sync"
+  }), aboutList.createEl("li").createSpan({ text: "License: MIT" });
+  let kofiLink = new import_obsidian10.Setting(containerEl).setName("Support development").setDesc(
+    "If this plugin saves you time, consider supporting development. Optional and appreciated."
+  ).controlEl.createEl("a", {
+    cls: "engram-kofi-button",
+    href: "https://ko-fi.com/rasbandit",
+    attr: { target: "_blank", rel: "noopener" }
+  }), iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
+  (0, import_obsidian10.setIcon)(iconSpan, "coffee"), kofiLink.createSpan({ text: "Support on Ko-fi" });
 }
 function renderIgnoreWarnings(containerEl, app, plugin, redisplay) {
   let currentIgnores = plugin.settings.ignorePatterns, detected = [];
@@ -2253,20 +2268,7 @@ function renderSelfHostedTab(ctx) {
         value && value !== plugin.settings.vaultId && (plugin.settings.vaultId = value, plugin.api.setVaultId(value), await plugin.saveSettings(), redisplay());
       });
     });
-  })), new import_obsidian11.Setting(containerEl).setName("About").setHeading();
-  let aboutList = containerEl.createEl("ul", { cls: "engram-about-list" }), versionItem = aboutList.createEl("li");
-  versionItem.createSpan({ text: "Version: " }), versionItem.createSpan({ text: plugin.manifest.version });
-  let repoItem = aboutList.createEl("li");
-  repoItem.createSpan({ text: "Source: " }), repoItem.createEl("a", {
-    text: "github.com/Rasbandit/Engram-obsidian-sync",
-    href: "https://github.com/Rasbandit/Engram-obsidian-sync"
-  }), aboutList.createEl("li").createSpan({ text: "License: MIT" }), new import_obsidian11.Setting(containerEl).setName("Support development").setDesc(
-    "If this plugin saves you time, consider supporting development. Optional and appreciated."
-  ).addButton((btn) => {
-    btn.setButtonText("Ko-fi").setCta().onClick(() => {
-      window.open("https://ko-fi.com/rasbandit", "_blank");
-    });
-  });
+  }));
 }
 
 // src/settings.ts
