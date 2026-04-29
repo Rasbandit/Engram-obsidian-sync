@@ -151,7 +151,7 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 	new Setting(containerEl).setName("Support development").setHeading();
 
 	const supportSetting = new Setting(containerEl).setDesc(
-		"If this plugin saves you time, consider supporting development. Optional and appreciated.",
+		"If this plugin saves you time, consider supporting development.",
 	);
 
 	const kofiLink = supportSetting.controlEl.createEl("a", {

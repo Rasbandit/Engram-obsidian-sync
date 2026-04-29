@@ -2262,7 +2262,7 @@ function renderSelfHostedTab(ctx) {
     });
   })), new import_obsidian11.Setting(containerEl).setName("Support development").setHeading();
   let kofiLink = new import_obsidian11.Setting(containerEl).setDesc(
-    "If this plugin saves you time, consider supporting development. Optional and appreciated."
+    "If this plugin saves you time, consider supporting development."
   ).controlEl.createEl("a", {
     cls: "engram-kofi-button",
     href: "https://ko-fi.com/rasbandit",
