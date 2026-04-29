@@ -94,6 +94,10 @@ When the same note changes both locally and remotely between syncs, the plugin r
 
 If this plugin saves you time, you can [buy me a coffee on Ko-fi](https://ko-fi.com/rasbandit). Optional and appreciated.
 
+## Attribution
+
+This plugin uses [diff-match-patch](https://github.com/google/diff-match-patch) by Google for 3-way merge conflict resolution, licensed under Apache 2.0.
+
 ## License
 
 [MIT](LICENSE)
