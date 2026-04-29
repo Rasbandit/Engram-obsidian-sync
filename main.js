@@ -2238,9 +2238,22 @@ ${item.pattern}` : item.pattern, await plugin.saveSettings(), new import_obsidia
 // src/tabs/self-hosted-tab.ts
 var import_obsidian11 = require("obsidian");
 function renderSelfHostedTab(ctx) {
-  let { containerEl } = ctx;
-  new import_obsidian11.Setting(containerEl).setName("Self-Hosted").setHeading(), containerEl.createEl("p", {
-    text: "Self-hosted configuration will be available here once Engram Cloud launches. For now, set your server URL and credentials on the Account tab."
+  let { containerEl, plugin } = ctx;
+  new import_obsidian11.Setting(containerEl).setName("Self-hosted").setHeading(), containerEl.createEl("p", {
+    text: "This tab is for users running their own Engram server. Server URL and credentials are configured on the Account tab. Hosted Engram (coming soon) will have its own tab."
+  }), new import_obsidian11.Setting(containerEl).setName("About").setHeading();
+  let aboutList = containerEl.createEl("ul", { cls: "engram-about-list" }), versionItem = aboutList.createEl("li");
+  versionItem.createSpan({ text: "Version: " }), versionItem.createSpan({ text: plugin.manifest.version });
+  let repoItem = aboutList.createEl("li");
+  repoItem.createSpan({ text: "Source: " }), repoItem.createEl("a", {
+    text: "github.com/Rasbandit/Engram-obsidian-sync",
+    href: "https://github.com/Rasbandit/Engram-obsidian-sync"
+  }), aboutList.createEl("li").createSpan({ text: "License: MIT" }), new import_obsidian11.Setting(containerEl).setName("Support development").setDesc(
+    "If this plugin saves you time, consider supporting development. Optional and appreciated."
+  ).addButton((btn) => {
+    btn.setButtonText("Ko-fi").setCta().onClick(() => {
+      window.open("https://ko-fi.com/rasbandit", "_blank");
+    });
   });
 }
 
@@ -2271,7 +2284,7 @@ var EngramSyncSettingTab = class extends import_obsidian12.PluginSettingTab {
     };
     let tabs = [
       { id: "account", label: "Account", render: renderAccountTab },
-      { id: "self-hosted", label: "Self-Hosted", render: renderSelfHostedTab },
+      { id: "self-hosted", label: "Self-hosted", render: renderSelfHostedTab },
       { id: "advanced", label: "Advanced", render: renderAdvancedTab }
     ], tabBar = containerEl.createEl("nav", { cls: "engram-tab-bar" }), contentEl = containerEl.createEl("section", { cls: "engram-tab-content" }), ctx = {
       containerEl: contentEl,
