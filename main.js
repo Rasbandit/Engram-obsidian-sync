@@ -2489,7 +2489,7 @@ function renderSelfHostedTab(ctx) {
           dropdown.addOption(String(v.id), label);
         }
       dropdown.setDisabled(!1), plugin.settings.vaultId && dropdown.setValue(plugin.settings.vaultId), dropdown.onChange(async (value) => {
-        value && value !== plugin.settings.vaultId && (plugin.settings.vaultId = value, plugin.api.setVaultId(value), await plugin.saveSettings(), plugin.refreshEncryptionStatus(), redisplay());
+        await applyVaultSwitch(plugin, value) && redisplay();
       });
     });
   })), new import_obsidian13.Setting(containerEl).setName("Support development").setHeading();
@@ -2501,6 +2501,9 @@ function renderSelfHostedTab(ctx) {
     attr: { target: "_blank", rel: "noopener" }
   }), iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
   (0, import_obsidian13.setIcon)(iconSpan, "coffee"), kofiLink.createSpan({ text: "Support on Ko-fi" });
+}
+async function applyVaultSwitch(plugin, value) {
+  return !value || value === plugin.settings.vaultId ? !1 : (plugin.settings.vaultId = value, plugin.api.setVaultId(value), await plugin.saveSettings(), plugin.refreshEncryptionStatus(), !0);
 }
 
 // src/settings.ts
@@ -4099,6 +4102,17 @@ function describeEncryptionBadge(status, progress) {
       return { glyph: "\u{1F513}?", tooltip: "Encryption status unknown" };
   }
 }
+function chooseEncryptionPollInterval(status) {
+  switch (status) {
+    case "encrypting":
+    case "decrypting":
+      return 5e3;
+    case "decrypt_pending":
+      return 6e4;
+    default:
+      return null;
+  }
+}
 
 // src/sync-log.ts
 var SyncLog = class {
@@ -4491,7 +4505,9 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian17.Plugin
     if (!Number.isNaN(idNum))
       try {
         let progress = await this.api.getEncryptionProgress(idNum);
-        this.renderEncryptionBadge(progress.status, progress), progress.status === "encrypting" || progress.status === "decrypting" ? this.scheduleEncryptionPoll(5e3) : progress.status === "decrypt_pending" ? this.scheduleEncryptionPoll(6e4) : this.clearEncryptionPoll();
+        this.renderEncryptionBadge(progress.status, progress);
+        let interval = chooseEncryptionPollInterval(progress.status);
+        interval == null ? this.clearEncryptionPoll() : this.scheduleEncryptionPoll(interval);
       } catch (e) {
       }
   }

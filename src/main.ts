@@ -24,7 +24,7 @@ import {
 
 import { BaseStore } from "./base-store";
 import { destroyDevLog, devLog, initDevLog } from "./dev-log";
-import { describeEncryptionBadge } from "./encryption-badge";
+import { chooseEncryptionPollInterval, describeEncryptionBadge } from "./encryption-badge";
 import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
 import { SyncLog } from "./sync-log";
 import { SyncLogModal } from "./sync-log-modal";
@@ -666,18 +666,9 @@ export default class EngramSyncPlugin extends Plugin {
 		try {
 			const progress = await this.api.getEncryptionProgress(idNum);
 			this.renderEncryptionBadge(progress.status, progress);
-			// Active states (encrypting/decrypting): server is making progress, poll
-			// at the 5s cadence so the badge tracks N/M counts.
-			// `decrypt_pending` (24h cancellable window): the server transitions to
-			// `decrypting` autonomously when the window expires, so we still need to
-			// poll — at a slower cadence since nothing is moving meanwhile.
-			if (progress.status === "encrypting" || progress.status === "decrypting") {
-				this.scheduleEncryptionPoll(5_000);
-			} else if (progress.status === "decrypt_pending") {
-				this.scheduleEncryptionPoll(60_000);
-			} else {
-				this.clearEncryptionPoll();
-			}
+			const interval = chooseEncryptionPollInterval(progress.status);
+			if (interval == null) this.clearEncryptionPoll();
+			else this.scheduleEncryptionPoll(interval);
 		} catch {
 			// Server may not yet support the endpoint, or vault not registered yet —
 			// leave the badge in its prior state rather than flapping.
