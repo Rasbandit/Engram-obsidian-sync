@@ -591,4 +591,90 @@ describe("EngramApi", () => {
 			expect(invalidate).toHaveBeenCalledTimes(1);
 		});
 	});
+
+	describe("encryption methods", () => {
+		const sampleVault = {
+			id: 7,
+			name: "Personal",
+			slug: "personal",
+			is_default: true,
+			created_at: "2026-04-01T00:00:00Z",
+			encrypted: true,
+			encryption_status: "encrypting" as const,
+			encrypted_at: null,
+			decrypt_requested_at: null,
+			last_toggle_at: "2026-04-30T00:00:00Z",
+			cooldown_days: 7,
+		};
+
+		test("encryptVault POSTs /vaults/:id/encrypt and returns vault", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 202,
+				json: { vault: sampleVault },
+			} as any);
+			const result = await api.encryptVault(7);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("POST");
+			expect(opts.url).toBe(`${TEST_API_BASE}/vaults/7/encrypt`);
+			expect(result.encryption_status).toBe("encrypting");
+			expect(result.cooldown_days).toBe(7);
+		});
+
+		test("requestDecryptVault POSTs /vaults/:id/decrypt", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 202,
+				json: { vault: { ...sampleVault, encryption_status: "decrypt_pending" } },
+			} as any);
+			const result = await api.requestDecryptVault(7);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("POST");
+			expect(opts.url).toBe(`${TEST_API_BASE}/vaults/7/decrypt`);
+			expect(result.encryption_status).toBe("decrypt_pending");
+		});
+
+		test("cancelDecryptVault DELETEs /vaults/:id/decrypt", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 202,
+				json: { vault: { ...sampleVault, encryption_status: "encrypted" } },
+			} as any);
+			const result = await api.cancelDecryptVault(7);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("DELETE");
+			expect(opts.url).toBe(`${TEST_API_BASE}/vaults/7/decrypt`);
+			expect(result.encryption_status).toBe("encrypted");
+		});
+
+		test("getEncryptionProgress GETs /vaults/:id/encryption_progress", async () => {
+			mockRequestUrl.mockResolvedValueOnce({
+				status: 200,
+				json: {
+					status: "encrypting",
+					processed: 3,
+					total: 10,
+					started_at: "2026-04-30T00:00:00Z",
+				},
+			} as any);
+			const result = await api.getEncryptionProgress(7);
+			const opts = mockRequestUrl.mock.calls[0][0] as any;
+			expect(opts.method).toBe("GET");
+			expect(opts.url).toBe(`${TEST_API_BASE}/vaults/7/encryption_progress`);
+			expect(result).toEqual({
+				status: "encrypting",
+				processed: 3,
+				total: 10,
+				started_at: "2026-04-30T00:00:00Z",
+			});
+		});
+
+		test("encryptVault surfaces 429 cooldown errors with retry_after", async () => {
+			mockRequestUrl.mockRejectedValueOnce({
+				status: 429,
+				json: { error: "cooldown_active", retry_after: "2026-05-07T00:00:00Z" },
+			});
+			await expect(api.encryptVault(7)).rejects.toMatchObject({
+				status: 429,
+				json: { error: "cooldown_active", retry_after: "2026-05-07T00:00:00Z" },
+			});
+		});
+	});
 });

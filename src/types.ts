@@ -264,6 +264,14 @@ export interface SyncLogEntry {
 	details?: string;
 }
 
+/** Server-side encryption lifecycle for a vault. */
+export type VaultEncryptionStatus =
+	| "none"
+	| "encrypting"
+	| "encrypted"
+	| "decrypt_pending"
+	| "decrypting";
+
 /** Vault information returned by GET /vaults */
 export interface VaultInfo {
 	id: number;
@@ -271,6 +279,21 @@ export interface VaultInfo {
 	slug: string;
 	is_default: boolean;
 	created_at: string;
+	encrypted?: boolean;
+	encryption_status?: VaultEncryptionStatus;
+	encrypted_at?: string | null;
+	decrypt_requested_at?: string | null;
+	last_toggle_at?: string | null;
+	/** Per-user toggle cooldown in days. NULL/undefined = no cooldown. */
+	cooldown_days?: number | null;
+}
+
+/** Response from GET /vaults/:id/encryption_progress */
+export interface EncryptionProgress {
+	status: VaultEncryptionStatus;
+	processed: number;
+	total: number;
+	started_at: string | null;
 }
 
 export interface SyncPlan {
