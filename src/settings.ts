@@ -7,6 +7,7 @@ import type EngramSyncPlugin from "./main";
 import { SyncProgressModal } from "./sync-progress-modal";
 import { renderAccountTab } from "./tabs/account-tab";
 import { renderAdvancedTab } from "./tabs/advanced-tab";
+import { renderEncryptionTab } from "./tabs/encryption-tab";
 import { renderSelfHostedTab } from "./tabs/self-hosted-tab";
 import type { TabContext } from "./tabs/types";
 
@@ -17,6 +18,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 	constructor(app: App, plugin: EngramSyncPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	/** Pre-select a tab before the next display() call. */
+	setInitialTab(tabId: string): void {
+		this.activeTab = tabId;
 	}
 
 	display(): void {
@@ -63,6 +69,7 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 		const tabs = [
 			{ id: "account" as const, label: "Account", render: renderAccountTab },
 			{ id: "self-hosted" as const, label: "Self-hosted", render: renderSelfHostedTab },
+			{ id: "encryption" as const, label: "Encryption", render: renderEncryptionTab },
 			{ id: "advanced" as const, label: "Advanced", render: renderAdvancedTab },
 		];
 

@@ -19,10 +19,12 @@ import {
 	type EngramSyncSettings,
 	type FileSyncState,
 	type SyncStatus,
+	type VaultEncryptionStatus,
 } from "./types";
 
 import { BaseStore } from "./base-store";
 import { destroyDevLog, devLog, initDevLog } from "./dev-log";
+import { chooseEncryptionPollInterval, describeEncryptionBadge } from "./encryption-badge";
 import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
 import { SyncLog } from "./sync-log";
 import { SyncLogModal } from "./sync-log-modal";
@@ -53,6 +55,13 @@ interface PluginData {
 	syncedHashes?: Record<string, number>;
 }
 
+/** Obsidian's undocumented settings API (stable for years; used by many plugins). */
+interface AppSettingApi {
+	open: () => void;
+	openTabById: (id: string) => void;
+	activeTab?: unknown;
+}
+
 export default class EngramSyncPlugin extends Plugin {
 	settings: EngramSyncSettings = DEFAULT_SETTINGS;
 	api: EngramApi = new EngramApi("", "");
@@ -63,6 +72,9 @@ export default class EngramSyncPlugin extends Plugin {
 	private syncInterval: number | null = null;
 	noteStream: NoteChannel | null = null;
 	private statusBarEl: HTMLElement | null = null;
+	private encryptionStatusBarEl: HTMLElement | null = null;
+	private encryptionStatus: VaultEncryptionStatus | null = null;
+	private encryptionPollHandle: number | null = null;
 	private liveConnected = false;
 
 	/** Whether the WebSocket channel is currently connected (for settings UI). */
@@ -289,6 +301,16 @@ export default class EngramSyncPlugin extends Plugin {
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.setText("Engram: ready");
 		this.statusBarEl.addClass("engram-status-bar-clickable");
+
+		// Encryption status badge — separate item, click opens encryption tab
+		this.encryptionStatusBarEl = this.addStatusBarItem();
+		this.encryptionStatusBarEl.addClass("engram-status-bar-clickable");
+		this.encryptionStatusBarEl.addClass("engram-encryption-badge");
+		this.renderEncryptionBadge(null);
+		this.registerDomEvent(this.encryptionStatusBarEl, "click", () => {
+			this.openSettingsToTab("encryption");
+		});
+
 		this.registerDomEvent(this.statusBarEl, "click", () => {
 			if (this.settings.apiUrl && this.settings.apiKey) {
 				new Notice("Engram Sync: syncing...");
@@ -336,6 +358,7 @@ export default class EngramSyncPlugin extends Plugin {
 						return;
 					}
 					await this.doSyncWithFirstSyncCheck();
+					void this.refreshEncryptionStatus();
 				}
 			} finally {
 				this.syncEngine.setReady();
@@ -356,6 +379,7 @@ export default class EngramSyncPlugin extends Plugin {
 			clearInterval(this.syncInterval);
 			this.syncInterval = null;
 		}
+		this.clearEncryptionPoll();
 		destroyRemoteLog();
 		destroyDevLog();
 	}
@@ -493,6 +517,7 @@ export default class EngramSyncPlugin extends Plugin {
 				this.noteStream.setAuthProvider(this.authProvider);
 			}
 		}
+		void this.refreshEncryptionStatus();
 	}
 
 	async clearOAuthTokens(): Promise<void> {
@@ -566,6 +591,7 @@ export default class EngramSyncPlugin extends Plugin {
 					// Use savePluginData instead of saveSettings to avoid triggering re-registration
 					void this.savePluginData(this.syncEngine.getLastSync());
 					this.noteStream?.disconnect();
+					void this.refreshEncryptionStatus();
 				};
 
 				this.noteStream = channel;
@@ -623,6 +649,74 @@ export default class EngramSyncPlugin extends Plugin {
 				console.error("Engram Sync: sync failed", e);
 				new Notice("Engram Sync: sync failed — check connection");
 			}
+		}
+	}
+
+	/** Refresh the encryption badge from the server. Called after toggle actions
+	 *  and on layout-ready. While encrypting/decrypting, schedules a 5-second
+	 *  poll until status settles. */
+	async refreshEncryptionStatus(): Promise<void> {
+		const activeId = this.api.getActiveVaultId();
+		if (!activeId) {
+			this.renderEncryptionBadge(null);
+			return;
+		}
+		const idNum = Number(activeId);
+		if (Number.isNaN(idNum)) return;
+		try {
+			const progress = await this.api.getEncryptionProgress(idNum);
+			this.renderEncryptionBadge(progress.status, progress);
+			const interval = chooseEncryptionPollInterval(progress.status);
+			if (interval == null) this.clearEncryptionPoll();
+			else this.scheduleEncryptionPoll(interval);
+		} catch {
+			// Server may not yet support the endpoint, or vault not registered yet —
+			// leave the badge in its prior state rather than flapping.
+		}
+	}
+
+	private scheduleEncryptionPoll(intervalMs: number): void {
+		if (this.encryptionPollHandle != null) return;
+		this.encryptionPollHandle = window.setTimeout(() => {
+			this.encryptionPollHandle = null;
+			void this.refreshEncryptionStatus();
+		}, intervalMs);
+	}
+
+	private clearEncryptionPoll(): void {
+		if (this.encryptionPollHandle != null) {
+			clearTimeout(this.encryptionPollHandle);
+			this.encryptionPollHandle = null;
+		}
+	}
+
+	private renderEncryptionBadge(
+		status: VaultEncryptionStatus | null,
+		progress?: { processed: number; total: number },
+	): void {
+		if (!this.encryptionStatusBarEl) return;
+		this.encryptionStatus = status;
+		const { glyph, tooltip } = describeEncryptionBadge(status, progress);
+		this.encryptionStatusBarEl.setText(glyph);
+		this.encryptionStatusBarEl.setAttribute("aria-label", tooltip);
+	}
+
+	/** Read-only access for tests and the encryption tab redisplay path. */
+	getEncryptionStatus(): VaultEncryptionStatus | null {
+		return this.encryptionStatus;
+	}
+
+	private openSettingsToTab(tabId: string): void {
+		const setting = (this.app as unknown as { setting?: AppSettingApi }).setting;
+		if (!setting) return;
+		setting.open();
+		setting.openTabById(this.manifest.id);
+		const tab = setting.activeTab as
+			| { setInitialTab?: (id: string) => void; display?: () => void }
+			| undefined;
+		if (tab?.setInitialTab && tab.display) {
+			tab.setInitialTab(tabId);
+			tab.display();
 		}
 	}
 

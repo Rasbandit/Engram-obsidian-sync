@@ -177,4 +177,9 @@ export const Platform = {
 	isDesktopApp: true,
 };
 
+export function setIcon(_el: unknown, _name: string): void {
+	// no-op for unit tests — real obsidian.setIcon mounts an SVG, but
+	// nothing we test asserts against the rendered icon.
+}
+
 export class App {}

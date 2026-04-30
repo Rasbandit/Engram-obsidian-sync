@@ -136,12 +136,7 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 					}
 
 					dropdown.onChange(async (value) => {
-						if (value && value !== plugin.settings.vaultId) {
-							plugin.settings.vaultId = value;
-							plugin.api.setVaultId(value);
-							await plugin.saveSettings();
-							redisplay();
-						}
+						if (await applyVaultSwitch(plugin, value)) redisplay();
 					});
 				});
 			});
@@ -162,4 +157,29 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 	const iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
 	setIcon(iconSpan, "coffee");
 	kofiLink.createSpan({ text: "Support on Ko-fi" });
+}
+
+/** Subset of EngramSyncPlugin used by `applyVaultSwitch`. Defined here so the
+ *  helper is unit-testable without dragging in the Obsidian DOM stack. */
+export interface VaultSwitchTarget {
+	settings: { vaultId: string | null };
+	api: { setVaultId: (id: string | null) => void };
+	saveSettings: () => Promise<void>;
+	refreshEncryptionStatus: () => void | Promise<void>;
+}
+
+/**
+ * Apply a user-driven vault switch. Returns `true` if the active vault
+ * actually changed (caller should redisplay). Encryption state is per-vault,
+ * so the badge MUST be refreshed on every successful switch — leaving the
+ * prior tenant's lock state on screen is a security-indicator bug, not just
+ * cosmetic drift.
+ */
+export async function applyVaultSwitch(plugin: VaultSwitchTarget, value: string): Promise<boolean> {
+	if (!value || value === plugin.settings.vaultId) return false;
+	plugin.settings.vaultId = value;
+	plugin.api.setVaultId(value);
+	await plugin.saveSettings();
+	void plugin.refreshEncryptionStatus();
+	return true;
 }
