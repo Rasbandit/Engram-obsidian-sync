@@ -30,39 +30,7 @@ export function formatEncryptionRowLabel(vault: VaultInfo | null): {
 }
 
 export function renderSelfHostedTab(ctx: TabContext): void {
-	const { containerEl, plugin, redisplay, startDeviceFlow, switchToTab } = ctx;
-
-	const isAuthed = !!plugin.settings.apiKey || !!plugin.settings.refreshToken;
-	const activeVaultId = plugin.settings.vaultId;
-
-	// ── Persistent encryption status (top of page, like Signed-in row) ──
-	if (isAuthed && activeVaultId) {
-		const encSetting = new Setting(containerEl)
-			.setClass("engram-encryption-status-row")
-			.setName("Encryption: checking…")
-			.setDesc("Click to manage encryption at rest.")
-			.addButton((btn) =>
-				btn.setButtonText("Manage").onClick(() => switchToTab("encryption")),
-			);
-
-		const idNum = Number(activeVaultId);
-		if (!Number.isNaN(idNum)) {
-			plugin.api
-				.listVaults()
-				.then((vaults) => {
-					const vault = vaults.find((v) => v.id === idNum) ?? null;
-					const formatted = formatEncryptionRowLabel(vault);
-					if (formatted) {
-						encSetting.setName(`${formatted.glyph} ${formatted.label}`);
-					} else {
-						encSetting.setName("Encryption: vault not registered");
-					}
-				})
-				.catch((e: unknown) => {
-					encSetting.setName(`Encryption: ${describeListVaultsError(e)}`);
-				});
-		}
-	}
+	const { containerEl, plugin, redisplay, startDeviceFlow } = ctx;
 
 	// ── Setup ──
 	new Setting(containerEl).setName("Setup").setHeading();

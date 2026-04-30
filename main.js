@@ -2364,19 +2364,7 @@ function formatEncryptionRowLabel(vault) {
 }
 function renderSelfHostedTab(ctx) {
   var _a;
-  let { containerEl, plugin, redisplay, startDeviceFlow, switchToTab } = ctx, isAuthed = !!plugin.settings.apiKey || !!plugin.settings.refreshToken, activeVaultId = plugin.settings.vaultId;
-  if (isAuthed && activeVaultId) {
-    let encSetting = new import_obsidian12.Setting(containerEl).setClass("engram-encryption-status-row").setName("Encryption: checking\u2026").setDesc("Click to manage encryption at rest.").addButton(
-      (btn) => btn.setButtonText("Manage").onClick(() => switchToTab("encryption"))
-    ), idNum = Number(activeVaultId);
-    Number.isNaN(idNum) || plugin.api.listVaults().then((vaults) => {
-      var _a2;
-      let vault = (_a2 = vaults.find((v) => v.id === idNum)) != null ? _a2 : null, formatted = formatEncryptionRowLabel(vault);
-      formatted ? encSetting.setName(`${formatted.glyph} ${formatted.label}`) : encSetting.setName("Encryption: vault not registered");
-    }).catch((e) => {
-      encSetting.setName(`Encryption: ${describeListVaultsError(e)}`);
-    });
-  }
+  let { containerEl, plugin, redisplay, startDeviceFlow } = ctx;
   new import_obsidian12.Setting(containerEl).setName("Setup").setHeading();
   let repoSetting = new import_obsidian12.Setting(containerEl).setName("Engram server").setDesc("Engram is the backend that powers sync and semantic search. Run it yourself:");
   repoSetting.descEl.createEl("br"), repoSetting.descEl.createEl("a", {
@@ -2599,7 +2587,7 @@ var EngramSyncSettingTab = class extends import_obsidian14.PluginSettingTab {
   display() {
     let { containerEl } = this;
     containerEl.empty(), this.renderStatus(containerEl);
-    let progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" }), progressLabel = progressContainer.createEl("p", {
+    let encryptionStatusEl = containerEl.createDiv({ cls: "engram-encryption-status-row" }), progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" }), progressLabel = progressContainer.createEl("p", {
       text: "Syncing...",
       cls: "engram-progress-label"
     }), progressBarInner = progressContainer.createDiv({ cls: "engram-progress-bar-outer" }).createDiv({ cls: "engram-progress-bar-inner" });
@@ -2643,8 +2631,35 @@ var EngramSyncSettingTab = class extends import_obsidian14.PluginSettingTab {
       });
       btn.dataset.tab = tab.id, btn.addEventListener("click", () => activateTab(tab.id));
     }
+    this.renderEncryptionStatus(encryptionStatusEl, () => activateTab("encryption"));
     let startTab = tabs.find((t) => t.id === this.activeTab) ? this.activeTab : "account";
     activateTab(startTab);
+  }
+  /** Render the persistent encryption-status row (above the tab bar).
+   *  Mirrors the connection-status pattern: dot/glyph + label, clickable
+   *  to switch to the Encryption tab. Hidden when there's nothing useful
+   *  to show (no auth, no vault). */
+  renderEncryptionStatus(el, onClick) {
+    let isAuthed = !!this.plugin.settings.apiKey || !!this.plugin.settings.refreshToken, activeVaultId = this.plugin.settings.vaultId;
+    if (!isAuthed || !activeVaultId) {
+      el.style.display = "none";
+      return;
+    }
+    el.empty(), el.addClass("engram-status-container"), el.addEventListener("click", onClick);
+    let glyphEl = el.createSpan({ cls: "engram-encryption-glyph" }), labelEl = el.createSpan({ cls: "engram-encryption-label" });
+    labelEl.setText("Encryption: checking\u2026");
+    let idNum = Number(activeVaultId);
+    if (Number.isNaN(idNum)) {
+      labelEl.setText("Encryption: vault not registered");
+      return;
+    }
+    this.plugin.api.listVaults().then((vaults) => {
+      var _a;
+      let vault = (_a = vaults.find((v) => v.id === idNum)) != null ? _a : null, formatted = formatEncryptionRowLabel(vault);
+      formatted ? (glyphEl.setText(formatted.glyph), labelEl.setText(formatted.label)) : labelEl.setText("Encryption: vault not registered");
+    }).catch((e) => {
+      labelEl.setText(`Encryption: ${describeListVaultsError(e)}`);
+    });
   }
   /** Open a progress modal and wire it to the sync engine's progress callback. */
   async openProgressModal() {
