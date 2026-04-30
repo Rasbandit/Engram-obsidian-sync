@@ -119,26 +119,33 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 				dropdown.addOption("", "Loading vaults...");
 				dropdown.setDisabled(true);
 
-				plugin.api.listVaults().then((vaults) => {
-					dropdown.selectEl.empty();
-					if (vaults.length === 0) {
-						dropdown.addOption("", "No vaults found — first sync will create one");
-					} else {
-						for (const v of vaults) {
-							const label = v.is_default ? `${v.name} (default)` : v.name;
-							dropdown.addOption(String(v.id), label);
+				plugin.api
+					.listVaults()
+					.then((vaults) => {
+						dropdown.selectEl.empty();
+						if (vaults.length === 0) {
+							dropdown.addOption("", "No vaults found — first sync will create one");
+						} else {
+							for (const v of vaults) {
+								const label = v.is_default ? `${v.name} (default)` : v.name;
+								dropdown.addOption(String(v.id), label);
+							}
 						}
-					}
-					dropdown.setDisabled(false);
+						dropdown.setDisabled(false);
 
-					if (plugin.settings.vaultId) {
-						dropdown.setValue(plugin.settings.vaultId);
-					}
+						if (plugin.settings.vaultId) {
+							dropdown.setValue(plugin.settings.vaultId);
+						}
 
-					dropdown.onChange(async (value) => {
-						if (await applyVaultSwitch(plugin, value)) redisplay();
+						dropdown.onChange(async (value) => {
+							if (await applyVaultSwitch(plugin, value)) redisplay();
+						});
+					})
+					.catch((e: unknown) => {
+						dropdown.selectEl.empty();
+						dropdown.addOption("", describeListVaultsError(e));
+						dropdown.setDisabled(true);
 					});
-				});
 			});
 	}
 
@@ -157,6 +164,18 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 	const iconSpan = kofiLink.createSpan({ cls: "engram-kofi-icon" });
 	setIcon(iconSpan, "coffee");
 	kofiLink.createSpan({ text: "Support on Ko-fi" });
+}
+
+/** Map a `listVaults()` rejection to a short human label suitable for a
+ *  dropdown placeholder. Distinguishes 401/403, timeouts, and 5xx from the
+ *  legacy "swallow → empty list" behavior. Pure for testing. */
+export function describeListVaultsError(e: unknown): string {
+	const err = e as { status?: number; message?: string };
+	const status = err?.status;
+	if (status === 401 || status === 403) return "Sign-in required to load vaults";
+	if (status && status >= 500) return `Server error (${status}) — check Engram logs`;
+	if (status && status >= 400) return `Request failed (${status})`;
+	return "Could not reach Engram — check connection";
 }
 
 /** Subset of EngramSyncPlugin used by `applyVaultSwitch`. Defined here so the

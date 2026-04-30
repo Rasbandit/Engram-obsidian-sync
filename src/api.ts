@@ -138,14 +138,12 @@ export class EngramApi {
 		return resp.json as VaultRegistrationResponse;
 	}
 
-	/** Fetch all vaults accessible by the current user. Returns [] on error. */
+	/** Fetch all vaults accessible by the current user. Throws the underlying
+	 *  request error (with `.status` for HTTP responses) so callers can render
+	 *  401/timeout/5xx distinctly from "successful empty list". */
 	async listVaults(): Promise<VaultInfo[]> {
-		try {
-			const resp = await this.request("GET", "/vaults");
-			return (resp.json as { vaults: VaultInfo[] }).vaults;
-		} catch {
-			return [];
-		}
+		const resp = await this.request("GET", "/vaults");
+		return (resp.json as { vaults: VaultInfo[] }).vaults;
 	}
 
 	/** Authenticated ping — verifies both connectivity and API key. */

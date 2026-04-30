@@ -1,5 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
-import { type VaultSwitchTarget, applyVaultSwitch } from "../src/tabs/self-hosted-tab";
+import {
+	type VaultSwitchTarget,
+	applyVaultSwitch,
+	describeListVaultsError,
+} from "../src/tabs/self-hosted-tab";
 
 function makePlugin(initial: string | null): VaultSwitchTarget & {
 	api: { setVaultId: ReturnType<typeof mock> };
@@ -77,5 +81,37 @@ describe("applyVaultSwitch", () => {
 		await applyVaultSwitch(plugin, "9");
 
 		expect(order).toEqual(["setVaultId", "saveSettings", "refreshEncryptionStatus"]);
+	});
+});
+
+describe("describeListVaultsError", () => {
+	test("401 → sign-in required", () => {
+		expect(describeListVaultsError({ status: 401 })).toBe("Sign-in required to load vaults");
+	});
+
+	test("403 → sign-in required (forbidden surfaced same as 401)", () => {
+		expect(describeListVaultsError({ status: 403 })).toBe("Sign-in required to load vaults");
+	});
+
+	test("5xx → server error with status", () => {
+		expect(describeListVaultsError({ status: 500 })).toBe(
+			"Server error (500) — check Engram logs",
+		);
+		expect(describeListVaultsError({ status: 503 })).toBe(
+			"Server error (503) — check Engram logs",
+		);
+	});
+
+	test("other 4xx → request failed with status", () => {
+		expect(describeListVaultsError({ status: 404 })).toBe("Request failed (404)");
+	});
+
+	test("no status (timeout/network) → connection message", () => {
+		expect(describeListVaultsError(new Error("ETIMEDOUT"))).toBe(
+			"Could not reach Engram — check connection",
+		);
+		expect(describeListVaultsError(undefined)).toBe(
+			"Could not reach Engram — check connection",
+		);
 	});
 });

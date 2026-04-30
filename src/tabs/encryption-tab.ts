@@ -1,7 +1,12 @@
 import { Notice, Setting } from "obsidian";
 import { type EncryptionAction, EncryptionConfirmModal } from "../encryption-confirm-modal";
 import type { EncryptionProgress, VaultEncryptionStatus, VaultInfo } from "../types";
+import { describeListVaultsError } from "./self-hosted-tab";
 import type { TabContext } from "./types";
+
+type FetchVaultResult =
+	| { kind: "ok"; vault: VaultInfo | null }
+	| { kind: "error"; message: string };
 
 /** Format a status string for the user. Pure for testing. */
 export function formatStatusLabel(status: VaultEncryptionStatus | undefined): string {
@@ -64,7 +69,13 @@ export function renderEncryptionTab(ctx: TabContext): void {
 	void loadAndRender();
 
 	async function loadAndRender(): Promise<void> {
-		const vault = await fetchActiveVault();
+		const result = await fetchActiveVault();
+		if (result.kind === "error") {
+			statusBox.empty();
+			statusBox.setText(result.message);
+			return;
+		}
+		const vault = result.vault;
 		if (!vault) {
 			statusBox.empty();
 			statusBox.setText(
@@ -190,13 +201,17 @@ export function renderEncryptionTab(ctx: TabContext): void {
 		}
 	}
 
-	async function fetchActiveVault(): Promise<VaultInfo | null> {
+	async function fetchActiveVault(): Promise<FetchVaultResult> {
 		const activeId = plugin.api.getActiveVaultId();
-		if (!activeId) return null;
+		if (!activeId) return { kind: "ok", vault: null };
 		const idNum = Number(activeId);
-		if (Number.isNaN(idNum)) return null;
-		const vaults = await plugin.api.listVaults();
-		return vaults.find((v) => v.id === idNum) ?? null;
+		if (Number.isNaN(idNum)) return { kind: "ok", vault: null };
+		try {
+			const vaults = await plugin.api.listVaults();
+			return { kind: "ok", vault: vaults.find((v) => v.id === idNum) ?? null };
+		} catch (e) {
+			return { kind: "error", message: describeListVaultsError(e) };
+		}
 	}
 
 	async function safeProgress(vaultId: number): Promise<EncryptionProgress | null> {
