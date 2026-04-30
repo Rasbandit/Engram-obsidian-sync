@@ -1,6 +1,9 @@
 import type { VaultEncryptionStatus } from "./types";
 
-/** Pure mapping from encryption status → status-bar glyph + tooltip. */
+/** Pure mapping from encryption status → status-bar glyph + tooltip.
+ *  `null` → empty glyph so the caller can hide the badge instead of showing
+ *  a cryptic "🔓?". Unknown status is a transient pre-fetch state that
+ *  should not be rendered. */
 export function describeEncryptionBadge(
 	status: VaultEncryptionStatus | null,
 	progress?: { processed: number; total: number },
@@ -24,7 +27,7 @@ export function describeEncryptionBadge(
 		case "none":
 			return { glyph: "🔓", tooltip: "Vault not encrypted" };
 		default:
-			return { glyph: "🔓?", tooltip: "Encryption status unknown" };
+			return { glyph: "", tooltip: "" };
 	}
 }
 

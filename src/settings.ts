@@ -8,7 +8,11 @@ import { SyncProgressModal } from "./sync-progress-modal";
 import { renderAccountTab } from "./tabs/account-tab";
 import { renderAdvancedTab } from "./tabs/advanced-tab";
 import { renderEncryptionTab } from "./tabs/encryption-tab";
-import { renderSelfHostedTab } from "./tabs/self-hosted-tab";
+import {
+	describeListVaultsError,
+	formatEncryptionRowLabel,
+	renderSelfHostedTab,
+} from "./tabs/self-hosted-tab";
 import type { TabContext } from "./tabs/types";
 
 export class EngramSyncSettingTab extends PluginSettingTab {
@@ -31,6 +35,11 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 
 		// ── Status indicator (persists across tabs) ──
 		this.renderStatus(containerEl);
+
+		// ── Encryption status (persists across tabs, like the connection dot) ──
+		const encryptionStatusEl = containerEl.createDiv({ cls: "engram-encryption-status-row" });
+		// Filled in below once `activateTab` is defined so the row can switch
+		// to the Encryption tab on click.
 
 		// ── Progress bar (hidden until sync is active, persists across tabs) ──
 		const progressContainer = containerEl.createDiv({ cls: "engram-sync-progress" });
@@ -107,9 +116,57 @@ export class EngramSyncSettingTab extends PluginSettingTab {
 			btn.addEventListener("click", () => activateTab(tab.id));
 		}
 
+		// Populate the persistent encryption-status row now that activateTab
+		// exists. The row sits above the tab bar so it's visible regardless of
+		// which tab is open — same role as the connection dot.
+		this.renderEncryptionStatus(encryptionStatusEl, () => activateTab("encryption"));
+
 		// Activate the remembered tab (or default to "account")
 		const startTab = tabs.find((t) => t.id === this.activeTab) ? this.activeTab : "account";
 		activateTab(startTab);
+	}
+
+	/** Render the persistent encryption-status row (above the tab bar).
+	 *  Mirrors the connection-status pattern: dot/glyph + label, clickable
+	 *  to switch to the Encryption tab. Hidden when there's nothing useful
+	 *  to show (no auth, no vault). */
+	private renderEncryptionStatus(el: HTMLElement, onClick: () => void): void {
+		const isAuthed = !!this.plugin.settings.apiKey || !!this.plugin.settings.refreshToken;
+		const activeVaultId = this.plugin.settings.vaultId;
+		if (!isAuthed || !activeVaultId) {
+			el.style.display = "none";
+			return;
+		}
+
+		el.empty();
+		el.addClass("engram-status-container");
+		el.addEventListener("click", onClick);
+
+		const glyphEl = el.createSpan({ cls: "engram-encryption-glyph" });
+		const labelEl = el.createSpan({ cls: "engram-encryption-label" });
+		labelEl.setText("Encryption: checking…");
+
+		const idNum = Number(activeVaultId);
+		if (Number.isNaN(idNum)) {
+			labelEl.setText("Encryption: vault not registered");
+			return;
+		}
+
+		this.plugin.api
+			.listVaults()
+			.then((vaults) => {
+				const vault = vaults.find((v) => v.id === idNum) ?? null;
+				const formatted = formatEncryptionRowLabel(vault);
+				if (formatted) {
+					glyphEl.setText(formatted.glyph);
+					labelEl.setText(formatted.label);
+				} else {
+					labelEl.setText("Encryption: vault not registered");
+				}
+			})
+			.catch((e: unknown) => {
+				labelEl.setText(`Encryption: ${describeListVaultsError(e)}`);
+			});
 	}
 
 	/** Open a progress modal and wire it to the sync engine's progress callback. */

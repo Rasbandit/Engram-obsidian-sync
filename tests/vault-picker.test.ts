@@ -31,13 +31,12 @@ describe("EngramApi.listVaults", () => {
 		expect(vaults[1].is_default).toBe(false);
 	});
 
-	test("returns empty array on error", async () => {
+	test("rethrows underlying error so callers can distinguish auth/network/5xx", async () => {
 		const { EngramApi } = await import("../src/api");
 		const api = new EngramApi("http://localhost:4000/api");
-		(api as any).request = mock().mockRejectedValue(new Error("Network error"));
+		const err = Object.assign(new Error("Unauthorized"), { status: 401 });
+		(api as any).request = mock().mockRejectedValue(err);
 
-		const vaults = await api.listVaults();
-
-		expect(vaults).toEqual([]);
+		await expect(api.listVaults()).rejects.toMatchObject({ status: 401 });
 	});
 });

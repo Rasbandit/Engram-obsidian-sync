@@ -38,10 +38,14 @@ describe("describeEncryptionBadge", () => {
 		expect(out.tooltip).toBe("Vault not encrypted");
 	});
 
-	test("null status shows unknown", () => {
+	test("null status returns empty glyph so caller can hide the badge", () => {
+		// Used to render "🔓?" + "unknown" on first-load before refresh, after
+		// sign-out, and when no vault is selected — which read as a security
+		// indicator failure to users. Empty glyph + display:none in the caller
+		// keeps the status bar clean until we have a real status.
 		const out = describeEncryptionBadge(null);
-		expect(out.glyph).toBe("🔓?");
-		expect(out.tooltip).toContain("unknown");
+		expect(out.glyph).toBe("");
+		expect(out.tooltip).toBe("");
 	});
 });
 
