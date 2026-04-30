@@ -140,6 +140,10 @@ export function renderSelfHostedTab(ctx: TabContext): void {
 							plugin.settings.vaultId = value;
 							plugin.api.setVaultId(value);
 							await plugin.saveSettings();
+							// Encryption is per-vault. Switching tenants without refreshing
+							// the badge would leave the prior vault's lock state on screen,
+							// which is misleading for a security indicator.
+							void plugin.refreshEncryptionStatus();
 							redisplay();
 						}
 					});

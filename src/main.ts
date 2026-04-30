@@ -517,6 +517,7 @@ export default class EngramSyncPlugin extends Plugin {
 				this.noteStream.setAuthProvider(this.authProvider);
 			}
 		}
+		void this.refreshEncryptionStatus();
 	}
 
 	async clearOAuthTokens(): Promise<void> {
@@ -590,6 +591,7 @@ export default class EngramSyncPlugin extends Plugin {
 					// Use savePluginData instead of saveSettings to avoid triggering re-registration
 					void this.savePluginData(this.syncEngine.getLastSync());
 					this.noteStream?.disconnect();
+					void this.refreshEncryptionStatus();
 				};
 
 				this.noteStream = channel;
@@ -664,8 +666,15 @@ export default class EngramSyncPlugin extends Plugin {
 		try {
 			const progress = await this.api.getEncryptionProgress(idNum);
 			this.renderEncryptionBadge(progress.status, progress);
+			// Active states (encrypting/decrypting): server is making progress, poll
+			// at the 5s cadence so the badge tracks N/M counts.
+			// `decrypt_pending` (24h cancellable window): the server transitions to
+			// `decrypting` autonomously when the window expires, so we still need to
+			// poll — at a slower cadence since nothing is moving meanwhile.
 			if (progress.status === "encrypting" || progress.status === "decrypting") {
-				this.scheduleEncryptionPoll();
+				this.scheduleEncryptionPoll(5_000);
+			} else if (progress.status === "decrypt_pending") {
+				this.scheduleEncryptionPoll(60_000);
 			} else {
 				this.clearEncryptionPoll();
 			}
@@ -675,12 +684,12 @@ export default class EngramSyncPlugin extends Plugin {
 		}
 	}
 
-	private scheduleEncryptionPoll(): void {
+	private scheduleEncryptionPoll(intervalMs: number): void {
 		if (this.encryptionPollHandle != null) return;
 		this.encryptionPollHandle = window.setTimeout(() => {
 			this.encryptionPollHandle = null;
 			void this.refreshEncryptionStatus();
-		}, 5000);
+		}, intervalMs);
 	}
 
 	private clearEncryptionPoll(): void {

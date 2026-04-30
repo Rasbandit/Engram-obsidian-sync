@@ -2489,7 +2489,7 @@ function renderSelfHostedTab(ctx) {
           dropdown.addOption(String(v.id), label);
         }
       dropdown.setDisabled(!1), plugin.settings.vaultId && dropdown.setValue(plugin.settings.vaultId), dropdown.onChange(async (value) => {
-        value && value !== plugin.settings.vaultId && (plugin.settings.vaultId = value, plugin.api.setVaultId(value), await plugin.saveSettings(), redisplay());
+        value && value !== plugin.settings.vaultId && (plugin.settings.vaultId = value, plugin.api.setVaultId(value), await plugin.saveSettings(), plugin.refreshEncryptionStatus(), redisplay());
       });
     });
   })), new import_obsidian13.Setting(containerEl).setName("Support development").setHeading();
@@ -4411,7 +4411,7 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian17.Plugin
     return this.settings.apiKey ? new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId) : null;
   }
   async saveOAuthTokens(refreshToken, vaultId, userEmail) {
-    this.settings.refreshToken = refreshToken, this.settings.userEmail = userEmail, this.settings.authMethod = "oauth", this.settings.vaultId = vaultId, await this.saveSettings(), this.authProvider = this.createAuthProvider(), this.authProvider && (this.api.setAuthProvider(this.authProvider), this.noteStream && this.noteStream.setAuthProvider(this.authProvider));
+    this.settings.refreshToken = refreshToken, this.settings.userEmail = userEmail, this.settings.authMethod = "oauth", this.settings.vaultId = vaultId, await this.saveSettings(), this.authProvider = this.createAuthProvider(), this.authProvider && (this.api.setAuthProvider(this.authProvider), this.noteStream && this.noteStream.setAuthProvider(this.authProvider)), this.refreshEncryptionStatus();
   }
   async clearOAuthTokens() {
     this.settings.refreshToken = void 0, this.settings.userEmail = void 0, this.settings.authMethod = null, await this.saveSettings(), this.authProvider = this.settings.apiKey ? new ApiKeyAuth(this.settings.apiKey, this.settings.vaultId) : null, this.authProvider && this.api.setAuthProvider(this.authProvider);
@@ -4446,7 +4446,7 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian17.Plugin
         });
       }, channel.onVaultDeleted = () => {
         var _a;
-        new import_obsidian17.Notice("Engram: This vault has been deleted on the server."), rlog().info("lifecycle", "Vault deleted on server \u2014 clearing vaultId"), this.settings.vaultId = null, this.api.setVaultId(null), this.savePluginData(this.syncEngine.getLastSync()), (_a = this.noteStream) == null || _a.disconnect();
+        new import_obsidian17.Notice("Engram: This vault has been deleted on the server."), rlog().info("lifecycle", "Vault deleted on server \u2014 clearing vaultId"), this.settings.vaultId = null, this.api.setVaultId(null), this.savePluginData(this.syncEngine.getLastSync()), (_a = this.noteStream) == null || _a.disconnect(), this.refreshEncryptionStatus();
       }, this.noteStream = channel, this.authProvider && this.noteStream.setAuthProvider(this.authProvider), channel.connect();
     }).catch((e) => {
       if (console.error("Engram Sync: failed to fetch user id for channel", e), rlog().error(
@@ -4491,14 +4491,14 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian17.Plugin
     if (!Number.isNaN(idNum))
       try {
         let progress = await this.api.getEncryptionProgress(idNum);
-        this.renderEncryptionBadge(progress.status, progress), progress.status === "encrypting" || progress.status === "decrypting" ? this.scheduleEncryptionPoll() : this.clearEncryptionPoll();
+        this.renderEncryptionBadge(progress.status, progress), progress.status === "encrypting" || progress.status === "decrypting" ? this.scheduleEncryptionPoll(5e3) : progress.status === "decrypt_pending" ? this.scheduleEncryptionPoll(6e4) : this.clearEncryptionPoll();
       } catch (e) {
       }
   }
-  scheduleEncryptionPoll() {
+  scheduleEncryptionPoll(intervalMs) {
     this.encryptionPollHandle == null && (this.encryptionPollHandle = window.setTimeout(() => {
       this.encryptionPollHandle = null, this.refreshEncryptionStatus();
-    }, 5e3));
+    }, intervalMs));
   }
   clearEncryptionPoll() {
     this.encryptionPollHandle != null && (clearTimeout(this.encryptionPollHandle), this.encryptionPollHandle = null);
