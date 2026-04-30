@@ -1,8 +1,68 @@
 import { Notice, Setting, setIcon } from "obsidian";
+import { describeEncryptionBadge } from "../encryption-badge";
+import type { VaultEncryptionStatus, VaultInfo } from "../types";
 import type { TabContext } from "./types";
 
+/** One-line encryption status label shown in the persistent header row.
+ *  Pure so it can be tested without the Obsidian DOM. Returns null when
+ *  there's nothing meaningful to show (no active vault). */
+export function formatEncryptionRowLabel(vault: VaultInfo | null): {
+	glyph: string;
+	label: string;
+} | null {
+	if (!vault) return null;
+	const status: VaultEncryptionStatus = vault.encryption_status ?? "none";
+	const { glyph } = describeEncryptionBadge(status);
+	switch (status) {
+		case "encrypted":
+			return { glyph, label: "Encryption: enabled (at rest)" };
+		case "encrypting":
+			return { glyph, label: "Encryption: enabling…" };
+		case "decrypt_pending":
+			return { glyph, label: "Encryption: decryption scheduled" };
+		case "decrypting":
+			return { glyph, label: "Encryption: disabling…" };
+		case "none":
+			return { glyph: glyph || "🔓", label: "Encryption: not enabled" };
+		default:
+			return null;
+	}
+}
+
 export function renderSelfHostedTab(ctx: TabContext): void {
-	const { containerEl, plugin, redisplay, startDeviceFlow } = ctx;
+	const { containerEl, plugin, redisplay, startDeviceFlow, switchToTab } = ctx;
+
+	const isAuthed = !!plugin.settings.apiKey || !!plugin.settings.refreshToken;
+	const activeVaultId = plugin.settings.vaultId;
+
+	// ── Persistent encryption status (top of page, like Signed-in row) ──
+	if (isAuthed && activeVaultId) {
+		const encSetting = new Setting(containerEl)
+			.setClass("engram-encryption-status-row")
+			.setName("Encryption: checking…")
+			.setDesc("Click to manage encryption at rest.")
+			.addButton((btn) =>
+				btn.setButtonText("Manage").onClick(() => switchToTab("encryption")),
+			);
+
+		const idNum = Number(activeVaultId);
+		if (!Number.isNaN(idNum)) {
+			plugin.api
+				.listVaults()
+				.then((vaults) => {
+					const vault = vaults.find((v) => v.id === idNum) ?? null;
+					const formatted = formatEncryptionRowLabel(vault);
+					if (formatted) {
+						encSetting.setName(`${formatted.glyph} ${formatted.label}`);
+					} else {
+						encSetting.setName("Encryption: vault not registered");
+					}
+				})
+				.catch((e: unknown) => {
+					encSetting.setName(`Encryption: ${describeListVaultsError(e)}`);
+				});
+		}
+	}
 
 	// ── Setup ──
 	new Setting(containerEl).setName("Setup").setHeading();

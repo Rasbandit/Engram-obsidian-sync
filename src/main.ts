@@ -699,6 +699,10 @@ export default class EngramSyncPlugin extends Plugin {
 		const { glyph, tooltip } = describeEncryptionBadge(status, progress);
 		this.encryptionStatusBarEl.setText(glyph);
 		this.encryptionStatusBarEl.setAttribute("aria-label", tooltip);
+		// Hide the badge entirely when we don't have a real status — the cryptic
+		// "🔓?" used to confuse users on first-load before refreshEncryptionStatus
+		// returned, and after vault deletion / sign-out.
+		this.encryptionStatusBarEl.style.display = glyph === "" ? "none" : "";
 	}
 
 	/** Read-only access for tests and the encryption tab redisplay path. */

@@ -2309,9 +2309,74 @@ var EncryptionConfirmModal = class extends import_obsidian11.Modal {
 
 // src/tabs/self-hosted-tab.ts
 var import_obsidian12 = require("obsidian");
+
+// src/encryption-badge.ts
+function describeEncryptionBadge(status, progress) {
+  switch (status) {
+    case "encrypted":
+      return { glyph: "\u{1F512}", tooltip: "Vault encrypted at rest" };
+    case "encrypting":
+      return { glyph: "\u{1F512}\u2026", tooltip: `Encrypting vault${progress ? ` \u2014 ${progress.processed}/${progress.total} notes` : ""}` };
+    case "decrypt_pending":
+      return {
+        glyph: "\u{1F513}\u23F3",
+        tooltip: "Decryption scheduled \u2014 cancel within 24h"
+      };
+    case "decrypting":
+      return { glyph: "\u{1F513}\u2026", tooltip: `Decrypting vault${progress ? ` \u2014 ${progress.processed}/${progress.total} notes` : ""}` };
+    case "none":
+      return { glyph: "\u{1F513}", tooltip: "Vault not encrypted" };
+    default:
+      return { glyph: "", tooltip: "" };
+  }
+}
+function chooseEncryptionPollInterval(status) {
+  switch (status) {
+    case "encrypting":
+    case "decrypting":
+      return 5e3;
+    case "decrypt_pending":
+      return 6e4;
+    default:
+      return null;
+  }
+}
+
+// src/tabs/self-hosted-tab.ts
+function formatEncryptionRowLabel(vault) {
+  var _a;
+  if (!vault) return null;
+  let status = (_a = vault.encryption_status) != null ? _a : "none", { glyph } = describeEncryptionBadge(status);
+  switch (status) {
+    case "encrypted":
+      return { glyph, label: "Encryption: enabled (at rest)" };
+    case "encrypting":
+      return { glyph, label: "Encryption: enabling\u2026" };
+    case "decrypt_pending":
+      return { glyph, label: "Encryption: decryption scheduled" };
+    case "decrypting":
+      return { glyph, label: "Encryption: disabling\u2026" };
+    case "none":
+      return { glyph: glyph || "\u{1F513}", label: "Encryption: not enabled" };
+    default:
+      return null;
+  }
+}
 function renderSelfHostedTab(ctx) {
   var _a;
-  let { containerEl, plugin, redisplay, startDeviceFlow } = ctx;
+  let { containerEl, plugin, redisplay, startDeviceFlow, switchToTab } = ctx, isAuthed = !!plugin.settings.apiKey || !!plugin.settings.refreshToken, activeVaultId = plugin.settings.vaultId;
+  if (isAuthed && activeVaultId) {
+    let encSetting = new import_obsidian12.Setting(containerEl).setClass("engram-encryption-status-row").setName("Encryption: checking\u2026").setDesc("Click to manage encryption at rest.").addButton(
+      (btn) => btn.setButtonText("Manage").onClick(() => switchToTab("encryption"))
+    ), idNum = Number(activeVaultId);
+    Number.isNaN(idNum) || plugin.api.listVaults().then((vaults) => {
+      var _a2;
+      let vault = (_a2 = vaults.find((v) => v.id === idNum)) != null ? _a2 : null, formatted = formatEncryptionRowLabel(vault);
+      formatted ? encSetting.setName(`${formatted.glyph} ${formatted.label}`) : encSetting.setName("Encryption: vault not registered");
+    }).catch((e) => {
+      encSetting.setName(`Encryption: ${describeListVaultsError(e)}`);
+    });
+  }
   new import_obsidian12.Setting(containerEl).setName("Setup").setHeading();
   let repoSetting = new import_obsidian12.Setting(containerEl).setName("Engram server").setDesc("Engram is the backend that powers sync and semantic search. Run it yourself:");
   repoSetting.descEl.createEl("br"), repoSetting.descEl.createEl("a", {
@@ -4096,38 +4161,6 @@ var BaseStore = class {
   }
 };
 
-// src/encryption-badge.ts
-function describeEncryptionBadge(status, progress) {
-  switch (status) {
-    case "encrypted":
-      return { glyph: "\u{1F512}", tooltip: "Vault encrypted at rest" };
-    case "encrypting":
-      return { glyph: "\u{1F512}\u2026", tooltip: `Encrypting vault${progress ? ` \u2014 ${progress.processed}/${progress.total} notes` : ""}` };
-    case "decrypt_pending":
-      return {
-        glyph: "\u{1F513}\u23F3",
-        tooltip: "Decryption scheduled \u2014 cancel within 24h"
-      };
-    case "decrypting":
-      return { glyph: "\u{1F513}\u2026", tooltip: `Decrypting vault${progress ? ` \u2014 ${progress.processed}/${progress.total} notes` : ""}` };
-    case "none":
-      return { glyph: "\u{1F513}", tooltip: "Vault not encrypted" };
-    default:
-      return { glyph: "\u{1F513}?", tooltip: "Encryption status unknown" };
-  }
-}
-function chooseEncryptionPollInterval(status) {
-  switch (status) {
-    case "encrypting":
-    case "decrypting":
-      return 5e3;
-    case "decrypt_pending":
-      return 6e4;
-    default:
-      return null;
-  }
-}
-
 // src/sync-log.ts
 var SyncLog = class {
   constructor(capacity = 500) {
@@ -4537,7 +4570,7 @@ var _EngramSyncPlugin = class _EngramSyncPlugin extends import_obsidian17.Plugin
     if (!this.encryptionStatusBarEl) return;
     this.encryptionStatus = status;
     let { glyph, tooltip } = describeEncryptionBadge(status, progress);
-    this.encryptionStatusBarEl.setText(glyph), this.encryptionStatusBarEl.setAttribute("aria-label", tooltip);
+    this.encryptionStatusBarEl.setText(glyph), this.encryptionStatusBarEl.setAttribute("aria-label", tooltip), this.encryptionStatusBarEl.style.display = glyph === "" ? "none" : "";
   }
   /** Read-only access for tests and the encryption tab redisplay path. */
   getEncryptionStatus() {
