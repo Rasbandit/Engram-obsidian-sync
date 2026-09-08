@@ -83,6 +83,7 @@ import {
 	type SyncStatus,
 } from "./types";
 import { checkForPluginUpdate } from "./update-check";
+import { setUpgradeAction } from "./upgrade-required";
 
 /** Generate a stable client ID for vault registration.
  *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
@@ -489,6 +490,10 @@ export default class EngramSyncPlugin extends Plugin {
 		// plugin_version on the socket URL. Set it late and the first requests
 		// of a launch go out unversioned.
 		setPluginVersion(this.manifest.version);
+		// Reuses the soft nudge's destination: a hard "too old to sync" refusal
+		// and a "newer version available" nudge want the same place, and that
+		// path is already feature-detected against Obsidian internals.
+		setUpgradeAction(() => this.openCommunityPluginsUpdate());
 		rlog().info("lifecycle", `onload start — v${this.manifest.version}`);
 		activeDocument.body.classList.add("engram-vault-sync-active");
 		await this.loadSettings();

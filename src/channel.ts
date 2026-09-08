@@ -4,6 +4,7 @@ import { errMsg } from "./error-util";
 import { noteRef } from "./note-ref";
 import { pluginVersion } from "./plugin-version";
 import { rlog } from "./remote-log";
+import { notifyUpgradeRequired } from "./upgrade-required";
 
 /** How long to wait before reconnecting when no auth token is available
  *  (e.g. plugin loaded before OAuth refresh hydrated, or user signed out).
@@ -1287,11 +1288,28 @@ export class NoteChannel {
 					"channel",
 					`Channel join error on ${topic}: ${JSON.stringify(payload)}`,
 				);
+				const joinResponse = (
+					payload as {
+						response?: { reason?: unknown; min?: unknown; min_version?: unknown };
+					}
+				).response;
+				const joinReason =
+					typeof joinResponse?.reason === "string" ? joinResponse.reason : undefined;
+				// Checked for EVERY topic, not just crdt:. The version floor refuses
+				// sync: and crdt: alike, and the crdt-only branch below would miss
+				// the refusal on a backend or code path where sync: is rejected
+				// first — leaving the user with a silent, permanent failure.
+				// Latches to one notice per session inside notifyUpgradeRequired.
+				if (joinReason === "plugin_upgrade_required") {
+					notifyUpgradeRequired(
+						typeof joinResponse?.min_version === "string"
+							? joinResponse.min_version
+							: null,
+					);
+				}
 				if (topic === this.crdtTopic) {
-					const response = (payload as { response?: { reason?: unknown; min?: unknown } })
-						.response;
-					const reason =
-						typeof response?.reason === "string" ? response.reason : undefined;
+					const response = joinResponse;
+					const reason = joinReason;
 					const min = typeof response?.min === "number" ? response.min : undefined;
 					if (ref === this.crdtJoinMsgRef) {
 						// Remember the rejection for THIS session so a subsequent whole-

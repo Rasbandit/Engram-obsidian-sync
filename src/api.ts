@@ -24,6 +24,7 @@ import type {
 	VaultRegistrationResponse,
 	VersionConflictResponse,
 } from "./types";
+import { notifyUpgradeRequired } from "./upgrade-required";
 
 /** A request exceeded its deadline. requestUrl() cannot be aborted, so the
  *  underlying request is ABANDONED, not cancelled — a late server-side apply
@@ -217,6 +218,17 @@ export class EngramApi {
 			// so 402 always gets the rich error — see spec §4.6.
 			if (status === 402) {
 				throw parseLimitExceededError(e);
+			}
+			// 426 = this plugin is below the backend's minimum version. Terminal
+			// on every transport, so it is surfaced here rather than left to
+			// each caller's generic failure path. Rethrown unchanged: nothing
+			// branches on it programmatically, and the user-visible half is the
+			// notice (which latches itself to once per session).
+			if (status === 426) {
+				const body = errorBody(e);
+				notifyUpgradeRequired(
+					typeof body.min_version === "string" ? body.min_version : null,
+				);
 			}
 			// On 401, the cached access token may be stale (e.g. server-side TTL
 			// shorter than the expires_in we trusted). Invalidate and retry once
@@ -718,20 +730,29 @@ export function beaconRoute(path: string): string {
 		.slice(0, 64);
 }
 
-function parseLimitExceededError(e: unknown): LimitExceededError {
+/** The JSON body of an Obsidian `requestUrl` rejection. Arrives as `.json`
+ *  (parsed) or `.text` (raw) depending on platform, so try both; a malformed
+ *  or missing body yields `{}` rather than a decode crash, because every
+ *  caller here is already on an error path and must not fail twice. */
+function errorBody(e: unknown): Record<string, unknown> {
 	const err = e as { json?: unknown; text?: string };
-	let body: Record<string, unknown> = {};
 	if (err.json && typeof err.json === "object") {
-		body = err.json as Record<string, unknown>;
-	} else if (typeof err.text === "string") {
+		return err.json as Record<string, unknown>;
+	}
+	if (typeof err.text === "string") {
 		try {
 			const parsed: unknown = JSON.parse(err.text);
-			if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
 		} catch {
-			// Malformed text — fall through with empty body; "unknown" reason
-			// still routes to the generic toast.
+			// Malformed text — fall through to {}. For a 402 that still routes
+			// to the generic toast via the "unknown" reason.
 		}
 	}
+	return {};
+}
+
+function parseLimitExceededError(e: unknown): LimitExceededError {
+	const body = errorBody(e);
 	const pick = <T>(key: string): T | null => (body[key] !== undefined ? (body[key] as T) : null);
 	// Fall back to `error` when `reason` is absent. Not every 402 uses the
 	// LimitResponse shape: RequireApiWriteEnabled and EnforcePatCreation emit
