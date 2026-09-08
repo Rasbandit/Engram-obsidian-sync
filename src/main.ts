@@ -497,7 +497,7 @@ export default class EngramSyncPlugin extends Plugin {
 			this.api.setVaultId(this.settings.vaultId);
 		}
 		// Wire the per-install device id (minted in loadSettings) onto the real
-		// api instance before any sync runs, so cursor pulls carry X-Device-Id.
+		// api instance before any sync runs, so every REST call carries X-Device-Id.
 		this.api.setDeviceId(this.deviceId);
 		this.api.setTracingEnabled(this.settings.diagnosticsEnabled);
 

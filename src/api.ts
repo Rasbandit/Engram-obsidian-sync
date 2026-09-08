@@ -118,7 +118,8 @@ export class EngramApi {
 		this.vaultId = id;
 	}
 
-	/** Set the per-install device id sent as X-Device-Id on cursor pulls. */
+	/** Set the per-install device id sent as X-Device-Id on every REST call
+	 *  (used for delete-broadcast echo suppression, #970). */
 	setDeviceId(id: string | null): void {
 		this.deviceId = id && id.length > 0 ? id : null;
 	}
