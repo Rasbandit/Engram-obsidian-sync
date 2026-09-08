@@ -1234,7 +1234,7 @@ export class SyncEngine {
 	private idMapReconcileQueued = false;
 
 	/** note_ids the SERVER is known to already have a note row for — learned
-	 *  either from a `/sync/changes` pull (applySyncChange) or confirmed by a
+	 *  either from a seq-replay catch-up (`applySyncChange`) or confirmed by a
 	 *  successful REST push response. The backend's CRDT channel now requires
 	 *  the note to pre-exist (note_in_vault?) and silently drops a crdt_msg for
 	 *  an unknown note_id — it can no longer bootstrap a note row from a bare

@@ -49,7 +49,6 @@ src/
   conflict-modal.ts    Interactive conflict resolution UI
   search-modal.ts      Semantic search modal
   search-view.ts       Persistent search sidebar
-  cursor.ts            Sync-cursor helpers (cursor-pull + manifest reconcile)
   sync-center-render.ts  Sync Center dashboard rendering
   settings.ts + tabs/  Settings UI (tabs/: account, sync-center, self-hosted, advanced, about, start)
   offline-queue.ts     Persistent queue for offline edits
@@ -90,11 +89,11 @@ bun test --coverage   # check the report for the live coverage number (~89% func
 
 Don't hardcode counts; run `bun test` for the live total and `ls tests/*.test.ts`
 for the file list. The suite spans the SyncEngine (ignore/modify/delete/rename,
-pull, cursor-pull, WebSocket, echo suppression, 3-way merge, state export/import),
-cursor + manifest reconciliation, the API client (incl. batch push + `/sync/changes`),
-the offline queue, auth (ApiKey + OAuth device flow), the Phoenix channel, diff/merge,
-remote logging, plan/limit state, plus compliance tests (manifest, license, README
-disclosures, source/styles hygiene, command IDs).
+pull, seq-replay catch-up, WebSocket, echo suppression, 3-way merge, state export/import),
+manifest reconciliation, the API client, the offline queue, auth (ApiKey + OAuth
+device flow), the Phoenix channel, diff/merge, remote logging, plan/limit state,
+plus compliance tests (manifest, license, README disclosures, source/styles
+hygiene, command IDs).
 
 ### Test config
 

@@ -9,8 +9,7 @@ _Last verified: 2026-07-08_
 | File | Lines | Purpose |
 |------|-------|---------|
 | `src/main.ts` | ~1100 | Plugin lifecycle, vault event wiring, commands, status bar, settings I/O |
-| `src/sync.ts` | ~3500 | Core sync engine: push, pull, fullSync, cursor-pull, debounce, offline queue, conflicts, 3-way merge, request pacer |
-| `src/cursor.ts` | — | Sync-cursor helpers (cursor-pull bootstrap + manifest reconciliation) |
+| `src/sync.ts` | ~3500 | Core sync engine: push, pull, fullSync, seq-replay catch-up, manifest reconciliation, debounce, offline queue, conflicts, 3-way merge, request pacer |
 | `src/api.ts` | ~430 | HTTP client wrapping `requestUrl()` for all Engram REST calls |
 | `src/types.ts` | ~270 | All interfaces: settings, API responses, queue entries, sync status |
 | `src/settings.ts` + `src/tabs/` | — | Settings UI (PluginSettingTab) split into per-tab modules (Account, Sync Center, Self-hosted, Advanced, About, Start) |
@@ -72,7 +71,7 @@ All endpoints require `Authorization: Bearer <api_key>`. Path params use `encode
 | `POST` | `/notes` | `{path, content, mtime}` | `{note, chunks_indexed}` |
 | `GET` | `/notes/{path}` | — | Full note content |
 | `GET` | `/notes/changes?since={iso}` | — | `{changes[], server_time}` |
-| `GET` | `/sync/changes?cursor={c}&limit={n}` | cursor (opaque), limit (default 500) | `{changes[], cursor, has_more}` — cursor-pull (PR #109); tombstones included |
+| ~~`GET`~~ | ~~`/sync/changes?cursor={c}&limit={n}`~~ | — | **Removed** (backend REST-purge Bucket A, #1036) — catch-up now runs entirely over the socket (`catchupViaSeqReplay`) |
 | `GET` | `/sync/manifest` | — | Authoritative `{path, content_hash}` inventory for bootstrap/reconciliation |
 | `POST` | `/notes/batch` | `{notes: [{path, content, mtime}...]}` (≤100) | Bulk push (protocol rev) |
 | `DELETE` | `/notes/{path}` | — | `{deleted, path}` |
@@ -174,9 +173,8 @@ User patterns (from settings textarea, one per line):
 | `pushing` | `Set<path>` | Files currently being pushed (prevents re-entry) |
 | `recentlyPushed` | `Map<path, timeout>` | Echo suppression cooldowns (5s) |
 | `lastSync` | `string` | ISO 8601 timestamp, persisted to plugin data |
-| `syncCursor` | `string \| null` | Opaque cursor for cursor-pull via `GET /sync/changes` (PR #109); persisted under `syncCursor` key. `getSyncCursor()`/`setSyncCursor()` |
 | `syncState` | `Map<path, FileSyncState>` | Per-file synced state (replaced the old `syncedHashes` map). `exportSyncState()`/`importSyncState()` |
-| `syncStateVaultId` | `string \| null` | The server vaultId `syncState`/`lastSync`/`syncCursor` belong to; on vault change the stale state is invalidated |
+| `syncStateVaultId` | `string \| null` | The server vaultId `syncState`/`lastSync` belong to; on vault change the stale state is invalidated |
 | `offline` | `boolean` | Current connectivity state |
 | `healthCheckTimer` | `interval` | 30s poll when offline |
 | `ready` | `boolean` | Event handlers suppressed until true (ready gate) |
