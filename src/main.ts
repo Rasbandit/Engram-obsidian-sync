@@ -95,8 +95,9 @@ async function generateClientId(app: import("obsidian").App): Promise<string> {
 interface PluginData {
 	settings: EngramSyncSettings;
 	lastSync: string;
-	/** Per-install device id (random UUID). Sent as X-Device-Id on cursor pulls
-	 *  so the backend tracks its sync watermark per device. Device-local; NOT a
+	/** Per-install device id (random UUID). Sent as X-Device-Id on every REST
+	 *  call so the server can stamp it into `note_changed` delete broadcasts
+	 *  (#970), letting us drop our own fanout echoes. Device-local; NOT a
 	 *  user-facing setting. Distinct from settings.clientId (a path hash that
 	 *  collides across devices). */
 	deviceId?: string;
@@ -311,8 +312,9 @@ export default class EngramSyncPlugin extends Plugin {
 		this.indexChannel = null;
 	}
 	syncLog: SyncLog = new SyncLog();
-	/** Per-install device id sent as X-Device-Id so the backend attributes its
-	 *  sync watermark per device. Random UUID minted on first load, persisted
+	/** Per-install device id sent as X-Device-Id on every REST call so the
+	 *  server can stamp it into `note_changed` delete broadcasts (#970) for
+	 *  fanout-echo suppression. Random UUID minted on first load, persisted
 	 *  top-level in PluginData (device-local; NOT a user-facing setting). A
 	 *  reinstall/reset mints a new id → one clean re-bootstrap. */
 	deviceId: string | null = null;
@@ -495,7 +497,7 @@ export default class EngramSyncPlugin extends Plugin {
 			this.api.setVaultId(this.settings.vaultId);
 		}
 		// Wire the per-install device id (minted in loadSettings) onto the real
-		// api instance before any sync runs, so cursor pulls carry X-Device-Id.
+		// api instance before any sync runs, so every REST call carries X-Device-Id.
 		this.api.setDeviceId(this.deviceId);
 		this.api.setTracingEnabled(this.settings.diagnosticsEnabled);
 
@@ -1468,7 +1470,7 @@ export default class EngramSyncPlugin extends Plugin {
 		}
 		// Mint per-install device id on first load. Distinct from clientId (a
 		// path hash that collides across devices); device id is a fresh random
-		// UUID so the backend tracks its sync watermark per install.
+		// UUID sent as X-Device-Id for delete-broadcast echo suppression (#970).
 		this.deviceId = data?.deviceId ?? null;
 		if (!this.deviceId) {
 			this.deviceId = crypto.randomUUID();

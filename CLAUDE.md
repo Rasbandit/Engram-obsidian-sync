@@ -80,12 +80,12 @@ Don't hardcode test counts here — they drift. Run `bun test` for the live tota
 and `ls tests/*.test.ts` for the current file list. Coverage roughly tracks
 ~89% funcs / ~97% lines but check `bun test --coverage` for the real number.
 
-Broad areas under test: SyncEngine (ignore/modify/delete/rename, pull, cursor-pull,
-WebSocket events, echo suppression, 3-way merge, state export/import), the cursor
-+ manifest reconciliation path, the offline queue, the API client (incl. batch
-push + `/sync/changes`), auth (ApiKey + OAuth device flow), the Phoenix channel,
-diff/merge, remote logging, plan/limit state, and a set of compliance tests
-(manifest, license, README disclosures, source/styles hygiene, command IDs).
+Broad areas under test: SyncEngine (ignore/modify/delete/rename, pull, seq-replay
+catch-up, WebSocket events, echo suppression, 3-way merge, state export/import),
+manifest reconciliation, the offline queue, the API client, auth (ApiKey + OAuth
+device flow), the Phoenix channel, diff/merge, remote logging, plan/limit state,
+and a set of compliance tests (manifest, license, README disclosures,
+source/styles hygiene, command IDs).
 
 ### Test configuration
 
