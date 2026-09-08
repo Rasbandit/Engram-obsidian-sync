@@ -55,6 +55,7 @@ import { LimitExceededError } from "./limit-error";
 import { notifyLimitExceeded } from "./limit-toast";
 import { parsePlanState } from "./plan-state";
 import { atomicWriteJson, resilientReadJson } from "./plugin-data-io";
+import { setPluginVersion } from "./plugin-version";
 import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
 import { SearchModal } from "./search-modal";
 import { SEARCH_VIEW_TYPE, SearchView } from "./search-view";
@@ -483,6 +484,11 @@ export default class EngramSyncPlugin extends Plugin {
 			setActiveTracker(this.promiseTracker);
 		}
 		devLog().log("lifecycle", "plugin loading");
+		// Ahead of every transport, because both read it lazily on the wire: the
+		// api client stamps X-Plugin-Version per request and the channel puts
+		// plugin_version on the socket URL. Set it late and the first requests
+		// of a launch go out unversioned.
+		setPluginVersion(this.manifest.version);
 		rlog().info("lifecycle", `onload start — v${this.manifest.version}`);
 		activeDocument.body.classList.add("engram-vault-sync-active");
 		await this.loadSettings();

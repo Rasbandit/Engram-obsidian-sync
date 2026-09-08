@@ -11,6 +11,7 @@ import { LimitExceededError } from "./limit-error";
 import { BeaconBuffer } from "./observability/beacon";
 import { newTraceContext } from "./observability/traceGen";
 import type { BillingUsage } from "./plan-usage";
+import { pluginVersion } from "./plugin-version";
 import { type RemoteLogEntry, rlog } from "./remote-log";
 import type {
 	AttachmentDetail,
@@ -282,6 +283,13 @@ export class EngramApi {
 		}
 		if (this.deviceId) {
 			headers["X-Device-Id"] = this.deviceId;
+		}
+		// Reported so the backend can refuse clients below its compatibility
+		// floor (426 plugin_upgrade_required). Omitted, never sent empty — see
+		// plugin-version.ts.
+		const version = pluginVersion();
+		if (version) {
+			headers["X-Plugin-Version"] = version;
 		}
 		if (body !== undefined) {
 			headers["Content-Type"] = "application/json";

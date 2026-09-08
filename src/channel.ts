@@ -2,6 +2,7 @@ import type { AuthProvider } from "./auth";
 import { expBackoff } from "./backoff";
 import { errMsg } from "./error-util";
 import { noteRef } from "./note-ref";
+import { pluginVersion } from "./plugin-version";
 import { rlog } from "./remote-log";
 
 /** How long to wait before reconnecting when no auth token is available
@@ -926,6 +927,12 @@ export class NoteChannel {
 		});
 		if (this.deviceId) params.set("device_id", this.deviceId);
 		if (this.vaultId) params.set("vault_id", this.vaultId);
+		// The socket half of the compatibility floor, and the ONLY place the
+		// backend records the installed base's version distribution (one field
+		// per connect, not per request). ChannelGate refuses a join below the
+		// floor with reason `plugin_upgrade_required`.
+		const version = pluginVersion();
+		if (version) params.set("plugin_version", version);
 		const url = `${wsBase}/socket/websocket?${params.toString()}`;
 
 		const openedAt = Date.now();
