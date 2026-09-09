@@ -2,7 +2,9 @@ import type { AuthProvider } from "./auth";
 import { expBackoff } from "./backoff";
 import { errMsg } from "./error-util";
 import { noteRef } from "./note-ref";
+import { pluginVersion } from "./plugin-version";
 import { rlog } from "./remote-log";
+import { notifyUpgradeRequired } from "./upgrade-required";
 
 /** How long to wait before reconnecting when no auth token is available
  *  (e.g. plugin loaded before OAuth refresh hydrated, or user signed out).
@@ -926,6 +928,18 @@ export class NoteChannel {
 		});
 		if (this.deviceId) params.set("device_id", this.deviceId);
 		if (this.vaultId) params.set("vault_id", this.vaultId);
+		// The socket half of the compatibility floor. ChannelGate refuses a join
+		// below the floor with reason `plugin_upgrade_required`.
+		//
+		// Also the version signal with the BEST COVERAGE — not the only one.
+		// `remote-log.ts` puts plugin_version on every client log entry and the
+		// backend persists it as an indexed column (`logs/client_log.ex`), which
+		// is far easier to query than a log line; but client logs only ship when
+		// the user has enabled diagnostics, so that source silently under-counts
+		// exactly the disengaged installs a floor decision most needs to see.
+		// One field per connect, not per request.
+		const version = pluginVersion();
+		if (version) params.set("plugin_version", version);
 		const url = `${wsBase}/socket/websocket?${params.toString()}`;
 
 		const openedAt = Date.now();
@@ -1280,11 +1294,37 @@ export class NoteChannel {
 					"channel",
 					`Channel join error on ${topic}: ${JSON.stringify(payload)}`,
 				);
+				const joinResponse = (
+					payload as {
+						response?: { reason?: unknown; min?: unknown; min_version?: unknown };
+					}
+				).response;
+				const joinReason =
+					typeof joinResponse?.reason === "string" ? joinResponse.reason : undefined;
+				// Checked for EVERY topic, not just crdt:. The version floor refuses
+				// sync: and crdt: alike, and the crdt-only branch below would miss
+				// the refusal on a backend or code path where sync: is rejected
+				// first — leaving the user with a silent, permanent failure.
+				// Latches to one notice per session inside notifyUpgradeRequired.
+				//
+				// Also ref-agnostic, unlike the crdt branch below which screens on
+				// `crdtJoinMsgRef` to separate a JOIN error from a per-message
+				// error reply. Safe only because `plugin_upgrade_required` comes
+				// from `ChannelGate.check/3`, which is called from `join/3` and
+				// nowhere else. If the server ever emits that reason on a
+				// per-message reply, this needs the same ref screen — otherwise
+				// one stray frame latches the notice and permanently suppresses
+				// the real one.
+				if (joinReason === "plugin_upgrade_required") {
+					notifyUpgradeRequired(
+						typeof joinResponse?.min_version === "string"
+							? joinResponse.min_version
+							: null,
+					);
+				}
 				if (topic === this.crdtTopic) {
-					const response = (payload as { response?: { reason?: unknown; min?: unknown } })
-						.response;
-					const reason =
-						typeof response?.reason === "string" ? response.reason : undefined;
+					const response = joinResponse;
+					const reason = joinReason;
 					const min = typeof response?.min === "number" ? response.min : undefined;
 					if (ref === this.crdtJoinMsgRef) {
 						// Remember the rejection for THIS session so a subsequent whole-

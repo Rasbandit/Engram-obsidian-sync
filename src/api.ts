@@ -11,6 +11,7 @@ import { LimitExceededError } from "./limit-error";
 import { BeaconBuffer } from "./observability/beacon";
 import { newTraceContext } from "./observability/traceGen";
 import type { BillingUsage } from "./plan-usage";
+import { pluginVersion } from "./plugin-version";
 import { type RemoteLogEntry, rlog } from "./remote-log";
 import type {
 	AttachmentDetail,
@@ -23,6 +24,7 @@ import type {
 	VaultRegistrationResponse,
 	VersionConflictResponse,
 } from "./types";
+import { notifyUpgradeRequired } from "./upgrade-required";
 
 /** A request exceeded its deadline. requestUrl() cannot be aborted, so the
  *  underlying request is ABANDONED, not cancelled — a late server-side apply
@@ -199,6 +201,39 @@ export class EngramApi {
 		this.lastToken = "";
 	}
 
+	/** Surface a `426` — this plugin is below the backend's minimum version —
+	 *  and report whether that is what happened, so the caller rethrows the
+	 *  original error unchanged. Nothing branches on a 426 programmatically;
+	 *  the user-visible half is the notice, which latches to once per session.
+	 *
+	 *  Returning true short-circuits the generic per-request warn, so the ONE
+	 *  record kept names the route. Two reasons that matters:
+	 *
+	 *  - 426 is a generic HTTP status. A proxy in front of a self-hosted backend
+	 *    can emit a bare one for reasons unrelated to this feature, and the user
+	 *    then gets "this plugin is too old" that updating cannot fix. Without
+	 *    the route there is nothing to diagnose it from.
+	 *  - `/api/logs` is itself on the vault-scoped pipeline, so a below-floor
+	 *    client 426s on its own log push. Warning per-request would have the
+	 *    remote-log ring re-buffering nothing but its own refusals.
+	 *
+	 *  The route is folded into the latched warn rather than dropped, because
+	 *  the latch already bounds it to one line per session. */
+	private noteIfUpgradeRequired(
+		e: unknown,
+		status: number | undefined,
+		method: string,
+		path: string,
+	): boolean {
+		if (status !== 426) return false;
+		const body = errorBody(e);
+		notifyUpgradeRequired(typeof body.min_version === "string" ? body.min_version : null, {
+			method,
+			route: beaconRoute(path),
+		});
+		return true;
+	}
+
 	private async request(
 		method: string,
 		path: string,
@@ -217,6 +252,9 @@ export class EngramApi {
 			if (status === 402) {
 				throw parseLimitExceededError(e);
 			}
+			if (this.noteIfUpgradeRequired(e, status, method, path)) {
+				throw e;
+			}
 			// On 401, the cached access token may be stale (e.g. server-side TTL
 			// shorter than the expires_in we trusted). Invalidate and retry once
 			// with a freshly-refreshed token. Static-key providers have no
@@ -233,6 +271,15 @@ export class EngramApi {
 					const retryStatus = statusOf(e2);
 					if (retryStatus === 402) {
 						throw parseLimitExceededError(e2);
+					}
+					// 426 must be handled here too, for the same reason 402 is.
+					// `Auth` runs BEFORE `RequirePluginVersion` server-side, so a
+					// stale cached token yields 401-then-426 — i.e. every launch
+					// that refreshes a token puts the version refusal on THIS
+					// path, not the primary one. Missing it here made the notice
+					// unreachable in the single most likely real-world shape.
+					if (this.noteIfUpgradeRequired(e2, retryStatus, method, path)) {
+						throw e2;
 					}
 					rlog().warn(
 						"api",
@@ -282,6 +329,13 @@ export class EngramApi {
 		}
 		if (this.deviceId) {
 			headers["X-Device-Id"] = this.deviceId;
+		}
+		// Reported so the backend can refuse clients below its compatibility
+		// floor (426 plugin_upgrade_required). Omitted, never sent empty — see
+		// plugin-version.ts.
+		const version = pluginVersion();
+		if (version) {
+			headers["X-Plugin-Version"] = version;
 		}
 		if (body !== undefined) {
 			headers["Content-Type"] = "application/json";
@@ -710,20 +764,29 @@ export function beaconRoute(path: string): string {
 		.slice(0, 64);
 }
 
-function parseLimitExceededError(e: unknown): LimitExceededError {
+/** The JSON body of an Obsidian `requestUrl` rejection. Arrives as `.json`
+ *  (parsed) or `.text` (raw) depending on platform, so try both; a malformed
+ *  or missing body yields `{}` rather than a decode crash, because every
+ *  caller here is already on an error path and must not fail twice. */
+function errorBody(e: unknown): Record<string, unknown> {
 	const err = e as { json?: unknown; text?: string };
-	let body: Record<string, unknown> = {};
 	if (err.json && typeof err.json === "object") {
-		body = err.json as Record<string, unknown>;
-	} else if (typeof err.text === "string") {
+		return err.json as Record<string, unknown>;
+	}
+	if (typeof err.text === "string") {
 		try {
 			const parsed: unknown = JSON.parse(err.text);
-			if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
 		} catch {
-			// Malformed text — fall through with empty body; "unknown" reason
-			// still routes to the generic toast.
+			// Malformed text — fall through to {}. For a 402 that still routes
+			// to the generic toast via the "unknown" reason.
 		}
 	}
+	return {};
+}
+
+function parseLimitExceededError(e: unknown): LimitExceededError {
+	const body = errorBody(e);
 	const pick = <T>(key: string): T | null => (body[key] !== undefined ? (body[key] as T) : null);
 	// Fall back to `error` when `reason` is absent. Not every 402 uses the
 	// LimitResponse shape: RequireApiWriteEnabled and EnforcePatCreation emit

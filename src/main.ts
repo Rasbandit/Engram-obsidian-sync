@@ -55,6 +55,7 @@ import { LimitExceededError } from "./limit-error";
 import { notifyLimitExceeded } from "./limit-toast";
 import { parsePlanState } from "./plan-state";
 import { atomicWriteJson, resilientReadJson } from "./plugin-data-io";
+import { setPluginVersion } from "./plugin-version";
 import { destroyRemoteLog, initRemoteLog, rlog } from "./remote-log";
 import { SearchModal } from "./search-modal";
 import { SEARCH_VIEW_TYPE, SearchView } from "./search-view";
@@ -82,6 +83,7 @@ import {
 	type SyncStatus,
 } from "./types";
 import { checkForPluginUpdate } from "./update-check";
+import { setUpgradeAction } from "./upgrade-required";
 
 /** Generate a stable client ID for vault registration.
  *  Uses SHA-256 of the vault's absolute path (desktop) or name (mobile fallback). */
@@ -483,6 +485,15 @@ export default class EngramSyncPlugin extends Plugin {
 			setActiveTracker(this.promiseTracker);
 		}
 		devLog().log("lifecycle", "plugin loading");
+		// Ahead of every transport, because both read it lazily on the wire: the
+		// api client stamps X-Plugin-Version per request and the channel puts
+		// plugin_version on the socket URL. Set it late and the first requests
+		// of a launch go out unversioned.
+		setPluginVersion(this.manifest.version);
+		// Reuses the soft nudge's destination: a hard "too old to sync" refusal
+		// and a "newer version available" nudge want the same place, and that
+		// path is already feature-detected against Obsidian internals.
+		setUpgradeAction(() => this.openCommunityPluginsUpdate());
 		rlog().info("lifecycle", `onload start — v${this.manifest.version}`);
 		activeDocument.body.classList.add("engram-vault-sync-active");
 		await this.loadSettings();
@@ -1371,6 +1382,15 @@ export default class EngramSyncPlugin extends Plugin {
 		// down after this point would otherwise write into a destroyed devLog.
 		setLogSink(null);
 		setActiveTracker(null);
+		// Same rule uninstallDebugApi states: a module-level closure over the
+		// instance being unloaded outlives it. The 426 that can land after this
+		// point comes from `destroyRemoteLog()` below — it awaits a final
+		// flush() -> pushLogs -> EngramApi.request, inside a voided promise, so
+		// it settles after this synchronous line. (NOT the beacon flush: that
+		// uses window.fetch and never reads .status, so it cannot reach
+		// notifyUpgradeRequired.) Without this, the notice's Update button
+		// would call into a dead `this.app`.
+		setUpgradeAction(null);
 		this.promiseTracker?.destroy();
 		this.promiseTracker = null;
 		destroyDevLog();
