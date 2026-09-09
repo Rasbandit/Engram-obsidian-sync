@@ -201,6 +201,24 @@ export class EngramApi {
 		this.lastToken = "";
 	}
 
+	/** Surface a `426` — this plugin is below the backend's minimum version —
+	 *  and report whether that is what happened, so the caller rethrows the
+	 *  original error unchanged. Nothing branches on a 426 programmatically;
+	 *  the user-visible half is the notice, which latches to once per session.
+	 *
+	 *  Returning true short-circuits the generic warn below. That is not tidiness:
+	 *  `/api/logs` is itself on the vault-scoped pipeline, so a below-floor client
+	 *  gets 426 on its own log push too. Logging every refusal would refill the
+	 *  200-entry remote-log ring with nothing but its own refusals and evict the
+	 *  diagnostics you actually wanted off a blocked install. The latched warn
+	 *  inside `notifyUpgradeRequired` is the one record we keep. */
+	private noteIfUpgradeRequired(e: unknown, status: number | undefined): boolean {
+		if (status !== 426) return false;
+		const body = errorBody(e);
+		notifyUpgradeRequired(typeof body.min_version === "string" ? body.min_version : null);
+		return true;
+	}
+
 	private async request(
 		method: string,
 		path: string,
@@ -219,16 +237,8 @@ export class EngramApi {
 			if (status === 402) {
 				throw parseLimitExceededError(e);
 			}
-			// 426 = this plugin is below the backend's minimum version. Terminal
-			// on every transport, so it is surfaced here rather than left to
-			// each caller's generic failure path. Rethrown unchanged: nothing
-			// branches on it programmatically, and the user-visible half is the
-			// notice (which latches itself to once per session).
-			if (status === 426) {
-				const body = errorBody(e);
-				notifyUpgradeRequired(
-					typeof body.min_version === "string" ? body.min_version : null,
-				);
+			if (this.noteIfUpgradeRequired(e, status)) {
+				throw e;
 			}
 			// On 401, the cached access token may be stale (e.g. server-side TTL
 			// shorter than the expires_in we trusted). Invalidate and retry once
@@ -246,6 +256,15 @@ export class EngramApi {
 					const retryStatus = statusOf(e2);
 					if (retryStatus === 402) {
 						throw parseLimitExceededError(e2);
+					}
+					// 426 must be handled here too, for the same reason 402 is.
+					// `Auth` runs BEFORE `RequirePluginVersion` server-side, so a
+					// stale cached token yields 401-then-426 — i.e. every launch
+					// that refreshes a token puts the version refusal on THIS
+					// path, not the primary one. Missing it here made the notice
+					// unreachable in the single most likely real-world shape.
+					if (this.noteIfUpgradeRequired(e2, retryStatus)) {
+						throw e2;
 					}
 					rlog().warn(
 						"api",

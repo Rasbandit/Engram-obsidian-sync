@@ -1,6 +1,15 @@
 /**
  * The running plugin's version, reported to the backend on every REST call
- * (`X-Plugin-Version`) and every socket connect (`plugin_version`).
+ * that goes through `EngramApi` (`X-Plugin-Version`) and every socket connect
+ * (`plugin_version`).
+ *
+ * Five network paths bypass `EngramApi` and therefore report nothing, all
+ * correctly: token refresh (`main.ts`), the two device-flow calls
+ * (`device-flow-modal.ts`), `EngramApi.probeHealth` (static, no instance), and
+ * the beacon's raw `window.fetch` (`observability/beacon.ts`). The auth ones
+ * MUST stay exempt — a client refused for being too old still has to be able
+ * to link and refresh a token, or the only way out of the block is a
+ * reinstall.
  *
  * The backend refuses clients below a floor it ships as a constant — see
  * `Engram.PluginVersion`. Reporting is what makes that floor enforceable AND

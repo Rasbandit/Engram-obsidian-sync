@@ -1382,6 +1382,11 @@ export default class EngramSyncPlugin extends Plugin {
 		// down after this point would otherwise write into a destroyed devLog.
 		setLogSink(null);
 		setActiveTracker(null);
+		// Same rule uninstallDebugApi states: a module-level closure over the
+		// instance being unloaded outlives it. A 426 landing between here and
+		// the next eval (the beacon flush above can produce one) would render a
+		// notice whose Update button calls into a dead `this.app`.
+		setUpgradeAction(null);
 		this.promiseTracker?.destroy();
 		this.promiseTracker = null;
 		destroyDevLog();

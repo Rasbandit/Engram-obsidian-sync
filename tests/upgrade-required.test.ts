@@ -94,7 +94,10 @@ describe("REST 426", () => {
 
 		const api = new EngramApi("https://api.example.com", "key");
 
-		await expect(api.getManifest()).rejects.toBeDefined();
+		// Shape asserted, not just "it threw": the contract is that a 426 is
+		// rethrown UNCHANGED. `toBeDefined()` passed even when the error was
+		// replaced wholesale.
+		await expect(api.getManifest()).rejects.toMatchObject({ status: 426 });
 		expect(__noticeCapture.notices).toHaveLength(1);
 		expect(__noticeCapture.notices[0].message).toContain("1.29.0");
 	});
@@ -107,7 +110,10 @@ describe("REST 426", () => {
 
 		const api = new EngramApi("https://api.example.com", "key");
 
-		await expect(api.getManifest()).rejects.toBeDefined();
+		// Shape asserted, not just "it threw": the contract is that a 426 is
+		// rethrown UNCHANGED. `toBeDefined()` passed even when the error was
+		// replaced wholesale.
+		await expect(api.getManifest()).rejects.toMatchObject({ status: 426 });
 		expect(__noticeCapture.notices[0].message).toContain("1.31.0");
 	});
 
@@ -116,8 +122,37 @@ describe("REST 426", () => {
 
 		const api = new EngramApi("https://api.example.com", "key");
 
-		await expect(api.getManifest()).rejects.toBeDefined();
+		// Shape asserted, not just "it threw": the contract is that a 426 is
+		// rethrown UNCHANGED. `toBeDefined()` passed even when the error was
+		// replaced wholesale.
+		await expect(api.getManifest()).rejects.toMatchObject({ status: 426 });
 		expect(__noticeCapture.notices).toHaveLength(1);
+	});
+
+	// The shape a real launch produces. Server-side `Auth` runs BEFORE
+	// `RequirePluginVersion`, so a stale cached token yields 401-then-426 —
+	// the 426 lands on the single-shot retry path, not the primary one.
+	// That path handled 402 and not 426, so the notice never fired at all.
+	test("a 426 arriving on the 401 retry still notifies", async () => {
+		const api = new EngramApi("https://api.example.com", "key");
+		api.setAuthProvider({
+			getToken: async () => "token",
+			getVaultId: () => null,
+			isAuthenticated: () => true,
+			signOut: () => {},
+			invalidateAccessToken: () => {},
+		} as any);
+
+		mockRequestUrl.mockRejectedValueOnce({ status: 401, text: "unauthorized" });
+		mockRequestUrl.mockRejectedValueOnce({
+			status: 426,
+			json: { min_version: "1.29.0" },
+		});
+
+		await expect(api.getManifest()).rejects.toMatchObject({ status: 426 });
+
+		expect(__noticeCapture.notices).toHaveLength(1);
+		expect(__noticeCapture.notices[0].message).toContain("1.29.0");
 	});
 
 	test("other statuses do not trip it", async () => {
@@ -125,7 +160,7 @@ describe("REST 426", () => {
 
 		const api = new EngramApi("https://api.example.com", "key");
 
-		await expect(api.getManifest()).rejects.toBeDefined();
+		await expect(api.getManifest()).rejects.toMatchObject({ status: 500 });
 		expect(__noticeCapture.notices).toHaveLength(0);
 		expect(isUpgradeRequired()).toBe(false);
 	});

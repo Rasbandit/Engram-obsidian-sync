@@ -26,6 +26,15 @@
  * ponytail: does NOT stop sync. The server already refuses everything, so a
  * local kill switch would only duplicate that at the cost of a second piece of
  * state to get wrong. Add one if the reconnect traffic ever shows up as load.
+ *
+ * What that actually looks like on the wire, since "does not stop sync" sounds
+ * busier than it is: Phoenix does not close a socket on a join error, so a
+ * refused client keeps ONE open socket. `sync:` and `crdt:` are refused,
+ * `user:` still joins (no version gate on `check_not_deleted/1`), and the 30s
+ * heartbeat keeps the connection alive — so `onclose` never fires and the
+ * `crdtJoinFailedReason` backoff in `channel.ts` is never reached. The client
+ * idles with `connected === false` rather than retry-storming. Nothing watches
+ * that flag today.
  */
 import { Notice } from "obsidian";
 import { rlog } from "./remote-log";
