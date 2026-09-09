@@ -20,22 +20,59 @@ import { join } from "node:path";
 
 const main = readFileSync(join(import.meta.dir, "..", "src", "main.ts"), "utf8");
 
-/** The body of `async onload()`, up to the next top-level method. */
+/** The body of `async onload()`, up to the NEXT top-level member.
+ *
+ *  Not `onunload` — that is 858 lines and three methods further on
+ *  (`handleSyncError`, `healingVault`, `healDeadVault` all sit between), so
+ *  slicing to it made "appears in onload" mean "appears anywhere in a
+ *  three-method window". Moving the call into `healDeadVault` — reached only
+ *  on a dead-vault error — kept the naive version green.
+ *
+ *  The boundary is therefore the first top-level member AFTER the opening: a
+ *  line at exactly one tab of indent that declares something. If that regex
+ *  stops matching, the slice runs long and the tests get WEAKER silently, so
+ *  the length is asserted too. */
 function onloadBody(source: string): string {
 	const start = source.indexOf("async onload(): Promise<void> {");
 	expect(start).toBeGreaterThan(-1);
-	const end = source.indexOf("\n\tonunload(): void {", start);
-	expect(end).toBeGreaterThan(start);
-	return source.slice(start, end);
+	const rest = source.slice(start + 1);
+	const next = rest.search(/\n\t(?:private |readonly |async |@)?\w+[<(:]/);
+	expect(next).toBeGreaterThan(-1);
+	const body = rest.slice(0, next);
+	// onload really is ~772 lines and ends at `private handleSyncError`. The
+	// naive boundary (`onunload`) ran ~858 lines further, swallowing
+	// handleSyncError, healingVault and healDeadVault — so a call relocated
+	// into healDeadVault, reached only on a dead-vault error, still "appeared
+	// in onload". Naming the two methods that must NOT be in scope fails
+	// loudly if the boundary drifts, which a line count alone would not.
+	// Their DECLARATIONS, not their names — `onload` legitimately calls both.
+	expect(body).not.toContain("private handleSyncError(");
+	expect(body).not.toContain("private async healDeadVault(");
+	return body;
+}
+
+/** A call must be LIVE: at method-body indent, not commented out, not nested
+ *  inside a conditional. `toContain` matched `// setPluginVersion(...)` and
+ *  `if (DEV_MODE) setPluginVersion(...)` — both of which leave the feature
+ *  completely inert on a production install while all four tests pass. */
+function callsAtTopLevel(body: string, call: string): boolean {
+	return body.split("\n").some((l) => l === `\t\t${call}`);
 }
 
 describe("onload wiring", () => {
 	test("reports the manifest version, not a hardcoded string", () => {
-		expect(onloadBody(main)).toContain("setPluginVersion(this.manifest.version)");
+		expect(callsAtTopLevel(onloadBody(main), "setPluginVersion(this.manifest.version);")).toBe(
+			true,
+		);
 	});
 
 	test("wires the upgrade action so the notice has a working button", () => {
-		expect(onloadBody(main)).toContain("setUpgradeAction(");
+		expect(
+			callsAtTopLevel(
+				onloadBody(main),
+				"setUpgradeAction(() => this.openCommunityPluginsUpdate());",
+			),
+		).toBe(true);
 	});
 
 	// Both transports read the version lazily, so a late set means the first

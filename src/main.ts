@@ -1383,9 +1383,13 @@ export default class EngramSyncPlugin extends Plugin {
 		setLogSink(null);
 		setActiveTracker(null);
 		// Same rule uninstallDebugApi states: a module-level closure over the
-		// instance being unloaded outlives it. A 426 landing between here and
-		// the next eval (the beacon flush above can produce one) would render a
-		// notice whose Update button calls into a dead `this.app`.
+		// instance being unloaded outlives it. The 426 that can land after this
+		// point comes from `destroyRemoteLog()` below — it awaits a final
+		// flush() -> pushLogs -> EngramApi.request, inside a voided promise, so
+		// it settles after this synchronous line. (NOT the beacon flush: that
+		// uses window.fetch and never reads .status, so it cannot reach
+		// notifyUpgradeRequired.) Without this, the notice's Update button
+		// would call into a dead `this.app`.
 		setUpgradeAction(null);
 		this.promiseTracker?.destroy();
 		this.promiseTracker = null;

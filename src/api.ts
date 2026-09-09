@@ -206,16 +206,31 @@ export class EngramApi {
 	 *  original error unchanged. Nothing branches on a 426 programmatically;
 	 *  the user-visible half is the notice, which latches to once per session.
 	 *
-	 *  Returning true short-circuits the generic warn below. That is not tidiness:
-	 *  `/api/logs` is itself on the vault-scoped pipeline, so a below-floor client
-	 *  gets 426 on its own log push too. Logging every refusal would refill the
-	 *  200-entry remote-log ring with nothing but its own refusals and evict the
-	 *  diagnostics you actually wanted off a blocked install. The latched warn
-	 *  inside `notifyUpgradeRequired` is the one record we keep. */
-	private noteIfUpgradeRequired(e: unknown, status: number | undefined): boolean {
+	 *  Returning true short-circuits the generic per-request warn, so the ONE
+	 *  record kept names the route. Two reasons that matters:
+	 *
+	 *  - 426 is a generic HTTP status. A proxy in front of a self-hosted backend
+	 *    can emit a bare one for reasons unrelated to this feature, and the user
+	 *    then gets "this plugin is too old" that updating cannot fix. Without
+	 *    the route there is nothing to diagnose it from.
+	 *  - `/api/logs` is itself on the vault-scoped pipeline, so a below-floor
+	 *    client 426s on its own log push. Warning per-request would have the
+	 *    remote-log ring re-buffering nothing but its own refusals.
+	 *
+	 *  The route is folded into the latched warn rather than dropped, because
+	 *  the latch already bounds it to one line per session. */
+	private noteIfUpgradeRequired(
+		e: unknown,
+		status: number | undefined,
+		method: string,
+		path: string,
+	): boolean {
 		if (status !== 426) return false;
 		const body = errorBody(e);
-		notifyUpgradeRequired(typeof body.min_version === "string" ? body.min_version : null);
+		notifyUpgradeRequired(typeof body.min_version === "string" ? body.min_version : null, {
+			method,
+			route: beaconRoute(path),
+		});
 		return true;
 	}
 
@@ -237,7 +252,7 @@ export class EngramApi {
 			if (status === 402) {
 				throw parseLimitExceededError(e);
 			}
-			if (this.noteIfUpgradeRequired(e, status)) {
+			if (this.noteIfUpgradeRequired(e, status, method, path)) {
 				throw e;
 			}
 			// On 401, the cached access token may be stale (e.g. server-side TTL
@@ -263,7 +278,7 @@ export class EngramApi {
 					// that refreshes a token puts the version refusal on THIS
 					// path, not the primary one. Missing it here made the notice
 					// unreachable in the single most likely real-world shape.
-					if (this.noteIfUpgradeRequired(e2, retryStatus)) {
+					if (this.noteIfUpgradeRequired(e2, retryStatus, method, path)) {
 						throw e2;
 					}
 					rlog().warn(

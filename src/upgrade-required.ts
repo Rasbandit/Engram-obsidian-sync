@@ -57,14 +57,28 @@ export function setUpgradeAction(fn: (() => void) | null): void {
 	openUpdateUi = fn;
 }
 
+/** Where the refusal came from. Folded into the single latched log line so a
+ *  false positive is diagnosable — 426 is a generic HTTP status and a proxy in
+ *  front of a self-hosted backend can emit a bare one, leaving the user with
+ *  "this plugin is too old" that updating cannot fix. Omitted for a socket
+ *  refusal, which `channel.ts` logs separately with its own topic. */
+export interface UpgradeRefusalSource {
+	method: string;
+	route: string;
+}
+
 /** Tell the user their plugin is too old. First call wins; the rest are no-ops. */
-export function notifyUpgradeRequired(minVersion: string | null): void {
+export function notifyUpgradeRequired(
+	minVersion: string | null,
+	source?: UpgradeRefusalSource,
+): void {
 	if (notified) return;
 	notified = true;
 
+	const where = source ? ` on ${source.method} ${source.route}` : "";
 	rlog().warn(
 		"lifecycle",
-		`server requires plugin >= ${minVersion ?? "unknown"} — sync refused until updated`,
+		`server requires plugin >= ${minVersion ?? "unknown"}${where} — sync refused until updated`,
 	);
 
 	const needs = minVersion ? ` (needs ${minVersion} or newer)` : "";

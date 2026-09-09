@@ -3,18 +3,32 @@
  * that goes through `EngramApi` (`X-Plugin-Version`) and every socket connect
  * (`plugin_version`).
  *
- * Five network paths bypass `EngramApi` and therefore report nothing, all
- * correctly: token refresh (`main.ts`), the two device-flow calls
- * (`device-flow-modal.ts`), `EngramApi.probeHealth` (static, no instance), and
- * the beacon's raw `window.fetch` (`observability/beacon.ts`). The auth ones
- * MUST stay exempt — a client refused for being too old still has to be able
- * to link and refresh a token, or the only way out of the block is a
- * reinstall.
+ * Several network paths do NOT carry it, all correctly:
+ *
+ *   - token refresh (`main.ts`) and the two device-flow calls
+ *     (`device-flow-modal.ts`) — these MUST stay exempt, or a client refused
+ *     for being too old cannot link or refresh a token and the only way out of
+ *     the block is a reinstall;
+ *   - `device-flow-socket.ts`, which opens `/socket/device/websocket` with no
+ *     `plugin_version` param, for the same reason;
+ *   - `EngramApi.probeHealth` (static, no instance) and `EngramApi.health()`
+ *     (an instance method that calls `requestUrl` directly rather than through
+ *     `sendRequest`) — `/health` is public and ungated;
+ *   - the beacon's raw `window.fetch` (`observability/beacon.ts`);
+ *   - `update-check.ts`, which fetches the published manifest from GitHub.
+ *
+ * The list is worth keeping accurate: an earlier version said "every REST
+ * call" and then "five paths", and both were wrong. Grep `requestUrl(`,
+ * `fetch(` and `new WebSocket` before trusting it.
  *
  * The backend refuses clients below a floor it ships as a constant — see
  * `Engram.PluginVersion`. Reporting is what makes that floor enforceable AND
- * what makes the installed-base distribution visible in the `ws connect` log,
- * which is the only signal that says whether raising the floor is safe.
+ * what makes the installed-base distribution visible in the `ws connect` log.
+ * That log is the version signal with the best COVERAGE, not the only one:
+ * `remote-log.ts` sends the same value on every client log entry and the
+ * backend stores it as an indexed column, but only when the user has enabled
+ * diagnostics — so it under-counts exactly the disengaged installs a floor
+ * decision most needs to see.
  *
  * A module singleton rather than a constructor parameter because the version
  * is fixed for the process and needed in two unrelated transports; threading
