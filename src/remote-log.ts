@@ -18,6 +18,14 @@ export interface RemoteLogEntry {
 	vault_id?: string;
 	seq?: number;
 	diagnostic?: boolean;
+	/** This entry bypassed the diagnostics gate (see `anomaly()`).
+	 *
+	 *  Provenance, not severity. Without it a forced anomaly is byte-identical
+	 *  to an ordinary warn once stored, so nothing downstream can tell a signal
+	 *  that covers the WHOLE fleet from one that only covers users who opted in
+	 *  — and a test asserting "disabling stops the flush" cannot exempt the one
+	 *  class contractually allowed through. */
+	forced?: boolean;
 }
 
 type PushFn = (entries: RemoteLogEntry[]) => Promise<void>;
@@ -248,6 +256,7 @@ export class RemoteLogger {
 		if (this.deviceId) entry.device_id = this.deviceId;
 		if (this.vaultId) entry.vault_id = this.vaultId;
 		if (diagnostic) entry.diagnostic = true;
+		if (force) entry.forced = true;
 
 		this.buffer.push(entry);
 

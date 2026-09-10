@@ -445,6 +445,39 @@ describe("anomaly() bypasses the diagnostics gate", () => {
 		expect(sent[0].level).toBe("warn");
 	});
 
+	// The wire must SAY that an entry bypassed the gate.
+	//
+	// Without this, a forced anomaly is byte-identical to an ordinary warn once
+	// it lands in client_logs. Two things break: an e2e asserting "disabling
+	// stops the flush" cannot exempt the one class contractually allowed
+	// through (it fails ~2/3 of runs on main — engram-app/Engram#1598), and in
+	// Loki you cannot tell whether a warn came from a user who opted IN or from
+	// the always-on path, which is exactly the question you ask when judging
+	// how much of the fleet a signal actually covers.
+	test("a forced anomaly is marked forced on the wire", async () => {
+		const { logger, sent } = makeLogger();
+
+		logger.anomaly("sync", "replay_produced_no_files", { rows: 316, files: 0 });
+		await logger.flush();
+
+		expect(sent.length).toBe(1);
+		expect(sent[0].forced).toBe(true);
+	});
+
+	// The flag means "bypassed the gate", not "is a warning". An ordinary warn
+	// from a user who opted IN must not claim the exemption, or the marker
+	// stops answering the question it exists for.
+	test("an ordinary entry is not marked forced", async () => {
+		const { logger, sent } = makeLogger();
+		logger.setEnabled(true);
+
+		logger.warn("sync", "ordinary warning");
+		await logger.flush();
+
+		expect(sent.length).toBe(1);
+		expect(sent[0].forced).toBeUndefined();
+	});
+
 	test("an ordinary info line stays suppressed with diagnostics OFF", async () => {
 		const { logger, sent } = makeLogger();
 
