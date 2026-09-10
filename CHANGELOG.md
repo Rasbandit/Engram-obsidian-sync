@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.29.0](https://github.com/engram-app/Engram-obsidian/compare/1.28.0...1.29.0) (2026-09-09)
+
+
+### Features
+
+* **sync:** report plugin version, and surface the backend's version floor ([#512](https://github.com/engram-app/Engram-obsidian/issues/512)) ([12130c1](https://github.com/engram-app/Engram-obsidian/commit/12130c108391ae02f7258040e95dcf641638dd89))
+
+
+### Bug Fixes
+
+* **diagnostics:** hash vault paths before remote logging ([#510](https://github.com/engram-app/Engram-obsidian/issues/510)) ([45fdc3d](https://github.com/engram-app/Engram-obsidian/commit/45fdc3d8236bcce509058fa8398fde6c114b2b2a))
+
 ## [1.28.0](https://github.com/engram-app/Engram-obsidian/compare/1.27.0...1.28.0) (2026-09-05)
 
 
