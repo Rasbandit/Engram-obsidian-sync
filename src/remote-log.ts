@@ -18,13 +18,18 @@ export interface RemoteLogEntry {
 	vault_id?: string;
 	seq?: number;
 	diagnostic?: boolean;
-	/** This entry bypassed the diagnostics gate (see `anomaly()`).
+	/** This entry came from the always-on call site (`anomaly()`), which is
+	 *  EXEMPT from the diagnostics gate.
+	 *
+	 *  Deliberately not "bypassed the gate": an anomaly from a user who HAS
+	 *  opted in is still marked, because nothing was bypassed there. The
+	 *  question the flag answers is "does this signal cover the whole fleet, or
+	 *  only opted-in users?" — and only the call site determines that.
 	 *
 	 *  Provenance, not severity. Without it a forced anomaly is byte-identical
-	 *  to an ordinary warn once stored, so nothing downstream can tell a signal
-	 *  that covers the WHOLE fleet from one that only covers users who opted in
-	 *  — and a test asserting "disabling stops the flush" cannot exempt the one
-	 *  class contractually allowed through. */
+	 *  to an ordinary warn once stored, so nothing downstream can make that
+	 *  distinction — and a test asserting "disabling stops the flush" cannot
+	 *  exempt the one class contractually allowed through. */
 	forced?: boolean;
 }
 
