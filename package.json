@@ -1,6 +1,6 @@
 {
   "name": "engram-obsidian",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "description": "Your notes are your AI's memory. Sync your vault everywhere, search by meaning, and let Claude, Cursor, and other AI apps read and write your notes. Hosted or self-host, free to start.",
   "main": "main.js",
   "type": "module",
